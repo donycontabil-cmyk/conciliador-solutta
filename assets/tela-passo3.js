@@ -31,7 +31,7 @@
 
   // Tudo o que o Passo ③ precisa de um mês: arquivos, registro, cálculo e itens A e B.
   // Usado pela tela e pelo relatório (tela-relatorio3.js). Devolve null se a rota mudou no meio.
-  async function carregarDados(codigo, anoMes, conferir) {
+  async function carregarDados(codigo, anoMes, conferir, opcoes) {
     const arm = app().armazenamento;
     const emp = app().empresas.find((e) => String(e.codigo) === String(codigo));
     const comp = anoMes + '-01';
@@ -52,18 +52,37 @@
     const concs = await arm.conciliacoes(codigo, comp);
     const registro = concs.find((c) => c.id === idReg) || { id: idReg, codigo, tipo: 'fornecedor_pagar', competencia: comp, situacao: 'andamento', arquivos: [], decisoes: {}, resumo: {} };
     const d = registro.decisoes || {};
-    const decisoes = { donos: d.donos || {}, conciliadas: d.conciliadas || [], observacoes: d.observacoes || {}, conciliacoesAB: d.conciliacoesAB || [], historico: d.historico || [] };
+    const decisoes = { donos: d.donos || {}, conciliadas: d.conciliadas || [], observacoes: d.observacoes || {}, conciliacoesAB: d.conciliacoesAB || [], historico: d.historico || [], inicio: d.inicio || null };
+    // Mês anterior: o que ficou em aberto nele, para "continuar da conciliação anterior".
+    const anterior = (opcoes && opcoes.semAnterior) ? null : await pendenciasDoMesAnterior(codigo, comp);
+    if (conferir && !conferir()) return null;
     const entrada = {
       competencia: comp, natureza: 'fornecedores',
       mesAnterior: U.nomeCompetencia(U.somarMeses(comp, -1)), mesAtual: U.nomeCompetencia(comp),
       contaRazao: { conta: raz.conteudo.conta, lancamentos: raz.conteudo.conta.lancamentos },
       agingAnterior: aAnt.conteudo, agingAtual: aAtu.conteudo, decisoes,
     };
+    if (decisoes.inicio && decisoes.inicio.modo === 'continuar' && anterior && anterior.pendencias) entrada.continuacao = anterior.pendencias;
     const r = M.calcular(entrada);
     const itens = M.itensAB(entrada, r);
     const arrumado = M.arrumarGruposAB(decisoes.conciliacoesAB, itens.legado);
     decisoes.conciliacoesAB = arrumado.grupos;
-    return { emp, comp, arquivos: { aAnt, aAtu, raz }, registro, entrada, decisoes, r, itens, arrumou: arrumado.mudou };
+    return { emp, comp, arquivos: { aAnt, aAtu, raz }, registro, entrada, decisoes, r, itens, arrumou: arrumado.mudou, anterior };
+  }
+
+  // Pendências do mês anterior (o que ficou em aberto na A e na B dele). Vêm do registro do
+  // mês anterior; registro de antes desta versão (sem pendências) é calculado com os arquivos
+  // dele, do zero. Sem conciliação no mês anterior não há do que continuar.
+  async function pendenciasDoMesAnterior(codigo, comp) {
+    const arm = app().armazenamento;
+    const compAnt = U.somarMeses(comp, -1);
+    const idAnt = 'F-' + codigo + '-fornecedor_pagar-' + U.anoMes(compAnt);
+    const reg = (await arm.conciliacoes(codigo, compAnt)).find((c) => c.id === idAnt) || null;
+    if (!reg) return { competencia: compAnt, pendencias: null };
+    if (reg.pendencias) return { competencia: compAnt, pendencias: reg.pendencias, registro: reg };
+    const dadosAnt = await carregarDados(codigo, U.anoMes(compAnt), null, { semAnterior: true });
+    if (!dadosAnt || dadosAnt.erro || dadosAnt.falta) return { competencia: compAnt, pendencias: null, registro: reg };
+    return { competencia: compAnt, pendencias: M.pendenciasAB(dadosAnt.itens, dadosAnt.decisoes.conciliacoesAB, compAnt), registro: reg, calculado: true };
   }
 
   async function mostrar(el, codigo, anoMes, conferir) {
@@ -89,10 +108,14 @@
       incluirAnterior: app().lerLocal('conciliador-solutta.ab-anterior') !== '0',
       selA: new Set(), selB: new Set(), abertosAB: new Set(), idDoItem: new Map(),
       r: dados.r, itens: dados.itens, porChave: new Map(dados.r.fornecedores.map((f) => [f.chave, f])),
+      anterior: dados.anterior,
     };
     if (E.aba !== 'ab' && abasOcultas().has(E.aba)) E.aba = 'ab';
     desenharTudo();
-    if (dados.arrumou) gravar(null);
+    // Pendências gravadas desatualizadas (registro de antes desta versão, troca do início,
+    // arquivo trocado): regrava para o mês seguinte continuar do jeito certo.
+    const pendenciasDeAgora = JSON.stringify(M.pendenciasAB(E.itens, E.decisoes.conciliacoesAB, E.comp));
+    if (dados.arrumou || (dados.registro.atualizadoEm && JSON.stringify(dados.registro.pendencias || null) !== pendenciasDeAgora)) gravar(null);
   }
 
   // Escolhe os arquivos do ③: aging do mês, aging do mês passado e o razão de fornecedores.
@@ -126,6 +149,8 @@
         situacao: 'andamento',
         arquivos: [E.arquivos.aAnt.meta.id, E.arquivos.aAtu.meta.id, E.arquivos.raz.meta.id],
         decisoes: E.decisoes, resumo: resumoParaGravar(),
+        // O que ficou em aberto: o mês seguinte pode continuar daqui.
+        pendencias: M.pendenciasAB(E.itens, E.decisoes.conciliacoesAB, E.comp),
       });
       try {
         E.registro = await arm.salvarConciliacao(reg);
@@ -292,17 +317,88 @@
   const TIPO_AB = { AxA: 'A×A', AxB: 'A×B', BxB: 'B×B' };
   const COMO_AB = { 'doc-fornecedor-par': 'doc + fornecedor · par', 'doc-fornecedor': 'doc + fornecedor', 'doc-par': 'só doc · par', 'doc': 'só doc', 'manual': 'à mão' };
 
+  const NOME_FONTE = { anterior: 'aging', atual: 'aging', nota: 'razão · nota', baixa: 'razão · baixa' };
   function rotuloFonte(x) {
     if (x.fonte === 'anterior') return 'aging ' + E.entrada.mesAnterior;
     if (x.fonte === 'atual') return 'aging ' + E.entrada.mesAtual;
+    if (x.fonte === 'pendente') return 'pendente de ' + U.nomeCompetencia(x.origem) + (x.fonteOriginal ? ' · ' + (NOME_FONTE[x.fonteOriginal] || x.fonteOriginal) : '');
     return x.fonte === 'nota' ? 'razão · nota' : 'razão · baixa';
   }
-  // Na tabela estreita de cada parte: "aging jun/26", "nota", "baixa".
+  // Na tabela estreita de cada parte: "aging jun/26", "nota", "baixa", "pend. jul/26".
   function rotuloCurto(x) {
     const curto = (mes) => String(mes).slice(0, 3) + '/' + String(mes).slice(-2);
     if (x.fonte === 'anterior') return 'aging ' + curto(E.entrada.mesAnterior);
     if (x.fonte === 'atual') return 'aging ' + curto(E.entrada.mesAtual);
+    if (x.fonte === 'pendente') return 'pend. ' + curto(U.nomeCompetencia(x.origem));
     return x.fonte;
+  }
+
+  // ------------------------------------------------------------------
+  // Início do mês (Dony, 14/09/2026: "no mês seguinte, continuar da conciliação anterior ou
+  // fazer desconsiderando a anterior"). Aparece quando o mês anterior foi conciliado.
+  // ------------------------------------------------------------------
+  function cartaoInicio() {
+    const ant = E.anterior;
+    if (!ant || !ant.pendencias) return '';
+    const p = ant.pendencias;
+    const mesAnt = T.esc(U.nomeCompetencia(ant.competencia)), mes = T.esc(U.nomeCompetencia(E.comp));
+    const ficou = '<b>' + p.A.length + '</b> item(ns) em aberto na Parte A (' + U.formatarCentavos(p.valorA) + ') e <b>' + p.B.length + '</b> na Parte B (' + U.formatarCentavos(p.valorB) + ')';
+    const ini = E.decisoes.inicio;
+    if (ini) {
+      const c = E.itens.continuacao;
+      const texto = ini.modo === 'continuar'
+        ? '↪ <b>Continuando de ' + mesAnt + '</b>: entraram na Parte A <b>' + (c ? c.pendentes : 0) + '</b> pendência(s) e saíram do aging <b>' + (c ? c.excluidos.length : 0) + '</b> título(s) que tinham ficado em aberto na Parte B.' +
+          (c && c.naoAchados.length ? ' <span class="falta">' + c.naoAchados.length + ' título(s) da Parte B de ' + mesAnt + ' não foram achados no aging (arquivo trocado?).</span>' : '')
+        : '○ <b>Começou do zero</b>: ' + mesAnt + ' desconsiderado (lá ficaram ' + ficou + ').';
+      return '<div class="linha-inicio">' + texto + ' <button type="button" class="botao pequeno leve" data-acao="trocar-inicio">trocar</button></div>';
+    }
+    return '<div class="cartao corpo cartao-inicio">' +
+      '<h3>Como começar ' + mes + '?</h3>' +
+      '<p class="suave" style="margin:4px 0 10px">' + mesAnt + ' foi conciliado: ficaram ' + ficou + '.</p>' +
+      '<div class="opcoes-inicio">' +
+      '<button type="button" class="opcao-inicio" data-inicio="continuar"><b>↪ Continuar de ' + mesAnt + '</b>' +
+      '<span>A Parte A traz o que ficou em aberto na A de ' + mesAnt + ' e tira do aging os títulos que ficaram em aberto na B. A diferença continua acumulando de um mês para o outro.</span></button>' +
+      '<button type="button" class="opcao-inicio" data-inicio="zero"><b>○ Começar do zero</b>' +
+      '<span>Desconsidera ' + mesAnt + ': Parte A = aging de ' + mesAnt + ' + razão de ' + mes + ', como no primeiro mês.</span></button>' +
+      '</div></div>';
+  }
+
+  async function escolherInicio(modo) {
+    const ant = E.anterior;
+    if (!ant || !ant.pendencias) return;
+    const mesAnt = U.nomeCompetencia(ant.competencia), mes = U.nomeCompetencia(E.comp);
+    const efetivo = (E.decisoes.inicio && E.decisoes.inicio.modo) || 'zero';
+    const qtd = E.decisoes.conciliacoesAB.length;
+    const mudaItens = modo !== efetivo;
+    if (mudaItens && qtd) {
+      // Os itens da Parte A mudam: as conciliações feitas com os itens de antes são desfeitas.
+      const ok = await T.confirmar({
+        titulo: modo === 'continuar' ? 'Continuar de ' + mesAnt + '?' : 'Começar ' + mes + ' do zero?',
+        texto: (modo === 'continuar' ? 'A Parte A de ' + mes + ' passa a trazer o que ficou em aberto em ' + mesAnt + '.' : 'A Parte A de ' + mes + ' deixa de trazer as pendências de ' + mesAnt + '.') +
+          '<br><br>Os itens da Parte A mudam, então as <b>' + qtd + '</b> conciliações deste mês serão <b>desfeitas</b> (voltam para em aberto) para conciliar de novo.',
+        botao: modo === 'continuar' ? 'Continuar de ' + mesAnt : 'Começar do zero', perigo: true,
+      });
+      if (!ok) return;
+      E.decisoes.conciliacoesAB = [];
+    }
+    E.decisoes.inicio = { modo, de: ant.competencia, quem: app().usuario.nome, quando: U.agoraISO() };
+    historico((modo === 'continuar' ? 'Início: continuar de ' : 'Início: começar do zero, sem ') + mesAnt + (mudaItens && qtd ? ' (desfez ' + qtd + ' conciliações)' : ''));
+    await gravar('terceiro-inicio', (modo === 'continuar' ? 'continuar de ' : 'do zero, sem ') + mesAnt);
+    app().mostrarRota(); // recarrega com os itens do novo início
+  }
+
+  async function trocarInicio() {
+    const ant = E.anterior;
+    if (!ant || !ant.pendencias) return;
+    const mesAnt = U.nomeCompetencia(ant.competencia), mes = U.nomeCompetencia(E.comp);
+    const escolha = await T.janela({
+      titulo: 'Como começar ' + mes + '?',
+      corpo: '<p style="line-height:1.55"><b>↪ Continuar de ' + T.esc(mesAnt) + '</b>: a Parte A traz o que ficou em aberto na A de ' + T.esc(mesAnt) + ' e tira do aging os títulos que ficaram em aberto na B.</p>' +
+        '<p style="line-height:1.55;margin-top:8px"><b>○ Começar do zero</b>: desconsidera ' + T.esc(mesAnt) + ' (Parte A = aging + razão, como no primeiro mês).</p>' +
+        (E.decisoes.conciliacoesAB.length ? '<p class="falta pequeno" style="margin-top:10px">Se mudar, as conciliações deste mês são desfeitas para conciliar de novo.</p>' : ''),
+      botoes: [{ texto: 'Cancelar', valor: null }, { texto: 'Começar do zero', valor: 'zero' }, { texto: 'Continuar de ' + mesAnt, tipo: 'primario', valor: 'continuar' }],
+    });
+    if (escolha) await escolherInicio(escolha);
   }
 
   // Documento primeiro (sem documento no fim), depois fornecedor e data: o que casa fica perto.
@@ -411,7 +507,7 @@
     const b = buscaAB(busca);
     const naLista = (x) => (mostrar === 'todos' || (mostrar === 'conciliados' ? E.idDoItem.has(x.id) : !E.idDoItem.has(x.id))) && b.item(x);
     const doLadoA = filtroDoLado('A'), doLadoB = filtroDoLado('B');
-    const passaA = (x) => (E.incluirAnterior || x.fonte !== 'anterior') && naLista(x) && doLadoA(x);
+    const passaA = (x) => (E.incluirAnterior || (x.fonte !== 'anterior' && x.fonte !== 'pendente')) && naLista(x) && doLadoA(x);
     const passaB = (x) => naLista(x) && doLadoB(x);
     const filtradosA = it.A.filter(passaA).sort(ordemDoc);
     const filtradosB = it.B.filter(passaB).sort(ordemDoc);
@@ -428,11 +524,11 @@
       '<input type="search" class="busca" data-filtro="busca" placeholder="Busca nos dois lados: documento, fornecedor, valor, data ou #ID" title="Vale para a Parte A, a Parte B e a lista de conciliações. Cada parte tem também os seus filtros." value="' + T.esc(busca) + '">' +
       '<select class="filtro" data-filtro="mostrar">' + [['', 'Em aberto'], ['conciliados', 'Conciliados'], ['todos', 'Todos']].map((o) =>
         '<option value="' + o[0] + '"' + (mostrar === o[0] ? ' selected' : '') + '>' + o[1] + '</option>').join('') + '</select>' +
-      '<label class="linha-flex" style="gap:6px"><input type="checkbox" id="ab-anterior"' + (E.incluirAnterior ? ' checked' : '') + '> <span class="pequeno">Parte A = aging ' + T.esc(E.entrada.mesAnterior) + ' + razão</span></label>' +
+      '<label class="linha-flex" style="gap:6px"><input type="checkbox" id="ab-anterior"' + (E.incluirAnterior ? ' checked' : '') + '> <span class="pequeno">Parte A = aging ' + T.esc(E.entrada.mesAnterior) + (E.itens.continuacao ? ' + pendências' : '') + ' + razão</span></label>' +
       '<span class="suave pequeno">(desmarque para <b>só o razão</b>)</span>';
 
     const rot = mostrar === 'todos' ? 'item(ns)' : (mostrar === 'conciliados' ? 'conciliado(s)' : 'em aberto');
-    alvo.innerHTML = resumoAB(ab, grupos) +
+    alvo.innerHTML = cartaoInicio() + resumoAB(ab, grupos) +
       '<div class="grade-ab">' +
       colunaAB('A', 'Parte A · contabilidade', E.incluirAnterior ? 'aging ' + E.entrada.mesAnterior + ' + razão de ' + E.entrada.mesAtual : 'só o razão de ' + E.entrada.mesAtual, filtradosA, fixosA, rot) +
       colunaAB('B', 'Parte B · financeiro', 'aging ' + E.entrada.mesAtual, filtradosB, fixosB, rot) +
@@ -837,6 +933,7 @@
     if (acao) {
       const a = acao.getAttribute('data-acao');
       if (a === 'config-abas') await configurarAbas();
+      else if (a === 'trocar-inicio') await trocarInicio();
       else if (a === 'limpar-conciliacao') await limparConciliacao();
       else if (a === 'conciliar-tudo') conciliarTudo();
       else if (a === 'desfazer-automaticas') await desfazerEmLote(false);
@@ -852,6 +949,8 @@
       redesenhaMantendo();
       return;
     }
+    const inicio = ev.target.closest('[data-inicio]');
+    if (inicio) { await escolherInicio(inicio.getAttribute('data-inicio')); return; }
     const abrirAb = ev.target.closest('[data-abrir-ab]');
     if (abrirAb) { alternarDetalheAB(abrirAb); return; }
     const verId = ev.target.closest('[data-ver-id]');

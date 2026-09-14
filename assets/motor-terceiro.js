@@ -89,11 +89,24 @@
   // Itens das partes A e B, com identidade que nasce do CONTEÚDO (Parte 4): trocar a ordem
   // das linhas do arquivo não troca o ID de ninguém. `legado` traduz os ids da versão 5
   // (posição no aging e digital do razão) para os de agora.
+  //
+  // CONTINUAR do mês anterior (Dony, 14/09/2026: "no mês seguinte, continuar da conciliação
+  // anterior ou fazer desconsiderando a anterior"). Com `entrada.continuacao` (as pendências
+  // do mês anterior, ver pendenciasAB):
+  //   Parte A = aging do mês passado SEM os títulos que ficaram em aberto na Parte B do mês
+  //             passado + o que ficou em aberto na Parte A do mês passado + razão do mês.
+  // Assim a diferença (em aberto A − em aberto B) é a acumulada de verdade entre a
+  // contabilidade e o financeiro. Sem `continuacao` é o "começar do zero".
   function itensAB(entrada, r) {
     const A = [], B = [];
     const porId = new Map();
     const legado = new Map();
     const lancs = (entrada.contaRazao && entrada.contaRazao.lancamentos) || [];
+    const cont = entrada.continuacao || null;
+    // O título que ficou em aberto na B do mês passado (TB:<hash>) é o mesmo do aging do mês
+    // passado que entra na A agora (TA:<hash>): mesmo arquivo, mesmo conteúdo.
+    const tirar = new Set(cont ? (cont.B || []).map((x) => String(x.id).replace(/^TB:/, 'TA:')) : []);
+    const excluidos = [];
     function guardar(x) {
       let id = x.id, n = 1;
       while (porId.has(id)) id = x.id + '~' + (n++);
@@ -108,12 +121,26 @@
         const doc = normalizarDocumento(t.documento);
         const base = [doc, t.parcela || '', Util.soDigitos(t.cnpj), t.valor, t.vencimento || '', Util.normalizarNome(t.nome)].join('|');
         const n = vezes.get(base) || 0; vezes.set(base, n + 1);
-        const x = guardar({ id: prefixo + ':' + Util.hash8(base + '|' + n), lado, fonte, doc, parcela: t.parcela || '',
-          chave: chaveDoTitulo(t), nome: t.nome, cnpj: t.cnpj || '', data: t.vencimento || '', ordem: 0, historico: '', valor: t.valor });
+        const id = prefixo + ':' + Util.hash8(base + '|' + n);
+        const item = { id, lado, fonte, doc, parcela: t.parcela || '',
+          chave: chaveDoTitulo(t), nome: t.nome, cnpj: t.cnpj || '', data: t.vencimento || '', ordem: 0, historico: '', valor: t.valor };
+        if (lado === 'A' && tirar.has(id)) { excluidos.push(item); return; }
+        const x = guardar(item);
         legado.set(prefixoLegado + ':' + i, x.id);
       });
     }
     titulos(entrada.agingAnterior && entrada.agingAnterior.titulos, 'A', 'anterior', 'TA', 'AGA');
+    // Pendências da Parte A do mês passado: entram antes do razão do mês (a nota nasce antes).
+    let pendentes = 0;
+    if (cont) {
+      (cont.A || []).forEach((p) => {
+        const id = String(p.id).indexOf('PA:') === 0 ? String(p.id) : 'PA:' + p.id;
+        guardar({ id, lado: 'A', fonte: 'pendente', fonteOriginal: p.fonte === 'pendente' ? (p.fonteOriginal || '') : (p.fonte || ''),
+          origem: p.origem || cont.competencia || '', doc: p.doc || '', parcela: p.parcela || '', chave: p.chave || SEM, nome: p.nome || '',
+          cnpj: p.cnpj || '', data: p.data || '', ordem: 0, historico: p.historico || '', valor: Number(p.valor) || 0 });
+        pendentes++;
+      });
+    }
     r.linhas.forEach((l) => {
       const lc = lancs[l.i];
       const d = r.porLinha.get(l.digital);
@@ -123,7 +150,24 @@
       legado.set('RAZ:' + l.digital, x.id);
     });
     titulos(entrada.agingAtual && entrada.agingAtual.titulos, 'B', 'atual', 'TB', 'AGB');
-    return { A, B, porId, legado };
+    // Título em aberto na B do mês passado que não apareceu no aging (arquivo trocado depois?).
+    const achados = new Set(excluidos.map((x) => x.id));
+    const naoAchados = cont ? (cont.B || []).filter((x) => !achados.has(String(x.id).replace(/^TB:/, 'TA:'))) : [];
+    return { A, B, porId, legado, continuacao: cont ? { competencia: cont.competencia || '', pendentes, excluidos, naoAchados } : null };
+  }
+
+  // Pendências de um mês: o que ficou em aberto na Parte A e na Parte B, guardado no registro
+  // do mês para o mês seguinte poder continuar dele. Só os campos que o próximo mês usa.
+  const CAMPOS_PENDENCIA = ['id', 'lado', 'fonte', 'fonteOriginal', 'origem', 'doc', 'parcela', 'chave', 'nome', 'cnpj', 'data', 'historico', 'valor'];
+  function pendenciasAB(itens, grupos, competencia) {
+    const ab = emAbertoAB(itens, grupos);
+    const copia = (x) => {
+      const o = {};
+      CAMPOS_PENDENCIA.forEach((k) => { if (x[k] !== undefined && x[k] !== '') o[k] = x[k]; });
+      if (!o.origem) o.origem = competencia;
+      return o;
+    };
+    return { competencia, A: ab.abertosA.map(copia), B: ab.abertosB.map(copia), valorA: ab.valorA, valorB: ab.valorB };
   }
 
   function tipoAB(qtdA, qtdB) { return qtdA && qtdB ? 'AxB' : (qtdA ? 'AxA' : 'BxB'); }
@@ -162,7 +206,7 @@
       // Caso real: despesa lançada no último dia do mês e paga antes.
       const notas = a.filter((x) => x.valor > 0);
       const baixas = a.filter((x) => x.valor < 0);
-      if (baixas.length && notas.length && !notas.some((x) => x.fonte === 'anterior')) {
+      if (baixas.length && notas.length && !notas.some((x) => x.fonte === 'anterior' || x.fonte === 'pendente')) {
         const primeira = Math.min.apply(null, notas.map((x) => x.ordem));
         if (baixas.some((x) => x.ordem < primeira)) g.aviso = 'baixa-antes-da-nota';
       }
@@ -425,6 +469,6 @@
   return {
     calcular, fornecedorDoHistorico, documentoDoHistorico, chaveDoTitulo,
     normalizarDocumento, documentoDaLinha, itensAB, conciliarAutomatico, emAbertoAB, tipoAB, proximoIdAB, REGRAS_AB,
-    compararPorDocumento, arrumarGruposAB, relatorioAB,
+    compararPorDocumento, arrumarGruposAB, relatorioAB, pendenciasAB,
   };
 });

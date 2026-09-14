@@ -76,10 +76,21 @@
   // Partes da folha
   // ------------------------------------------------------------------
   function nomeDoMes(x) { return U.nomeCompetencia(R.comp); }
+  const NOME_FONTE = { anterior: 'aging', atual: 'aging', nota: 'razão · nota', baixa: 'razão · baixa' };
   function fonte(x) {
     if (x.fonte === 'anterior') return 'aging ' + R.dados.entrada.mesAnterior;
     if (x.fonte === 'atual') return 'aging ' + R.dados.entrada.mesAtual;
+    if (x.fonte === 'pendente') return 'pendente de ' + U.nomeCompetencia(x.origem) + (x.fonteOriginal ? ' · ' + (NOME_FONTE[x.fonteOriginal] || x.fonteOriginal) : '');
     return x.fonte === 'nota' ? 'razão · nota' : 'razão · baixa';
+  }
+  // Como o mês começou: continuando do anterior (com quantas pendências) ou do zero.
+  function textoInicio() {
+    const ini = R.dados.decisoes.inicio, c = R.dados.itens.continuacao, ant = R.dados.anterior;
+    if (!ini) return ant && ant.pendencias ? 'não escolhido (do zero)' : 'primeiro mês (sem conciliação anterior)';
+    const mesAnt = U.nomeCompetencia(ini.de);
+    return ini.modo === 'continuar'
+      ? 'continuando de ' + mesAnt + (c ? ' · ' + c.pendentes + ' pendência(s) entraram na A, ' + c.excluidos.length + ' título(s) da B saíram do aging' : '')
+      : 'do zero (desconsiderou ' + mesAnt + ')';
   }
   function dinheiro(c) { return U.formatarCentavos(c); }
   function tdDinheiro(c) { return '<td class="num' + (c < 0 ? ' negativo' : '') + '">' + dinheiro(c) + '</td>'; }
@@ -93,8 +104,9 @@
       ['CNPJ', emp.cnpj ? U.formatarCnpj(emp.cnpj) : '—'],
       ['Competência', nomeDoMes()],
       ['Conta', (conta.codigo || '') + ' · ' + (conta.nome || '')],
-      ['Parte A · contabilidade', 'aging ' + d.entrada.mesAnterior + ' + razão de ' + d.entrada.mesAtual],
+      ['Parte A · contabilidade', 'aging ' + d.entrada.mesAnterior + (d.itens.continuacao ? ' + pendências de ' + U.nomeCompetencia(d.itens.continuacao.competencia) : '') + ' + razão de ' + d.entrada.mesAtual],
       ['Parte B · financeiro', 'aging ' + d.entrada.mesAtual],
+      ['Início do mês', textoInicio()],
       ['Última gravação', d.registro.atualizadoEm ? (d.registro.atualizadoPor || '—') + ' · ' + U.dataHoraLocal(d.registro.atualizadoEm) : 'nada gravado ainda'],
       ['Emitido', (app().usuario.nome || '—') + ' · ' + U.dataHoraLocal(R.emitido)],
       ['Programa', (cfg.programa || 'Conciliador Solutta') + (cfg.numero ? ' · versão ' + cfg.numero : '')],
@@ -253,6 +265,7 @@
       ['Empresa', d.emp.codigo + ' · ' + d.emp.nome],
       ['Competência', U.nomeCompetencia(R.comp)],
       ['Conta', (d.r.conta.codigo || '') + ' · ' + (d.r.conta.nome || '')],
+      ['Início do mês', textoInicio()],
       ['Emitido', (app().usuario.nome || '') + ' · ' + U.dataHoraLocal(R.emitido)],
       [],
     ];
