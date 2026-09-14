@@ -18,12 +18,16 @@
   }
 
   const SINONIMOS = {
-    nome: ['razaosocial', 'fornecedor', 'cliente', 'nome', 'nomefornecedor', 'nomedofornecedor', 'nomecliente', 'nomedocliente', 'favorecido', 'sacado'],
-    cnpj: ['inscricao', 'cnpj', 'cpfcnpj', 'cnpjcpf', 'cpf', 'cnpjdofornecedor', 'documentodofornecedor'],
-    valor: ['valorliquido', 'saldo', 'valoremaberto', 'valoraberto', 'saldoemaberto', 'saldoaberto', 'valorapagar', 'valorareceber', 'valor', 'valortotal'],
+    // "nomeparceiroparceiro" = "Nome Parceiro (Parceiro)" da Univale (o fornecedor). Vem ANTES
+    // do nome fantasia da própria empresa, que não é o fornecedor.
+    nome: ['nomeparceiroparceiro', 'nomeparceiro', 'razaosocial', 'fornecedor', 'cliente', 'nome', 'nomefornecedor', 'nomedofornecedor', 'nomecliente', 'nomedocliente', 'favorecido', 'sacado'],
+    cnpj: ['cnpjcpfparceiro', 'inscricao', 'cnpj', 'cpfcnpj', 'cnpjcpf', 'cpf', 'cnpjdofornecedor', 'documentodofornecedor'],
+    // "vlrdodesdobramento" = coluna do aging da Univale que o Dony usa (14/09/2026): é o valor
+    // em aberto do título. Vem ANTES de "valor líquido" e "saldo" para ganhar quando existem os dois.
+    valor: ['vlrdodesdobramento', 'valordodesdobramento', 'vlrdesdobramento', 'valordesdobramento', 'valorliquido', 'saldo', 'valoremaberto', 'valoraberto', 'saldoemaberto', 'saldoaberto', 'valorapagar', 'valorareceber', 'valor', 'valortotal'],
     vencimento: ['vencimento', 'datavencimento', 'datadevencimento', 'dtvencimento', 'vencto', 'dtvencto'],
-    documento: ['docserie', 'documento', 'numerodocumento', 'ndocumento', 'notafiscal', 'nf', 'titulo', 'numerotitulo', 'numero'],
-    parcela: ['parcela', 'parc', 'nparcela'],
+    documento: ['docserie', 'documento', 'numerodocumento', 'ndocumento', 'notafiscal', 'nronota', 'nrounico', 'nf', 'titulo', 'numerotitulo', 'numero'],
+    parcela: ['parcela', 'parc', 'nparcela', 'desdob', 'desdobduplicata'],
     status: ['status', 'situacao'],
   };
 
