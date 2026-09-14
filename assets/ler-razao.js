@@ -36,16 +36,24 @@
   }
 
   // Sinônimos (Parte 5.2). Cada lista em ordem de preferência.
+  // "complhis" (complemento do histórico) vem ANTES de "historico": no razão da Univale o
+  // texto de verdade está no COMPLHIS (14/09/2026, Dony); nos desenhos A/B não existe COMPLHIS,
+  // então "historico" continua ganhando.
   const SINONIMOS = {
-    data: ['data', 'dt', 'datalanc', 'datadolancamento', 'datalancamento'],
-    numero: ['numero', 'num', 'lancamento', 'lanc', 'lcto', 'nlanc', 'nlancamento', 'lote'],
-    historico: ['historico', 'historicos', 'historicocomplemento', 'complementohistorico'],
-    contrapartida: ['ctacpart', 'contrapartida', 'cpart', 'cpartida', 'ctacpartida', 'contracpartida', 'ccontrapartida'],
+    data: ['data', 'dt', 'datalanc', 'datadolancamento', 'datalancamento', 'datamovimento', 'datamov'],
+    numero: ['numero', 'num', 'lancamento', 'lanc', 'lcto', 'nlanc', 'nlancamento', 'numlancamento', 'lote', 'numlote'],
+    historico: ['complhis', 'complementohistorico', 'historicocomplemento', 'complemento', 'historico', 'historicos'],
+    contrapartida: ['ctacpart', 'contrapartida', 'cpart', 'cpartida', 'ctacpartida', 'contracpartida', 'ccontrapartida', 'contacontrapartida', 'contacontabilcontrapartida'],
     filial: ['filial'],
     debito: ['debito', 'debitos', 'valordebito', 'vlrdebito'],
     credito: ['credito', 'creditos', 'valorcredito', 'vlrcredito'],
     saldo: ['saldo', 'saldoatual'],
     saldoExercicio: ['saldoexercicio'],
+    // Razão em LISTA (uma linha por lançamento, a conta numa coluna) — desenho C, ex.: Univale.
+    conta: ['contareduzida', 'contacontabil', 'contaredz', 'reduzida'],
+    contaClassificacao: ['contacontabil', 'classificacao', 'classificacaocontabil'],
+    descricaoConta: ['descricao', 'descricaoconta', 'nomeconta', 'descricaodaconta'],
+    documento: ['numdocumento', 'numerodocumento', 'ndocumento', 'nrodocumento', 'nrodoc', 'documento'],
   };
 
   function mapearCabecalho(linha) {
@@ -63,6 +71,15 @@
   function ehCabecalho(linha) {
     const m = mapearCabecalho(linha);
     return m.data !== undefined && m.historico !== undefined && (m.debito !== undefined || m.credito !== undefined);
+  }
+
+  // Cabeçalho de um razão em LISTA (desenho C): tem uma coluna de CONTA, data, histórico e
+  // débito/crédito. É o que distingue do razão em blocos (que não tem coluna "conta") e do
+  // relatório de títulos/aging (que não tem coluna de débito nem de crédito).
+  function ehCabecalhoFlat(linha) {
+    const m = mapearCabecalho(linha);
+    return m.conta !== undefined && m.data !== undefined && m.historico !== undefined &&
+      (m.debito !== undefined || m.credito !== undefined);
   }
 
   // Balancete: primeira coluna "Código"/"Conta"/"Classificação", com colunas de saldo, SEM histórico.
@@ -199,21 +216,109 @@
     return null;
   }
 
+  // ------------------------------------------------------------------
+  // Razão em LISTA (desenho C): uma linha por lançamento, a conta numa coluna.
+  // Ex.: Univale (14/09/2026) — colunas Data Movimento, COMPLHIS (histórico), Conta reduzida,
+  // Conta contábil, Conta Contrapartida, Valor Débito, Valor Crédito. Agrupa por conta.
+  // ------------------------------------------------------------------
+  function lerFlat(abas, opcoes) {
+    const nomeArquivo = (opcoes && opcoes.nomeArquivo) || '';
+    const avisos = [];
+    const contasMap = new Map();
+    let linhasIgnoradas = 0;
+    let info = { empresa: '', cnpj: '', periodo: null, titulo: '' };
+
+    for (const aba of abas) {
+      const linhas = aba.linhas;
+      const rCab = linhas.findIndex((l) => l && ehCabecalhoFlat(l));
+      if (rCab < 0) continue;
+      const mapa = mapearCabecalho(linhas[rCab]);
+      const infoAba = lerCabecalhoDoRelatorio(linhas, rCab);
+      info = {
+        empresa: info.empresa || infoAba.empresa,
+        cnpj: info.cnpj || infoAba.cnpj,
+        periodo: info.periodo || infoAba.periodo,
+        titulo: info.titulo || infoAba.titulo,
+      };
+      for (let r = rCab + 1; r < linhas.length; r++) {
+        const linha = linhas[r];
+        if (!linha || !celulasCheias(linha).length) continue;
+        if (ehCabecalhoFlat(linha)) continue;               // cabeçalho repetido a cada página
+        const data = mapa.data !== undefined ? Util.lerData(linha[mapa.data]) : null;
+        const deb = mapa.debito !== undefined ? numeroDe(linha[mapa.debito]) : null;
+        const cred = mapa.credito !== undefined ? numeroDe(linha[mapa.credito]) : null;
+        const codigo = mapa.conta !== undefined && linha[mapa.conta] !== null && linha[mapa.conta] !== undefined ? String(linha[mapa.conta]).trim() : '';
+        if (!data || (deb === null && cred === null) || !codigo) { linhasIgnoradas++; continue; }
+        let conta = contasMap.get(codigo);
+        if (!conta) {
+          conta = {
+            codigo,
+            classificacao: mapa.contaClassificacao !== undefined && linha[mapa.contaClassificacao] !== null ? String(linha[mapa.contaClassificacao]).trim() : '',
+            nome: mapa.descricaoConta !== undefined && linha[mapa.descricaoConta] !== null ? String(linha[mapa.descricaoConta]).trim() : '',
+            saldoAnterior: 0, lancamentos: [], totalDebitoDeclarado: null, totalCreditoDeclarado: null,
+            saldoFinalDeclarado: null, avisos: [],
+          };
+          contasMap.set(codigo, conta);
+        }
+        const historico = String(linha[mapa.historico] === null || linha[mapa.historico] === undefined ? '' : linha[mapa.historico]).replace(/\s+/g, ' ').trim();
+        conta.lancamentos.push({
+          data: data.texto, dia: data.dia, mes: data.mes, ano: data.ano,
+          numero: mapa.numero !== undefined && linha[mapa.numero] !== null ? String(linha[mapa.numero]) : '',
+          historico,
+          contrapartida: mapa.contrapartida !== undefined && linha[mapa.contrapartida] !== null ? String(linha[mapa.contrapartida]) : '',
+          documento: mapa.documento !== undefined && linha[mapa.documento] !== null ? String(linha[mapa.documento]) : '',
+          debito: deb || 0, credito: cred || 0, saldo: null,
+        });
+      }
+    }
+
+    const contas = Array.from(contasMap.values());
+    let periodo = info.periodo;
+    let periodoOrigem = periodo ? 'conteudo' : null;
+    if (!periodo) { const pn = periodoPeloNome(nomeArquivo); if (pn) { periodo = pn; periodoOrigem = 'nome-do-arquivo'; } }
+    if (!periodo) {
+      let menor = null, maior = null;
+      contas.forEach((c) => c.lancamentos.forEach((l) => {
+        const n = Util.montarData(l.dia, l.mes, l.ano).numero;
+        if (menor === null || n < menor) menor = n;
+        if (maior === null || n > maior) maior = n;
+      }));
+      if (menor !== null) { periodo = { de: Util.dataDeNumero(menor).texto, ate: Util.dataDeNumero(maior).texto }; periodoOrigem = 'datas-dos-lancamentos'; }
+    }
+    if (periodoOrigem === 'datas-dos-lancamentos') avisos.push('O arquivo não diz o período: usei a primeira e a última data dos lançamentos. Confirme a competência.');
+
+    for (const c of contas) {
+      conferirConta(c);
+      // Razão em lista não traz saldo anterior: o saldo se confere pelo aging e pelo balancete (③).
+      c.confere = true;
+      c.avisos.push('Razão em lista (uma linha por lançamento), sem saldo anterior no arquivo: o saldo é conferido pelo aging e pelo balancete.');
+    }
+    if (!contas.length) avisos.push('Não achei lançamentos neste razão em lista (confira se os títulos das colunas batem).');
+
+    return {
+      tipo: 'razao', desenho: 'C', empresa: info.empresa, cnpj: info.cnpj, titulo: info.titulo,
+      periodo, periodoOrigem, contas, avisos, linhasIgnoradas,
+    };
+  }
+
   /**
    * Diz se as abas são um razão, um balancete ou outra coisa.
    * @returns { tipo: 'razao' | 'balancete' | null, motivo }
    */
   function reconhecer(abas) {
-    let temCabecalho = false, temConta = false, balancete = false;
+    let temCabecalho = false, temConta = false, balancete = false, temFlat = false;
     for (const aba of abas) {
       for (const linha of aba.linhas) {
         if (!linha) continue;
         if (!temCabecalho && ehCabecalho(linha)) temCabecalho = true;
         if (!temConta && lerLinhaDeConta(linha)) temConta = true;
         if (!balancete && ehCabecalhoDeBalancete(linha)) balancete = true;
+        if (!temFlat && ehCabecalhoFlat(linha)) temFlat = true;
         if (temCabecalho && temConta) return { tipo: 'razao', motivo: 'Tem o cabeçalho de lançamentos (data, histórico, débito/crédito) e blocos de conta.' };
       }
     }
+    // Razão em lista (desenho C): uma linha por lançamento, conta numa coluna. Só quando NÃO há blocos "Conta:".
+    if (temFlat && !temConta) return { tipo: 'razao', flat: true, motivo: 'Razão em lista: uma linha por lançamento, com a conta numa coluna e Débito/Crédito.' };
     if (balancete) return { tipo: 'balancete', motivo: 'Este arquivo é um BALANCETE (primeira coluna com o código da conta e colunas de saldo, sem histórico), não um razão.' };
     if (temCabecalho && !temConta) return { tipo: null, motivo: 'Tem colunas de lançamento, mas nenhuma linha identificando a conta ("Conta:"). Não parece um razão contábil.' };
     return { tipo: null, motivo: 'Não achei o cabeçalho de um razão (Data, Histórico, Débito, Crédito).' };
@@ -226,6 +331,11 @@
    */
   function ler(abas, opcoes) {
     const nomeArquivo = (opcoes && opcoes.nomeArquivo) || '';
+    // Razão em lista (desenho C) tem um leitor próprio: uma linha por lançamento, conta na coluna.
+    const temBloco = abas.some((a) => a.linhas.some((l) => l && lerLinhaDeConta(l)));
+    const temFlat = !temBloco && abas.some((a) => a.linhas.some((l) => l && ehCabecalhoFlat(l)));
+    if (temFlat) return lerFlat(abas, opcoes);
+
     const avisos = [];
     const contas = [];
     let linhasIgnoradas = 0;

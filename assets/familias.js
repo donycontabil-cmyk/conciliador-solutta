@@ -49,8 +49,8 @@
       teste: (n) => /ADIANT/.test(n) && /FORNEC/.test(n) },
     { familia: 'clientes', papel: 'adiantamento', descricao: 'ADIANT + CLIENTE, RECEBIMENTOS ANTECIPADOS, ADIANTAMENTOS RECEBIDOS',
       teste: (n) => (/ADIANT/.test(n) && /CLIENTE/.test(n)) || /RECEBIMENTOS? ANTECIPADOS?/.test(n) || /ADIANTAMENTOS? RECEBIDOS?/.test(n) },
-    { familia: 'fornecedores', papel: 'principal', descricao: 'FORNECEDOR sem ADIANT',
-      teste: (n) => /FORNECEDOR/.test(n) && !/ADIANT/.test(n) },
+    { familia: 'fornecedores', papel: 'principal', descricao: 'FORNECEDOR(ES) / FORNEC A PAGAR / DUPLICATAS-TITULOS A PAGAR, sem ADIANT',
+      teste: (n) => !/ADIANT/.test(n) && (/FORNEC/.test(n) || /(DUPLICATAS?|TITULOS?) A PAGAR/.test(n)) },
     { familia: 'clientes', papel: 'principal', descricao: 'no ativo, sem ADIANT: CLIENTE, MENSALIDADE, DUPLICATAS/CONTAS/TITULOS A RECEBER',
       teste: (n, c) => ativo(c) && !/ADIANT/.test(n) &&
         (/CLIENTE/.test(n) || /MENSALIDADE/.test(n) || /(DUPLICATAS|CONTAS|TITULOS) A RECEBER/.test(n)) },
