@@ -235,6 +235,8 @@ table.tabela .caixa { width: 32px; text-align: center; }
 .abas button:hover { color: var(--texto); }
 .abas button.ativa { color: var(--primaria-escura); border-bottom-color: var(--primaria); font-weight: 600; }
 .abas .contador { display: inline-block; margin-left: 5px; padding: 0 6px; border-radius: 999px; background: var(--cinza-fundo); font-size: 11.5px; color: var(--cinza); }
+.abas .abas-config { margin-left: auto; font-size: 12.5px; color: var(--texto-fraco); }
+.item-aba { display: flex; gap: 8px; align-items: center; padding: 7px 0; border-top: 1px solid #eef0f3; cursor: pointer; }
 .filtros { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 10px; }
 
 /* ---------- Checklist ---------- */

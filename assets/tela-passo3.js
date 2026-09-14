@@ -75,6 +75,7 @@
       incluirAnterior: app().lerLocal('conciliador-solutta.ab-anterior') !== '0',
       selA: new Set(), selB: new Set(), abertosAB: new Set(), idDoItem: new Map(),
     };
+    if (E.aba !== 'ab' && abasOcultas().has(E.aba)) E.aba = 'ab';
     calcular();
     const arrumou = arrumarConciliacoes();
     desenharTudo();
@@ -165,7 +166,9 @@
       '</div>' +
       '<div class="linha-flex" style="margin-top:12px;justify-content:space-between">' +
       '<div class="' + (bate ? 'ok' : 'falta') + '" style="font-size:16px;font-weight:600">' + (bate ? '✓ Fecha no centavo' : '● Diferença de ' + T.moeda(Math.abs(p.diferenca)) + ' para conciliar') + '</div>' +
-      '<div class="suave pequeno">' + E.r.resumo.batem + ' batem · ' + E.r.resumo.comDiferenca + ' com diferença · ' + E.r.resumo.semFornecedor + ' linhas sem fornecedor</div>' +
+      // A contagem por fornecedor só aparece se alguma aba por fornecedor estiver à vista.
+      (['diferencas', 'fornecedores', 'sem'].some((id) => !abasOcultas().has(id))
+        ? '<div class="suave pequeno">' + E.r.resumo.batem + ' batem · ' + E.r.resumo.comDiferenca + ' com diferença · ' + E.r.resumo.semFornecedor + ' linhas sem fornecedor</div>' : '') +
       '</div></div>';
   }
 
@@ -196,9 +199,49 @@
     { id: 'agingAnt', titulo: 'Aging ' + E.entrada.mesAnterior },
     { id: 'agingAtu', titulo: 'Aging ' + E.entrada.mesAtual },
   ];
+  // Abas ocultas nesta empresa (Dony, 14/09/2026: "não eliminar, deixar ocultos"). Guardadas no
+  // cadastro da empresa: { passo3: [...] }. "Conciliar A × B" sempre aparece.
+  function abasOcultas() { return new Set(((E.emp && E.emp.abasOcultas) || {}).passo3 || []); }
+
   function desenharAbas() {
-    E.el.querySelector('#abas').innerHTML = ABAS().map((a) => '<button type="button" role="tab" data-aba="' + a.id + '" class="' + (E.aba === a.id ? 'ativa' : '') + '">' +
-      T.esc(a.titulo) + '<span class="contador">' + contador(a.id).toLocaleString('pt-BR') + '</span></button>').join('');
+    const ocultas = abasOcultas();
+    E.el.querySelector('#abas').innerHTML = ABAS().filter((a) => a.id === 'ab' || !ocultas.has(a.id)).map((a) =>
+      '<button type="button" role="tab" data-aba="' + a.id + '" class="' + (E.aba === a.id ? 'ativa' : '') + '">' +
+      T.esc(a.titulo) + '<span class="contador">' + contador(a.id).toLocaleString('pt-BR') + '</span></button>').join('') +
+      '<button type="button" class="abas-config" data-acao="config-abas" title="Escolher quais abas aparecem nesta empresa">⚙ ' +
+      (ocultas.size ? ocultas.size + ' aba(s) oculta(s)' : 'Abas') + '</button>';
+  }
+
+  async function configurarAbas() {
+    const ocultas = abasOcultas();
+    const escolha = await T.janela({
+      titulo: 'Abas do Passo ③ nesta empresa',
+      corpo: '<p class="suave" style="margin-bottom:8px;line-height:1.5">Desmarque as abas que esta empresa não usa. Elas ficam <b>ocultas</b> (nada é apagado) e voltam quando você marcar de novo.</p>' +
+        '<label class="item-aba"><input type="checkbox" checked disabled> <b>Conciliar A × B</b> <span class="suave pequeno">sempre aparece</span></label>' +
+        ABAS().filter((a) => a.id !== 'ab').map((a) => '<label class="item-aba"><input type="checkbox" data-aba-visivel="' + a.id + '"' + (ocultas.has(a.id) ? '' : ' checked') + '> ' + T.esc(a.titulo) + '</label>').join(''),
+      botoes: [{ texto: 'Cancelar', valor: null },
+        { texto: 'Guardar', tipo: 'primario', antes: (j) => Array.from(j.querySelectorAll('[data-aba-visivel]')).filter((c) => !c.checked).map((c) => c.getAttribute('data-aba-visivel')) }],
+    });
+    if (!Array.isArray(escolha)) return;
+    const arm = app().armazenamento;
+    try {
+      // Reler antes de gravar: outra pessoa pode ter mexido no cadastro.
+      const emp = (await arm.empresas()).find((e) => String(e.codigo) === String(E.codigo));
+      const todas = Object.assign({}, emp.abasOcultas || {}, { passo3: escolha });
+      const salvo = await arm.salvarEmpresa(Object.assign({}, emp, { abasOcultas: todas }));
+      E.emp = salvo;
+      const i = app().empresas.findIndex((e) => String(e.codigo) === String(E.codigo));
+      if (i >= 0) app().empresas[i] = salvo;
+      await arm.registrarNoLog({ codigo: E.codigo, acao: 'abas-ocultas', alvo: 'passo3', detalhe: escolha.join(', ') || '(nenhuma)' });
+      if (escolha.indexOf(E.aba) >= 0) { E.aba = 'ab'; app().gravarLocal('conciliador-solutta.aba-passo3', 'ab'); }
+      E.el.querySelector('.cartao.corpo').outerHTML = '';
+      E.el.querySelector('#abas').insertAdjacentHTML('beforebegin', desenharPonte());
+      desenharAbas();
+      desenharAba();
+      T.avisoRapido(escolha.length ? escolha.length + ' aba(s) oculta(s) nesta empresa.' : 'Todas as abas à vista.', 'ok');
+    } catch (e) {
+      T.avisoRapido(T.mensagemDeErro(e), 'erro');
+    }
   }
 
   function filtro(nome) { return E.filtros[E.aba + '.' + nome] || ''; }
@@ -746,7 +789,8 @@
     const acao = ev.target.closest('[data-acao]');
     if (acao) {
       const a = acao.getAttribute('data-acao');
-      if (a === 'conciliar-tudo') conciliarTudo();
+      if (a === 'config-abas') await configurarAbas();
+      else if (a === 'conciliar-tudo') conciliarTudo();
       else if (a === 'desfazer-automaticas') await desfazerAutomaticas();
       else if (a === 'conciliar-ab') await conciliarAB();
       else if (a === 'limpar-ab') { E.selA = new Set(); E.selB = new Set(); redesenhaMantendo(); }
