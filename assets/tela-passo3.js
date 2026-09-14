@@ -470,6 +470,7 @@
       '<div class="linha-flex">' +
       '<button type="button" class="botao primario" data-acao="conciliar-tudo" title="Acha tudo o que casa pelo documento e marca cada conciliação com um ID">⚡ Conciliar</button>' +
       (auto ? '<button type="button" class="botao pequeno perigo" data-acao="desfazer-automaticas">Desfazer as automáticas</button>' : '') +
+      (aMao ? '<button type="button" class="botao pequeno perigo" data-acao="desfazer-manuais">Desfazer as manuais</button>' : '') +
       '</div></div>' +
       '<p class="suave pequeno" style="margin:10px 0 0">' +
       (grupos.length ? '<b>' + grupos.length.toLocaleString('pt-BR') + '</b> conciliação(ões) com ID: ' + conta('AxA') + ' A×A · ' + conta('AxB') + ' A×B' + (conta('BxB') ? ' · ' + conta('BxB') + ' B×B' : '') + ' · ' + aMao + ' à mão · em aberto: <b>' + ab.abertosA.length + '</b> na A e <b>' + ab.abertosB.length + '</b> na B. ' : 'Nada conciliado ainda. ') +
@@ -608,19 +609,25 @@
     gravar('terceiro-ab-automatico', texto);
   }
 
-  async function desfazerAutomaticas() {
-    const auto = E.decisoes.conciliacoesAB.filter((g) => g.regra !== 'manual');
-    if (!auto.length) return;
+  // Desfazer em lote (Dony, 14/09/2026: "desfazer as automáticas e desfazer as manuais também").
+  // Uma por uma continua no botão Desfazer de cada ID, na lista.
+  async function desfazerEmLote(manuais) {
+    const saem = E.decisoes.conciliacoesAB.filter((g) => (g.regra === 'manual') === manuais);
+    if (!saem.length) return;
     const ok = await T.confirmar({
-      titulo: 'Desfazer as conciliações automáticas',
-      texto: 'As <b>' + auto.length.toLocaleString('pt-BR') + '</b> conciliações feitas pelo ⚡ Conciliar voltam para <b>em aberto</b>. As feitas à mão continuam.',
+      titulo: manuais ? 'Desfazer as conciliações manuais' : 'Desfazer as conciliações automáticas',
+      texto: manuais
+        ? 'As <b>' + saem.length.toLocaleString('pt-BR') + '</b> conciliações feitas à mão voltam para <b>em aberto</b> (as observações delas também saem). As automáticas continuam.'
+        : 'As <b>' + saem.length.toLocaleString('pt-BR') + '</b> conciliações feitas pelo ⚡ Conciliar voltam para <b>em aberto</b>. As feitas à mão continuam.',
       botao: 'Desfazer', perigo: true,
     });
     if (!ok) return;
-    E.decisoes.conciliacoesAB = E.decisoes.conciliacoesAB.filter((g) => g.regra === 'manual');
-    historico('Desfez ' + auto.length + ' conciliações automáticas');
+    E.decisoes.conciliacoesAB = E.decisoes.conciliacoesAB.filter((g) => (g.regra === 'manual') !== manuais);
+    saem.forEach((g) => E.abertosAB.delete(g.id));
+    historico('Desfez ' + saem.length + ' conciliações ' + (manuais ? 'manuais' : 'automáticas') + ': ' + saem.slice(0, 20).map((g) => '#' + g.id).join(', ') + (saem.length > 20 ? '…' : ''));
     redesenharAB();
-    gravar('terceiro-ab-desfazer-automaticas', auto.length + ' conciliações');
+    T.avisoRapido(saem.length + ' conciliação(ões) ' + (manuais ? 'manuais' : 'automáticas') + ' desfeita(s).', 'ok');
+    gravar(manuais ? 'terceiro-ab-desfazer-manuais' : 'terceiro-ab-desfazer-automaticas', saem.length + ' conciliações');
   }
 
   async function conciliarAB() {
@@ -791,7 +798,8 @@
       const a = acao.getAttribute('data-acao');
       if (a === 'config-abas') await configurarAbas();
       else if (a === 'conciliar-tudo') conciliarTudo();
-      else if (a === 'desfazer-automaticas') await desfazerAutomaticas();
+      else if (a === 'desfazer-automaticas') await desfazerEmLote(false);
+      else if (a === 'desfazer-manuais') await desfazerEmLote(true);
       else if (a === 'conciliar-ab') await conciliarAB();
       else if (a === 'limpar-ab') { E.selA = new Set(); E.selB = new Set(); redesenhaMantendo(); }
       return;
