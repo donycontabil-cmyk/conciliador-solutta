@@ -136,7 +136,8 @@
       '<div class="cabecalho"><div class="titulos"><h1>Passo ③ · Fornecedores × contas a pagar</h1>' +
       '<p class="suave">' + T.esc(E.emp.codigo + ' · ' + E.emp.nome) + ' · ' + U.nomeCompetencia(E.comp) + '</p>' +
       '<p class="suave pequeno">Conta ' + T.esc(r.conta.codigo + ' · ' + r.conta.nome) + ' · aging de ' + T.esc(E.entrada.mesAnterior) + ' e de ' + T.esc(E.entrada.mesAtual) + '</p></div>' +
-      '<span class="guardado" id="guardado" title="Cada decisão é gravada na hora">' + (E.guardadoEm ? 'guardado às ' + U.horaLocal(E.guardadoEm) : 'nenhuma decisão tomada ainda') + '</span></div>' +
+      '<div class="linha-flex" style="gap:12px"><span class="guardado" id="guardado" title="Cada decisão é gravada na hora">' + (E.guardadoEm ? 'guardado às ' + U.horaLocal(E.guardadoEm) : 'nenhuma decisão tomada ainda') + '</span>' +
+      '<button type="button" class="botao pequeno perigo" data-acao="limpar-conciliacao" title="Apagar tudo o que foi feito no Passo ③ de um mês e começar do zero">🧹 Limpar conciliação</button></div></div>' +
       desenharPonte() +
       '<div class="abas" id="abas" role="tablist"></div>' +
       '<div class="filtros" id="filtros"></div>' +
@@ -609,6 +610,53 @@
     gravar('terceiro-ab-automatico', texto);
   }
 
+  // Limpar a conciliação de um mês (Dony, 14/09/2026: "escolho o mês da conciliação e limpo ela
+  // todinha"). Apaga o registro do Passo ③ desse mês: conciliações com ID (automáticas e à mão),
+  // observações e fornecedores ajustados à mão. Os arquivos continuam guardados; o registro vai
+  // para _apagados (nada some de verdade).
+  async function limparConciliacao() {
+    const arm = app().armazenamento;
+    let registros;
+    try {
+      registros = (await arm.conciliacoes(E.codigo)).filter((c) => c.tipo === 'fornecedor_pagar')
+        .sort((a, b) => (a.competencia < b.competencia ? 1 : a.competencia > b.competencia ? -1 : 0));
+    } catch (e) { T.avisoRapido(T.mensagemDeErro(e), 'erro'); return; }
+    if (!registros.length) { T.avisoRapido('Nenhuma conciliação do Passo ③ gravada nesta empresa: não há o que limpar.', 'ok'); return; }
+    const descreve = (c) => {
+      const gs = (c.decisoes && c.decisoes.conciliacoesAB) || [];
+      const mao = gs.filter((g) => g.regra === 'manual').length;
+      return U.nomeCompetencia(c.competencia) + ' — ' + gs.length.toLocaleString('pt-BR') + ' conciliação(ões) com ID' + (mao ? ' (' + mao + ' à mão)' : '') +
+        (c.atualizadoEm ? ' · gravada por ' + (c.atualizadoPor || '?') + ' em ' + U.dataHoraLocal(c.atualizadoEm) : '');
+    };
+    const inicial = registros.find((c) => c.competencia === E.comp) || registros[0];
+    const mesDe = (id) => U.nomeCompetencia((registros.find((c) => c.id === id) || inicial).competencia);
+    const escolhido = await T.janela({
+      titulo: 'Limpar a conciliação do Passo ③',
+      corpo: '<div class="campo"><label for="mes-limpar">Mês da conciliação</label><select id="mes-limpar">' +
+        registros.map((c) => '<option value="' + T.esc(c.id) + '"' + (c === inicial ? ' selected' : '') + '>' + T.esc(descreve(c)) + '</option>').join('') + '</select></div>' +
+        '<p style="line-height:1.55;margin-top:12px">Apaga <b>tudo</b> o que foi feito no Passo ③ desse mês: as conciliações com ID (automáticas e à mão), as observações e os fornecedores ajustados à mão. Depois é como começar do zero.</p>' +
+        '<p class="suave pequeno" style="line-height:1.5">Os arquivos (agings e razão) continuam guardados. Uma cópia do que foi apagado vai para a pasta <b>_apagados</b> da pasta de dados — nada some de verdade.</p>',
+      botoes: [{ texto: 'Cancelar', valor: null }, { texto: 'Limpar ' + mesDe(inicial.id), tipo: 'perigo', antes: (j) => j.querySelector('#mes-limpar').value }],
+      aoAbrir: (j) => {
+        const sel = j.querySelector('#mes-limpar');
+        sel.addEventListener('change', () => { j.querySelector('footer .perigo').textContent = 'Limpar ' + mesDe(sel.value); });
+      },
+    });
+    if (!escolhido) return;
+    const reg = registros.find((c) => c.id === escolhido);
+    if (!reg) return;
+    try {
+      await E.fila; // gravação pendente termina antes (senão ela recriaria o registro apagado)
+      const ok = await arm.apagarConciliacao(reg.id);
+      const gs = (reg.decisoes && reg.decisoes.conciliacoesAB) || [];
+      await arm.registrarNoLog({ codigo: E.codigo, acao: 'terceiro-limpar', alvo: reg.id, detalhe: U.nomeCompetencia(reg.competencia) + ' · ' + gs.length + ' conciliações' });
+      T.avisoRapido('Conciliação de ' + U.nomeCompetencia(reg.competencia) + ' limpa' + (ok ? ' (cópia em _apagados).' : '.'), 'ok', 6000);
+      if (reg.competencia === E.comp) app().mostrarRota();
+    } catch (e) {
+      T.avisoRapido('Não foi possível limpar: ' + T.mensagemDeErro(e), 'erro');
+    }
+  }
+
   // Desfazer em lote (Dony, 14/09/2026: "desfazer as automáticas e desfazer as manuais também").
   // Uma por uma continua no botão Desfazer de cada ID, na lista.
   async function desfazerEmLote(manuais) {
@@ -797,6 +845,7 @@
     if (acao) {
       const a = acao.getAttribute('data-acao');
       if (a === 'config-abas') await configurarAbas();
+      else if (a === 'limpar-conciliacao') await limparConciliacao();
       else if (a === 'conciliar-tudo') conciliarTudo();
       else if (a === 'desfazer-automaticas') await desfazerEmLote(false);
       else if (a === 'desfazer-manuais') await desfazerEmLote(true);
