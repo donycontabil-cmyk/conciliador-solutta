@@ -87,7 +87,9 @@
     partes.push('<div class="grupo">Programa</div>');
     partes.push('<a href="#/suporte" class="' + (r.nome === 'suporte' ? 'ativo' : '') + '">🔎 Ver o desenho de um arquivo<span class="sub">para adaptar a um sistema novo</span></a>');
     partes.push('<a href="#/sobre" class="' + (r.nome === 'sobre' ? 'ativo' : '') + '">ℹ️ Onde ficam os dados<span class="sub">hoje e no servidor da Solutta</span></a>');
-    partes.push('<div class="rodape-menu">' + T.esc(App.config.programa) + ' · ' + T.esc(App.config.versao) + '</div>');
+    const build = App.config.build && App.config.build !== 'local' ? 'versão de ' + App.config.build : 'desenvolvimento (neste computador)';
+    partes.push('<div class="rodape-menu"><b>' + T.esc(App.config.programa) + '</b> · ' + T.esc(App.config.versao) +
+      '<br><span title="Data e hora da versão publicada. Depois de atualizar, dê Ctrl+F5 e confira se mudou.">' + T.esc(build) + '</span></div>');
     menu.innerHTML = partes.join('');
   }
 
