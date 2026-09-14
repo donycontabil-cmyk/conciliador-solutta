@@ -10,8 +10,8 @@
   // Armadilha 23: lista de <script> alterada sem conferir -> módulo não carrega, calado.
   // Aqui se confere: faltando algum, a tela diz qual.
   const MODULOS = ['CONFIG', 'XLSX', 'Util', 'LerPlanilha', 'LerRazao', 'LerFinanceiro', 'Familias', 'Leitor', 'MotorNomes',
-    'MotorReclass', 'MotorFechamento', 'LayoutAjustes', 'Demonstracao', 'Diagnostico', 'Armazenamento', 'ArmazenamentoPasta', 'ArmazenamentoMemoria',
-    'Tela', 'TelaPasta', 'TelaCarteira', 'TelaEmpresa', 'TelaFamilia', 'TelaSubir', 'TelaPasso1', 'TelaSuporte'];
+    'MotorReclass', 'MotorFechamento', 'MotorTerceiro', 'LayoutAjustes', 'Demonstracao', 'Diagnostico', 'Armazenamento', 'ArmazenamentoPasta', 'ArmazenamentoMemoria',
+    'Tela', 'TelaPasta', 'TelaCarteira', 'TelaEmpresa', 'TelaFamilia', 'TelaSubir', 'TelaPasso1', 'TelaPasso3', 'TelaSuporte'];
 
   const CHAVE_USUARIO = 'conciliador-solutta.usuario';
 
@@ -146,6 +146,7 @@
       else if (r.nome === 'empresa') await raiz.TelaEmpresa.mostrar(conteudo, r.codigo, conferir);
       else if (r.nome === 'familia') await raiz.TelaFamilia.mostrar(conteudo, r.codigo, r.familia, r.anoMes, conferir);
       else if (r.nome === 'passo' && r.passo === 'passo1') await raiz.TelaPasso1.mostrar(conteudo, r.codigo, r.anoMes, conferir);
+      else if (r.nome === 'passo' && r.passo === 'passo3') await raiz.TelaPasso3.mostrar(conteudo, r.codigo, r.anoMes, conferir);
       else conteudo.innerHTML = '<div class="aviso ambar">Esta tela não existe. <a href="#/">Voltar para as empresas</a>.</div>';
     } catch (e) {
       console.error(e);

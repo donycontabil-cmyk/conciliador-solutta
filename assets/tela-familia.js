@@ -111,8 +111,10 @@
     el.querySelector('#mes-antes').addEventListener('click', () => app().ir(base + U.anoMes(U.somarMeses(comp, -1))));
     el.querySelector('#mes-depois').addEventListener('click', () => app().ir(base + U.anoMes(U.somarMeses(comp, 1))));
 
+    const passo3 = concs.find((c) => c.id === 'F-' + codigo + '-fornecedor_pagar-' + U.anoMes(comp)) || null;
+    const arqs3 = raiz.TelaPasso3 ? raiz.TelaPasso3.arquivosDoTerceiro(metas, comp) : { agingAnterior: null, agingAtual: null, razao: null };
     desenharChecklist(el.querySelector('#checklist'), codigo, comp, checklist, fam);
-    desenharPassos(el.querySelector('#passos'), codigo, comp, fam, arqs, completo, passo1);
+    desenharPassos(el.querySelector('#passos'), codigo, comp, fam, arqs, completo, passo1, arqs3, passo3);
     desenharArquivos(el.querySelector('#arquivos'), doMes);
 
     // Subir arquivo continua liberado mesmo com o checklist pendente (Parte 7.1).
@@ -218,7 +220,7 @@
     });
   }
 
-  function desenharPassos(el, codigo, comp, fam, arqs, completo, passo1) {
+  function desenharPassos(el, codigo, comp, fam, arqs, completo, passo1, arqs3, passo3) {
     const base = '#/empresa/' + encodeURIComponent(codigo) + '/fornecedores/' + U.anoMes(comp) + '/';
     el.innerHTML = fam.passos.map((p) => {
       if (!p.construido) {
@@ -226,6 +228,7 @@
           '<p class="suave" style="line-height:1.5">' + T.esc(p.texto) + '</p>' +
           '<div class="acoes"><span class="pilula cinza">em construção · Etapa ' + p.etapa + '</span></div></div>';
       }
+      if (p.id === 'passo3') return cartaoTerceiro(p, codigo, comp, base, arqs3, passo3);
       const temF = arqs.F.length > 0;
       const temA = arqs.A.length > 0;
       const itens = [
@@ -249,6 +252,33 @@
         '<div class="acoes">' + (pode ? '<a class="botao primario" href="' + base + 'passo1">Abrir →</a>' : '<span class="botao primario travado" title="' + T.esc(porque) + '">Abrir →</span>') +
         '<button type="button" class="botao" data-subir>Subir o razão</button></div></div>';
     }).join('');
+  }
+
+  // Cartão do Passo ③ (aging): precisa do aging do mês passado, do aging do mês e do razão.
+  function cartaoTerceiro(p, codigo, comp, base, arqs3, passo3) {
+    const temAnt = !!arqs3.agingAnterior, temAtu = !!arqs3.agingAtual, temRaz = !!arqs3.razao;
+    const pode = temAnt && temAtu && temRaz;
+    const itens = [
+      linhaPrecisa(temAnt, 'Aging (contas a pagar) de ' + U.nomeCompetencia(U.somarMeses(comp, -1))),
+      linhaPrecisa(temAtu, 'Aging (contas a pagar) de ' + U.nomeCompetencia(comp)),
+      linhaPrecisa(temRaz, 'Razão de fornecedores de ' + U.nomeCompetencia(comp)),
+    ];
+    let estado, porque = '';
+    if (pode && passo3) estado = '<span class="pilula azul">em andamento</span>';
+    else if (pode) estado = '<span class="pilula verde">pronta para conciliar</span>';
+    else { estado = '<span class="pilula ambar">falta arquivo</span>'; porque = 'Suba os dois agings e o razão de fornecedores.'; }
+    const rs = passo3 && passo3.resumo;
+    const resumo = rs && typeof rs.diferenca === 'number'
+      ? '<p class="suave pequeno">Última gravação: ' + T.esc(passo3.atualizadoPor || '') + ' em ' + U.dataHoraLocal(passo3.atualizadoEm) +
+        '<br>' + rs.batem + ' batem · ' + rs.comDiferenca + ' com diferença · diferença ' + T.moeda(rs.diferenca) + '</p>' : '';
+    return '<div class="cartao passo"><div class="linha-flex"><span class="numero">' + p.numero + '</span><h3 style="flex:1">' + T.esc(p.titulo) + '</h3>' + estado + '</div>' +
+      '<p class="suave" style="line-height:1.5">' + T.esc(p.texto) + '</p><ul class="precisa">' + itens.join('') + '</ul>' + resumo +
+      (porque ? '<p class="pequeno" style="color:var(--ambar)">' + T.esc(porque) + '</p>' : '') +
+      '<div class="acoes">' + (pode ? '<a class="botao primario" href="' + base + 'passo3">Abrir →</a>' : '<span class="botao primario travado" title="' + T.esc(porque) + '">Abrir →</span>') +
+      '<button type="button" class="botao" data-subir>Subir arquivo</button></div></div>';
+  }
+  function linhaPrecisa(tem, texto) {
+    return '<li>' + (tem ? '<span class="ok">✓</span>' : '<span class="falta">✗</span>') + '<span>' + T.esc(texto) + (tem ? '' : ' <span class="falta pequeno">falta</span>') + '</span></li>';
   }
 
   function desenharArquivos(el, doMes) {

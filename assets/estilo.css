@@ -295,3 +295,13 @@ details.detalhe-linha summary { cursor: pointer; color: var(--primaria); font-si
 .sugestoes-dono { border: 1px solid var(--borda); border-radius: 8px; max-height: 220px; overflow: auto; margin-top: 8px; }
 .sugestoes-dono button { display: block; width: 100%; text-align: left; border: 0; border-bottom: 1px solid #eef0f3; background: #fff; padding: 7px 10px; cursor: pointer; }
 .sugestoes-dono button:hover { background: var(--fundo); }
+
+/* ---------- Ponte do Passo ③ ---------- */
+.ponte { display: flex; align-items: stretch; gap: 10px; flex-wrap: wrap; }
+.ponte b { color: var(--texto-suave); align-self: center; font-size: 15px; }
+.ponte-item { display: flex; flex-direction: column; gap: 2px; padding: 8px 12px; border: 1px solid var(--borda); border-radius: 8px; background: #fbfcfd; min-width: 130px; }
+.ponte-item .rotulo { font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--texto-suave); }
+.ponte-item .num { font-size: 17px; font-variant-numeric: tabular-nums; }
+.ponte-item .num.forte { font-weight: 700; color: var(--primaria-escura); }
+td.num .forte, td .forte { font-weight: 700; }
+td.num.forte { font-weight: 700; }
