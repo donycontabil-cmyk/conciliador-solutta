@@ -106,16 +106,27 @@
         ? '<div class="linha-flex" style="margin-top:10px"><button type="button" class="botao" id="bt-exemplo">🧪 Usar os razões de exemplo</button>' +
           '<span class="suave pequeno">Gera os razões de fornecedores e de adiantamento da empresa de demonstração (janeiro a julho/2026), com fornecedores, CNPJs e valores inventados.</span></div>'
         : '') +
-      '<div id="arquivos" style="margin-top:12px"></div>';
+      '<div id="arquivos" style="margin-top:12px"></div>' +
+      '<div id="inativos"></div>';
 
     el.querySelector('#mes-antes').addEventListener('click', () => app().ir(base + U.anoMes(U.somarMeses(comp, -1))));
     el.querySelector('#mes-depois').addEventListener('click', () => app().ir(base + U.anoMes(U.somarMeses(comp, 1))));
 
     const passo3 = concs.find((c) => c.id === 'F-' + codigo + '-fornecedor_pagar-' + U.anoMes(comp)) || null;
     const arqs3 = raiz.TelaPasso3 ? raiz.TelaPasso3.arquivosDoTerceiro(metas, comp) : { agingAnterior: null, agingAtual: null, razao: null };
-    desenharChecklist(el.querySelector('#checklist'), codigo, comp, checklist, fam);
-    desenharPassos(el.querySelector('#passos'), codigo, comp, fam, arqs, completo, passo1, arqs3, passo3);
+    const inativos = passosInativos(emp, fam);
+    desenharChecklist(el.querySelector('#checklist'), codigo, comp, checklist, fam, inativos);
+    desenharPassos(el.querySelector('#passos'), codigo, comp, fam, arqs, completo, passo1, arqs3, passo3, inativos);
     desenharArquivos(el.querySelector('#arquivos'), doMes);
+    desenharInativos(el.querySelector('#inativos'), fam, inativos);
+    const alternar = (ev) => {
+      const b = ev.target.closest('[data-inativar], [data-ativar]');
+      if (!b) return;
+      const inativar = b.hasAttribute('data-inativar');
+      alternarPasso(codigo, fam, b.getAttribute(inativar ? 'data-inativar' : 'data-ativar'), inativar, b);
+    };
+    el.querySelector('#passos').addEventListener('click', alternar);
+    el.querySelector('#inativos').addEventListener('click', alternar);
 
     // Subir arquivo continua liberado mesmo com o checklist pendente (Parte 7.1).
     const zona = el.querySelector('#soltar');
@@ -176,12 +187,58 @@
     });
   }
 
-  function desenharChecklist(el, codigo, comp, registro, fam) {
+  // ------------------------------------------------------------------
+  // Passos inativos (Dony, 14/09/2026): cada empresa pode inativar, por família, o passo que
+  // não usa (ex.: ① sem conta de adiantamento). O cartão sai da grade e fica escondido lá
+  // embaixo, em "Passos inativos", com o botão Ativar para quando passar a ter.
+  // ------------------------------------------------------------------
+  function passosInativos(emp, fam) {
+    return new Set(((emp && emp.passosInativos) || {})[fam.id] || []);
+  }
+
+  async function alternarPasso(codigo, fam, passoId, inativar, botao) {
+    const p = fam.passos.find((x) => x.id === passoId);
+    if (!p) return;
+    const arm = app().armazenamento;
+    if (botao) botao.disabled = true;
+    try {
+      // Reler antes de gravar: outra pessoa pode ter mexido no cadastro.
+      const emp = (await arm.empresas()).find((e) => String(e.codigo) === String(codigo));
+      const todos = Object.assign({}, emp.passosInativos || {});
+      const daFamiliaAtual = new Set(todos[fam.id] || []);
+      if (inativar) daFamiliaAtual.add(passoId); else daFamiliaAtual.delete(passoId);
+      todos[fam.id] = Array.from(daFamiliaAtual);
+      await arm.salvarEmpresa(Object.assign({}, emp, { passosInativos: todos }));
+      await arm.registrarNoLog({ codigo, acao: inativar ? 'passo-inativado' : 'passo-ativado', alvo: fam.id + '/' + passoId, detalhe: p.numero + ' ' + p.titulo });
+      T.avisoRapido(inativar
+        ? p.numero + ' ' + p.titulo + ': inativado nesta empresa. Para voltar, lá embaixo em "Passos inativos".'
+        : p.numero + ' ' + p.titulo + ': ativado de novo.', 'ok', 5000);
+      app().mostrarRota();
+    } catch (e) {
+      if (botao) botao.disabled = false;
+      T.avisoRapido(T.mensagemDeErro(e), 'erro');
+    }
+  }
+
+  function desenharInativos(el, fam, inativos) {
+    const lista = fam.passos.filter((p) => inativos.has(p.id));
+    if (!lista.length) { el.innerHTML = ''; return; }
+    el.innerHTML = '<details class="cartao inativos"><summary>Passos inativos nesta empresa (' + lista.length + ')</summary>' +
+      '<p class="suave pequeno" style="margin:4px 0 8px">Não aparecem na grade de passos. Ative quando a empresa passar a usar.</p>' +
+      lista.map((p) => '<div class="linha-inativo"><span class="numero">' + p.numero + '</span>' +
+        '<span style="flex:1"><b>' + T.esc(p.titulo) + '</b><br><span class="suave pequeno">' + T.esc(p.texto) + '</span></span>' +
+        '<button type="button" class="botao pequeno" data-ativar="' + p.id + '">Ativar</button></div>').join('') +
+      '</details>';
+  }
+
+  function desenharChecklist(el, codigo, comp, registro, fam, inativos) {
     const podeMarcar = app().usuario.podeLancar !== false;
     const decisoes = (registro && registro.decisoes) || {};
     const completo = checklistCompleto(registro);
+    const alguemEspera = fam.passos.some((p) => p.construido && !p.semChecklist && !(inativos && inativos.has(p.id)));
     el.innerHTML = '<div class="linha-flex" style="margin-bottom:6px"><h3>Antes de conciliar</h3>' +
-      (completo ? '<span class="pilula verde">liberado</span>' : '<span class="pilula cinza">os passos esperam os dois itens</span>') + '</div>' +
+      (completo ? '<span class="pilula verde">liberado</span>'
+        : '<span class="pilula cinza">' + (alguemEspera ? 'os passos esperam os dois itens' : 'nenhum passo ativo depende destes itens') + '</span>') + '</div>' +
       fam.checklist.map((item) => {
         const d = decisoes[item.id] || {};
         return '<label class="item"><input type="checkbox" data-item="' + item.id + '"' + (d.ok ? ' checked' : '') + (podeMarcar ? '' : ' disabled') + '>' +
@@ -220,13 +277,22 @@
     });
   }
 
-  function desenharPassos(el, codigo, comp, fam, arqs, completo, passo1, arqs3, passo3) {
+  function botaoInativar(p) {
+    return '<button type="button" class="botao pequeno leve inativar" data-inativar="' + p.id + '" title="Esta empresa não usa este passo: ele sai daqui e fica em Passos inativos, lá embaixo">Inativar</button>';
+  }
+
+  function desenharPassos(el, codigo, comp, fam, arqs, completo, passo1, arqs3, passo3, inativos) {
     const base = '#/empresa/' + encodeURIComponent(codigo) + '/fornecedores/' + U.anoMes(comp) + '/';
-    el.innerHTML = fam.passos.map((p) => {
+    const ativos = fam.passos.filter((p) => !inativos.has(p.id));
+    if (!ativos.length) {
+      el.innerHTML = '<div class="cartao"><div class="vazio">Todos os passos desta família estão inativos nesta empresa. Ative em "Passos inativos", lá embaixo.</div></div>';
+      return;
+    }
+    el.innerHTML = ativos.map((p) => {
       if (!p.construido) {
         return '<div class="cartao passo em-construcao"><div class="linha-flex"><span class="numero">' + p.numero + '</span><h3 style="flex:1">' + T.esc(p.titulo) + '</h3></div>' +
           '<p class="suave" style="line-height:1.5">' + T.esc(p.texto) + '</p>' +
-          '<div class="acoes"><span class="pilula cinza">em construção · Etapa ' + p.etapa + '</span></div></div>';
+          '<div class="acoes"><span class="pilula cinza">em construção · Etapa ' + p.etapa + '</span>' + botaoInativar(p) + '</div></div>';
       }
       if (p.id === 'passo3') return cartaoTerceiro(p, codigo, comp, base, arqs3, passo3);
       const temF = arqs.F.length > 0;
@@ -250,7 +316,7 @@
         '<p class="suave" style="line-height:1.5">' + T.esc(p.texto) + '</p><ul class="precisa">' + itens.join('') + '</ul>' + resumo +
         (porque ? '<p class="pequeno" style="color:var(--ambar)">' + T.esc(porque) + '</p>' : '') +
         '<div class="acoes">' + (pode ? '<a class="botao primario" href="' + base + 'passo1">Abrir →</a>' : '<span class="botao primario travado" title="' + T.esc(porque) + '">Abrir →</span>') +
-        '<button type="button" class="botao" data-subir>Subir o razão</button></div></div>';
+        '<button type="button" class="botao" data-subir>Subir o razão</button>' + botaoInativar(p) + '</div></div>';
     }).join('');
   }
 
@@ -275,7 +341,7 @@
       '<p class="suave" style="line-height:1.5">' + T.esc(p.texto) + '</p><ul class="precisa">' + itens.join('') + '</ul>' + resumo +
       (porque ? '<p class="pequeno" style="color:var(--ambar)">' + T.esc(porque) + '</p>' : '') +
       '<div class="acoes">' + (pode ? '<a class="botao primario" href="' + base + 'passo3">Abrir →</a>' : '<span class="botao primario travado" title="' + T.esc(porque) + '">Abrir →</span>') +
-      '<button type="button" class="botao" data-subir>Subir arquivo</button></div></div>';
+      '<button type="button" class="botao" data-subir>Subir arquivo</button>' + botaoInativar(p) + '</div></div>';
   }
   function linhaPrecisa(tem, texto) {
     return '<li>' + (tem ? '<span class="ok">✓</span>' : '<span class="falta">✗</span>') + '<span>' + T.esc(texto) + (tem ? '' : ' <span class="falta pequeno">falta</span>') + '</span></li>';

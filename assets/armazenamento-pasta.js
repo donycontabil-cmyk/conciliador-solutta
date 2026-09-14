@@ -362,6 +362,17 @@
       return pasta(dirEmpresas, [nome], true);
     }
 
+    function limparPassosInativos(valor) {
+      const limpo = {};
+      if (!valor || typeof valor !== 'object') return limpo;
+      for (const familia of Object.keys(valor)) {
+        if (!/^[a-z0-9_]{1,30}$/.test(familia) || !Array.isArray(valor[familia])) continue;
+        const passos = Array.from(new Set(valor[familia].filter((p) => typeof p === 'string' && /^[a-z0-9_]{1,30}$/.test(p)))).sort();
+        if (passos.length) limpo[familia] = passos;
+      }
+      return limpo;
+    }
+
     async function salvarEmpresa(empresa) {
       exigirConexao();
       const codigo = validarCodigo(empresa && empresa.codigo);
@@ -383,6 +394,11 @@
         atualizadoEm: agora,
         atualizadoPor: quem(),
       };
+      // Passos que a empresa não usa, por família (Dony, 14/09/2026: "inativar e poder ativar
+      // quando passar a ter"): { fornecedores: ['passo1', 'passo11'] }. Sem o campo na chamada
+      // (ex.: editar o cadastro), fica o que já estava.
+      const inativos = limparPassosInativos(empresa.passosInativos !== undefined ? empresa.passosInativos : (anterior && anterior.passosInativos));
+      if (Object.keys(inativos).length) registro.passosInativos = inativos;
       if (i >= 0) lista[i] = registro; else lista.push(registro);
       await gravar(raiz, 'empresas.json', JSON.stringify(lista, null, 2));
       await pastaDaEmpresa(codigo, true);

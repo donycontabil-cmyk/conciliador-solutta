@@ -272,7 +272,72 @@
       (x.nome < y.nome ? -1 : x.nome > y.nome ? 1 : 0) || x.ordem - y.ordem;
   }
 
-  // Busca da aba: "#12" = a conciliação 12; número = documento; texto = fornecedor ou histórico.
+  // Filtros de valor e de data (Dony, 14/09/2026: "filtrar por valor, por data, por fornecedor
+  // ou por documento, tanto na parte A quanto na parte B").
+  // Valor: "1.236,55" acha esse valor com ou sem sinal; um pedaço ("1.236") acha quem contém;
+  // faixa "100 a 500" (sem sinal).
+  function filtroValor(texto) {
+    const t = String(texto || '').replace(/R\$\s*/i, '').trim();
+    if (!t) return null;
+    const faixa = t.split(/\s+(?:a|até|ate)\s+/i);
+    if (faixa.length === 2) {
+      const de = U.paraNumero(faixa[0]), ate = U.paraNumero(faixa[1]);
+      if (de !== null && ate !== null) {
+        const min = U.centavos(Math.min(Math.abs(de), Math.abs(ate))), max = U.centavos(Math.max(Math.abs(de), Math.abs(ate)));
+        return (x) => Math.abs(x.valor) >= min && Math.abs(x.valor) <= max;
+      }
+    }
+    const pedaco = t.replace(/^[-+]\s*/, '').replace(/\s+/g, '');
+    const semPonto = pedaco.replace(/\./g, '');
+    return (x) => {
+      const f = U.formatarCentavos(Math.abs(x.valor));
+      return f.indexOf(pedaco) >= 0 || f.replace(/\./g, '').indexOf(semPonto) >= 0;
+    };
+  }
+  // Data (vencimento no aging, data do lançamento no razão): "08/07/2026", um pedaço
+  // ("07/2026") ou faixa "01/07/2026 a 15/07/2026" (sem o ano, vale o da competência).
+  function filtroData(texto) {
+    const t = String(texto || '').trim();
+    if (!t) return null;
+    const faixa = t.split(/\s+(?:a|até|ate)\s+/i);
+    if (faixa.length === 2) {
+      const numero = (s) => { s = s.trim(); if (/^\d{1,2}\/\d{1,2}$/.test(s)) s += '/' + E.comp.slice(0, 4); const d = U.lerData(s); return d ? d.numero : null; };
+      const de = numero(faixa[0]), ate = numero(faixa[1]);
+      if (de !== null && ate !== null) {
+        return (x) => { const d = U.lerData(x.data); return !!d && d.numero >= Math.min(de, ate) && d.numero <= Math.max(de, ate); };
+      }
+    }
+    return (x) => String(x.data || '').indexOf(t) >= 0;
+  }
+
+  // Filtros de UMA parte (cada lado tem os seus: o nome muda de um lado para o outro).
+  const CAMPOS_LADO = ['doc', 'forn', 'valor', 'data'];
+  function filtroDoLado(lado) {
+    const docTexto = String(filtro(lado + '.doc') || '').trim();
+    const doc = M.normalizarDocumento(docTexto);
+    const forn = String(filtro(lado + '.forn') || '').trim();
+    const fv = filtroValor(filtro(lado + '.valor'));
+    const fd = filtroData(filtro(lado + '.data'));
+    return (x) => (!docTexto || (!!doc && x.doc.indexOf(doc) >= 0)) && (!forn || combina(forn, x.nome, x.historico || '')) &&
+      (!fv || fv(x)) && (!fd || fd(x));
+  }
+  function filtrosDoLadoHtml(lado) {
+    const campo = (nome, texto, dica) => {
+      const v = filtro(lado + '.' + nome);
+      return '<input type="search" data-filtro="' + lado + '.' + nome + '" class="' + (v ? 'ativo' : '') + '" placeholder="' + texto + '" title="' + T.esc(dica) + '" value="' + T.esc(v) + '">';
+    };
+    const algum = CAMPOS_LADO.some((n) => filtro(lado + '.' + n));
+    return '<div class="filtros-lado">' +
+      campo('doc', 'Documento', 'Número do documento, ou parte dele') +
+      campo('forn', 'Fornecedor', 'Nome do fornecedor, ou pedaço do histórico') +
+      campo('valor', 'Valor', 'Valor (1.236,55), parte dele, ou faixa: 100 a 500 — com ou sem sinal') +
+      campo('data', 'Data', 'Data (08/07/2026), parte dela (07/2026), ou faixa: 01/07 a 15/07') +
+      '<button type="button" class="lapis" data-limpar-lado="' + lado + '" title="Limpar os filtros desta parte"' + (algum ? '' : ' disabled') + '>✕</button>' +
+      '</div>';
+  }
+
+  // Busca de cima (vale para os dois lados e para a lista): "#12" = a conciliação 12;
+  // valor ("791,43"); data ("08/07/2026"); número = documento; texto = fornecedor ou histórico.
   function buscaAB(busca) {
     const q = String(busca || '').trim();
     if (!q) return { item: () => true, grupo: () => true };
@@ -281,8 +346,11 @@
       const n = Number(mId[1]);
       return { item: (x) => { const g = E.idDoItem.get(x.id); return !!g && g.id === n; }, grupo: (g) => g.id === n };
     }
-    const dig = /^[\d.\-\/ ]+$/.test(q) ? M.normalizarDocumento(q) : '';
-    const item = (x) => (dig ? x.doc.indexOf(dig) >= 0 : combina(q, x.nome, x.historico || ''));
+    let item;
+    if (/^[-+]?\s*(R\$\s*)?\d[\d.]*,\d{1,2}$/i.test(q) || /^\d[\d.]*(,\d{1,2})?\s+(a|até|ate)\s+\d[\d.]*(,\d{1,2})?$/i.test(q)) item = filtroValor(q);
+    else if (/^\d{1,2}\/\d{1,2}(\/\d{2,4})?$/.test(q)) item = filtroData(q);
+    else if (/^[\d.\-\/ ]+$/.test(q)) { const dig = M.normalizarDocumento(q); item = (x) => !!dig && x.doc.indexOf(dig) >= 0; }
+    else item = (x) => combina(q, x.nome, x.historico || '');
     return { item, grupo: (g) => g.a.concat(g.b).some((id) => { const x = E.itens.porId.get(id); return x && item(x); }) };
   }
 
@@ -299,11 +367,13 @@
     const mostrar = filtro('mostrar');            // '' = em aberto · 'conciliados' · 'todos'
     const b = buscaAB(busca);
     const naLista = (x) => (mostrar === 'todos' || (mostrar === 'conciliados' ? E.idDoItem.has(x.id) : !E.idDoItem.has(x.id))) && b.item(x);
-    const listaA = it.A.filter((x) => (E.incluirAnterior || x.fonte !== 'anterior') && naLista(x)).sort(ordemDoc);
-    const listaB = it.B.filter(naLista).sort(ordemDoc);
+    const doLadoA = filtroDoLado('A'), doLadoB = filtroDoLado('B');
+    const listaA = it.A.filter((x) => (E.incluirAnterior || x.fonte !== 'anterior') && naLista(x) && doLadoA(x)).sort(ordemDoc);
+    const listaB = it.B.filter((x) => naLista(x) && doLadoB(x)).sort(ordemDoc);
+    E.listaA = listaA; E.listaB = listaB;
 
     E.el.querySelector('#filtros').innerHTML =
-      '<input type="search" class="busca" data-filtro="busca" placeholder="Documento, fornecedor, histórico ou #ID" value="' + T.esc(busca) + '">' +
+      '<input type="search" class="busca" data-filtro="busca" placeholder="Busca nos dois lados: documento, fornecedor, valor, data ou #ID" title="Vale para a Parte A, a Parte B e a lista de conciliações. Cada parte tem também os seus filtros." value="' + T.esc(busca) + '">' +
       '<select class="filtro" data-filtro="mostrar">' + [['', 'Em aberto'], ['conciliados', 'Conciliados'], ['todos', 'Todos']].map((o) =>
         '<option value="' + o[0] + '"' + (mostrar === o[0] ? ' selected' : '') + '>' + o[1] + '</option>').join('') + '</select>' +
       '<label class="linha-flex" style="gap:6px"><input type="checkbox" id="ab-anterior"' + (E.incluirAnterior ? ' checked' : '') + '> <span class="pequeno">Parte A = aging ' + T.esc(E.entrada.mesAnterior) + ' + razão</span></label>' +
@@ -353,9 +423,11 @@
 
   function colunaAB(lado, titulo, sub, itens, rot) {
     const total = itens.reduce((s, x) => s + x.valor, 0);
+    const filtrado = CAMPOS_LADO.some((n) => filtro(lado + '.' + n));
     return '<div class="cartao corpo coluna-ab"><div class="linha-flex" style="margin-bottom:6px"><h3 style="flex:1">' + T.esc(titulo) + '</h3>' +
       '<span class="pilula ' + (lado === 'A' ? 'azul' : 'ambar') + '" title="Soma da lista abaixo">' + U.formatarCentavos(total) + '</span></div>' +
-      '<p class="suave pequeno" style="margin:0 0 8px">' + T.esc(sub) + ' · ' + itens.length.toLocaleString('pt-BR') + ' ' + rot + '</p>' +
+      '<p class="suave pequeno" style="margin:0 0 8px">' + T.esc(sub) + ' · ' + itens.length.toLocaleString('pt-BR') + ' ' + rot + (filtrado ? ' <b>(filtrado)</b>' : '') + '</p>' +
+      filtrosDoLadoHtml(lado) +
       '<div id="col' + lado + '"></div></div>';
   }
 
@@ -363,7 +435,7 @@
     const sel = lado === 'A' ? E.selA : E.selB;
     return {
       alta: true, porPagina: 200,
-      cabecalho: '<th class="caixa"><input type="checkbox" data-marca-todos="' + lado + '" title="Marcar os em aberto desta lista"></th><th>Documento</th><th>Fornecedor</th><th>Data · origem</th><th class="num">Valor</th><th>ID</th>',
+      cabecalho: '<th class="caixa"><input type="checkbox" data-marca-todos="' + lado + '" title="Marcar todos os em aberto desta lista (com os filtros de agora)"></th><th>Documento</th><th>Fornecedor</th><th>Data · origem</th><th class="num">Valor</th><th>ID</th>',
       linhas: itens, vazio: 'Nada nesta lista.',
       linha: (x) => {
         const g = E.idDoItem.get(x.id);
@@ -384,14 +456,18 @@
     const barra = E.el.querySelector('#barra-ab'); if (!barra) return;
     const sa = somaSel(E.selA), sb = somaSel(E.selB), dif = sa - sb;
     const nSel = E.selA.size + E.selB.size;
-    if (!nSel) { barra.innerHTML = '<p class="suave pequeno" style="margin:10px 0">À mão: marque itens na Parte A e/ou na Parte B. Quando o valor marcado bater, clique em <b>Conciliar os marcados</b> — ganha o próximo ID.</p>'; return; }
+    if (!nSel) { barra.innerHTML = '<p class="suave pequeno" style="margin:10px 0">Para conciliar à mão: marque os itens na Parte A e/ou na Parte B — aparece embaixo a opção <b>Conciliar manualmente</b>, que cria o próximo ID.</p>'; return; }
     const bate = Math.abs(dif) < 1;
-    barra.innerHTML = '<div class="barra-selecao" style="position:static;transform:none;margin:12px 0;max-width:none">' +
-      '<span>A: <b class="num">' + U.formatarCentavos(sa) + '</b> (' + E.selA.size + ')</span>' +
-      '<span>B: <b class="num">' + U.formatarCentavos(sb) + '</b> (' + E.selB.size + ')</span>' +
+    const naTela = new Set((E.listaA || []).concat(E.listaB || []).map((x) => x.id));
+    const fora = Array.from(E.selA).concat(Array.from(E.selB)).filter((id) => !naTela.has(id)).length;
+    // Barra fixa no rodapé: aparece assim que marca, sem precisar rolar a tela.
+    barra.innerHTML = '<div class="espaco-barra"></div><div class="barra-selecao" role="region" aria-label="Itens marcados">' +
+      '<span>Parte A: <b class="num">' + U.formatarCentavos(sa) + '</b> (' + E.selA.size + ')</span>' +
+      '<span>Parte B: <b class="num">' + U.formatarCentavos(sb) + '</b> (' + E.selB.size + ')</span>' +
       '<span class="' + (bate ? 'ok' : 'falta') + '">' + (bate ? '✓ bate' : 'diferença ' + U.formatarCentavos(dif)) + '</span>' +
-      '<span class="explica">vira o ID #' + M.proximoIdAB(E.decisoes.conciliacoesAB) + ' · ' + TIPO_AB[M.tipoAB(E.selA.size, E.selB.size)] + '</span>' +
-      '<button type="button" class="botao primario" data-acao="conciliar-ab">Conciliar os marcados' + (bate ? '' : ' assim mesmo') + '</button>' +
+      '<span class="explica">vira o ID #' + M.proximoIdAB(E.decisoes.conciliacoesAB) + ' · ' + TIPO_AB[M.tipoAB(E.selA.size, E.selB.size)] +
+      (fora ? ' · ' + fora + ' marcado(s) fora do filtro' : '') + '</span>' +
+      '<button type="button" class="botao primario" data-acao="conciliar-ab">✓ Conciliar manualmente</button>' +
       '<button type="button" class="botao" data-acao="limpar-ab">Limpar</button></div>';
   }
 
@@ -414,7 +490,8 @@
           '<td><span class="selo ' + (g.regra === 'manual' ? 'mao' : 'opcional') + '" title="' + T.esc(M.REGRAS_AB[g.regra] || '') + '">' + T.esc(COMO_AB[g.regra] || g.regra) + '</span>' +
           (g.aviso === 'baixa-antes-da-nota' ? '<br><span class="selo suspeita" title="A baixa tem data anterior à nota (7.11): confira">baixa antes da nota</span>' : '') + '</td>' +
           '<td class="num">' + T.nome(g.documento) + '</td>' +
-          '<td class="nome">' + T.nome(g.nome) + (faltam ? '<br><span class="falta pequeno">' + faltam + ' item(ns) não estão mais nos arquivos</span>' : '') + '</td>' +
+          '<td class="nome">' + T.nome(g.nome) + (g.obs ? '<br><span class="suave pequeno">✎ ' + T.esc(g.obs) + '</span>' : '') +
+          (faltam ? '<br><span class="falta pequeno">' + faltam + ' item(ns) não estão mais nos arquivos</span>' : '') + '</td>' +
           T.tdValor(g.valorA) + T.tdValor(g.valorB) +
           '<td class="pequeno" style="white-space:nowrap">' + g.a.length + ' de A · ' + g.b.length + ' de B' + (Math.abs(dif) >= 1 ? '<br><span class="falta">diferença ' + U.formatarCentavos(dif) + '</span>' : '') + '</td>' +
           '<td class="pequeno suave">' + T.esc(g.quem || '') + (g.quando ? '<br>' + U.dataHoraLocal(g.quando) : '') + '</td>' +
@@ -483,10 +560,24 @@
     gravar('terceiro-ab-desfazer-automaticas', auto.length + ' conciliações');
   }
 
-  function conciliarAB() {
+  async function conciliarAB() {
     const a = Array.from(E.selA), b = Array.from(E.selB);
     if (!a.length && !b.length) return;
     const valorA = somaSel(E.selA), valorB = somaSel(E.selB);
+    let obs = '';
+    if (Math.abs(valorA - valorB) >= 1) {
+      // Diferença não bloqueia: pergunta mostrando os dois valores (Parte 7.11), com o motivo.
+      const r = await T.janela({
+        titulo: 'Conciliar manualmente com diferença?',
+        corpo: '<p style="line-height:1.7">Parte A: <b>' + T.moeda(valorA) + '</b> (' + a.length + ' item(ns))<br>Parte B: <b>' + T.moeda(valorB) + '</b> (' + b.length + ' item(ns))<br>' +
+          '<span class="falta">Diferença: <b>' + T.moeda(valorA - valorB) + '</b></span></p>' +
+          '<div class="campo" style="margin-top:10px"><label for="obs-ab">Observação (por que concilia assim)</label><input id="obs-ab" autocomplete="off" maxlength="200" placeholder="Ex.: juros pagos no boleto" autofocus></div>',
+        botoes: [{ texto: 'Cancelar', valor: null }, { texto: 'Conciliar com diferença', tipo: 'primario', antes: (j) => ({ obs: j.querySelector('#obs-ab').value.trim() }) }],
+        aoAbrir: (j) => { j.querySelector('#obs-ab').addEventListener('keydown', (e) => { if (e.key === 'Enter') j.querySelector('footer .primario').click(); }); },
+      });
+      if (!r) return;
+      obs = r.obs;
+    }
     const itens = a.concat(b).map((id) => E.itens.porId.get(id)).filter(Boolean);
     const docs = Array.from(new Set(itens.map((x) => x.doc).filter(Boolean)));
     const g = {
@@ -495,6 +586,7 @@
       nome: ((itens.find((x) => x.chave !== SEM) || itens[0] || {}).nome) || '',
       a, b, valorA, valorB, quem: app().usuario.nome, quando: U.agoraISO(),
     };
+    if (obs) g.obs = obs;
     E.decisoes.conciliacoesAB = E.decisoes.conciliacoesAB.concat([g]);
     E.selA = new Set(); E.selB = new Set();
     historico('Conciliou à mão #' + g.id + ' (' + TIPO_AB[g.tipo] + '): ' + a.length + ' de A e ' + b.length + ' de B (' + U.formatarCentavos(valorA) + ' × ' + U.formatarCentavos(valorB) + ')');
@@ -636,8 +728,15 @@
       const a = acao.getAttribute('data-acao');
       if (a === 'conciliar-tudo') conciliarTudo();
       else if (a === 'desfazer-automaticas') await desfazerAutomaticas();
-      else if (a === 'conciliar-ab') conciliarAB();
+      else if (a === 'conciliar-ab') await conciliarAB();
       else if (a === 'limpar-ab') { E.selA = new Set(); E.selB = new Set(); redesenhaMantendo(); }
+      return;
+    }
+    const limparLado = ev.target.closest('[data-limpar-lado]');
+    if (limparLado) {
+      const lado = limparLado.getAttribute('data-limpar-lado');
+      CAMPOS_LADO.forEach((n) => { delete E.filtros['ab.' + lado + '.' + n]; });
+      redesenhaMantendo();
       return;
     }
     const abrirAb = ev.target.closest('[data-abrir-ab]');
@@ -677,11 +776,16 @@
     }
     const todos = ev.target.closest('[data-marca-todos]');
     if (todos) {
+      // Marca a lista INTEIRA desta parte (com os filtros de agora), não só as linhas já desenhadas.
       const lado = todos.getAttribute('data-marca-todos'); const set = lado === 'A' ? E.selA : E.selB;
+      ((lado === 'A' ? E.listaA : E.listaB) || []).forEach((x) => {
+        if (E.idDoItem.has(x.id)) return;
+        if (todos.checked) set.add(x.id); else set.delete(x.id);
+      });
       E.el.querySelectorAll('#col' + lado + ' [data-item]').forEach((c) => {
-        c.checked = todos.checked; const id = c.getAttribute('data-id');
-        if (todos.checked) set.add(id); else set.delete(id);
-        c.closest('tr').classList.toggle('destaque', todos.checked);
+        const marcado = set.has(c.getAttribute('data-id'));
+        c.checked = marcado;
+        c.closest('tr').classList.toggle('destaque', marcado);
       });
       atualizarBarraAB();
     }
