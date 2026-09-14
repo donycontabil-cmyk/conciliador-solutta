@@ -10,8 +10,8 @@
   // Armadilha 23: lista de <script> alterada sem conferir -> módulo não carrega, calado.
   // Aqui se confere: faltando algum, a tela diz qual.
   const MODULOS = ['CONFIG', 'XLSX', 'Util', 'LerPlanilha', 'LerRazao', 'LerFinanceiro', 'Familias', 'Leitor', 'MotorNomes',
-    'MotorReclass', 'MotorFechamento', 'LayoutAjustes', 'Demonstracao', 'Armazenamento', 'ArmazenamentoPasta', 'ArmazenamentoMemoria',
-    'Tela', 'TelaPasta', 'TelaCarteira', 'TelaEmpresa', 'TelaFamilia', 'TelaSubir', 'TelaPasso1'];
+    'MotorReclass', 'MotorFechamento', 'LayoutAjustes', 'Demonstracao', 'Diagnostico', 'Armazenamento', 'ArmazenamentoPasta', 'ArmazenamentoMemoria',
+    'Tela', 'TelaPasta', 'TelaCarteira', 'TelaEmpresa', 'TelaFamilia', 'TelaSubir', 'TelaPasso1', 'TelaSuporte'];
 
   const CHAVE_USUARIO = 'conciliador-solutta.usuario';
 
@@ -85,6 +85,7 @@
         (r.familia === 'fornecedores' ? 'ativo' : '') + '">📦 Fornecedores<span class="sub">checklist, passos e arquivos</span></a>');
     }
     partes.push('<div class="grupo">Programa</div>');
+    partes.push('<a href="#/suporte" class="' + (r.nome === 'suporte' ? 'ativo' : '') + '">🔎 Ver o desenho de um arquivo<span class="sub">para adaptar a um sistema novo</span></a>');
     partes.push('<a href="#/sobre" class="' + (r.nome === 'sobre' ? 'ativo' : '') + '">ℹ️ Onde ficam os dados<span class="sub">hoje e no servidor da Solutta</span></a>');
     partes.push('<div class="rodape-menu">' + T.esc(App.config.programa) + ' · ' + T.esc(App.config.versao) + '</div>');
     menu.innerHTML = partes.join('');
@@ -98,6 +99,7 @@
     const p = h.split('/').filter(Boolean);
     if (!p.length) return { nome: 'carteira' };
     if (p[0] === 'sobre') return { nome: 'sobre' };
+    if (p[0] === 'suporte') return { nome: 'suporte' };
     if (p[0] === 'empresa' && p[1]) {
       const r = { codigo: p[1], nome: 'empresa' };
       if (p[2]) { r.nome = 'familia'; r.familia = p[2]; }
@@ -122,6 +124,8 @@
     // Tela nova começa do topo; redesenhar a mesma tela mantém onde a pessoa estava.
     if (raiz.location.hash !== ultimoEndereco) { conteudo.scrollTop = 0; ultimoEndereco = raiz.location.hash; }
     atualizarMenu();
+    // "Ver o desenho de um arquivo" não precisa de pasta de dados nem de empresa: abre sempre.
+    if (App.rota.nome === 'suporte') { raiz.TelaSuporte.mostrar(conteudo); return; }
     if (!(await App.armazenamento.estaConectado())) {
       raiz.TelaPasta.telaConectar(conteudo);
       return;
