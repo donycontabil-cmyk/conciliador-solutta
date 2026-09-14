@@ -69,9 +69,11 @@
         contaRazao: { conta: raz.conteudo.conta, lancamentos: raz.conteudo.conta.lancamentos },
         agingAnterior: aAnt.conteudo, agingAtual: aAtu.conteudo,
       },
-      decisoes: { donos: d.donos || {}, conciliadas: d.conciliadas || [], observacoes: d.observacoes || {}, historico: d.historico || [] },
-      aba: app().lerLocal('conciliador-solutta.aba-passo3') || 'diferencas',
+      decisoes: { donos: d.donos || {}, conciliadas: d.conciliadas || [], observacoes: d.observacoes || {}, conciliacoesAB: d.conciliacoesAB || [], historico: d.historico || [] },
+      aba: app().lerLocal('conciliador-solutta.aba-passo3') || 'ab',
       filtros: {}, abertos: new Set(), guardadoEm: registro.atualizadoEm || null, fila: Promise.resolve(),
+      incluirAnterior: app().lerLocal('conciliador-solutta.ab-anterior') !== '0',
+      selA: new Set(), selB: new Set(),
     };
     calcular();
     desenharTudo();
@@ -164,6 +166,7 @@
   function contador(id) {
     const r = E.r;
     switch (id) {
+      case 'ab': return E.decisoes.conciliacoesAB.length;
       case 'diferencas': return r.comDiferenca.length;
       case 'fornecedores': return r.fornecedores.filter((f) => f.chave !== SEM).length;
       case 'sem': return r.semFornecedor.qtd;
@@ -174,6 +177,7 @@
     }
   }
   const ABAS = () => [
+    { id: 'ab', titulo: 'Conciliar A × B' },
     { id: 'diferencas', titulo: 'Diferenças' },
     { id: 'fornecedores', titulo: 'Por fornecedor' },
     { id: 'sem', titulo: 'Sem fornecedor' },
@@ -198,6 +202,7 @@
   function desenharAba() {
     const alvo = E.el.querySelector('#aba');
     switch (E.aba) {
+      case 'ab': return abaAB(alvo);
       case 'diferencas': return abaFornecedores(alvo, true);
       case 'fornecedores': return abaFornecedores(alvo, false);
       case 'sem': return abaSem(alvo);
@@ -206,6 +211,117 @@
       case 'agingAtu': return abaAging(alvo, E.arquivos.aAtu.conteudo, E.entrada.mesAtual);
       default: return null;
     }
+  }
+
+  // ------------------------------------------------------------------
+  // Aba "Conciliar A × B": Parte A (aging do mês passado + razão) × Parte B (aging do mês).
+  // Marca item a item dos dois lados; quando o total marcado bate, vira conciliado e sai.
+  // O que não for marcado fica em aberto — o da A na A, o da B na B (a diferença a investigar).
+  // ------------------------------------------------------------------
+  function itensAB() {
+    const A = [], B = [];
+    const lancs = E.arquivos.raz.conteudo.conta.lancamentos;
+    if (E.incluirAnterior) {
+      E.arquivos.aAnt.conteudo.titulos.forEach((t, i) => A.push({ id: 'AGA:' + i, fonte: 'aging ' + E.entrada.mesAnterior, chave: M.chaveDoTitulo(t), nome: t.nome, data: t.vencimento || '', doc: t.documento || '', valor: t.valor }));
+    }
+    E.r.linhas.forEach((l) => {
+      const lc = lancs[l.i]; const d = E.r.porLinha.get(l.digital);
+      A.push({ id: 'RAZ:' + l.digital, fonte: 'razão', chave: d.chave, nome: d.nome, data: lc.data, doc: M.documentoDoHistorico(lc.historico), historico: lc.historico, valor: lc.credito > 0 ? lc.credito : -lc.debito });
+    });
+    E.arquivos.aAtu.conteudo.titulos.forEach((t, i) => B.push({ id: 'AGB:' + i, fonte: 'aging ' + E.entrada.mesAtual, chave: M.chaveDoTitulo(t), nome: t.nome, data: t.vencimento || '', doc: t.documento || '', valor: t.valor }));
+    return { A, B };
+  }
+
+  function abaAB(alvo) {
+    const dados = itensAB();
+    E.mapaItens = new Map();
+    dados.A.concat(dados.B).forEach((x) => E.mapaItens.set(x.id, x));
+    const conciliados = new Set();
+    E.decisoes.conciliacoesAB.forEach((g) => g.ids.forEach((id) => conciliados.add(id)));
+    // remove da seleção o que já não existe / já conciliado
+    E.selA.forEach((id) => { if (!E.mapaItens.has(id) || conciliados.has(id)) E.selA.delete(id); });
+    E.selB.forEach((id) => { if (!E.mapaItens.has(id) || conciliados.has(id)) E.selB.delete(id); });
+
+    const busca = filtro('busca');
+    const passa = (x) => combina(busca, x.nome, x.historico || '', x.doc || '');
+    const abertosA = dados.A.filter((x) => !conciliados.has(x.id) && passa(x));
+    const abertosB = dados.B.filter((x) => !conciliados.has(x.id) && passa(x));
+    const emAbertoA = dados.A.filter((x) => !conciliados.has(x.id)).reduce((s, x) => s + x.valor, 0);
+    const emAbertoB = dados.B.filter((x) => !conciliados.has(x.id)).reduce((s, x) => s + x.valor, 0);
+
+    E.el.querySelector('#filtros').innerHTML =
+      '<input type="search" class="busca" data-filtro="busca" placeholder="Filtrar por fornecedor, histórico ou documento" value="' + T.esc(busca) + '">' +
+      '<label class="linha-flex" style="gap:6px"><input type="checkbox" id="ab-anterior"' + (E.incluirAnterior ? ' checked' : '') + '> <span class="pequeno">Parte A = aging ' + T.esc(E.entrada.mesAnterior) + ' + razão</span></label>' +
+      '<span class="suave pequeno">(desmarque para <b>só o razão</b>)</span>';
+
+    alvo.innerHTML =
+      '<div class="grade-ab">' +
+      colunaAB('A', 'Parte A · contabilidade', E.incluirAnterior ? 'aging ' + E.entrada.mesAnterior + ' + razão de ' + E.entrada.mesAtual : 'só o razão de ' + E.entrada.mesAtual, abertosA, emAbertoA) +
+      colunaAB('B', 'Parte B · financeiro', 'aging ' + E.entrada.mesAtual, abertosB, emAbertoB) +
+      '</div>' +
+      '<div id="barra-ab"></div>' +
+      conciliadosAB();
+    T.tabelaPaginada(alvo.querySelector('#colA'), tabelaItens('A', abertosA));
+    T.tabelaPaginada(alvo.querySelector('#colB'), tabelaItens('B', abertosB));
+    atualizarBarraAB();
+  }
+
+  function colunaAB(lado, titulo, sub, itens, emAberto) {
+    return '<div class="cartao corpo coluna-ab"><div class="linha-flex" style="margin-bottom:6px"><h3 style="flex:1">' + T.esc(titulo) + '</h3>' +
+      '<span class="pilula ' + (lado === 'A' ? 'azul' : 'ambar') + '">em aberto ' + U.formatarCentavos(emAberto) + '</span></div>' +
+      '<p class="suave pequeno" style="margin:0 0 8px">' + T.esc(sub) + ' · ' + itens.length + ' item(ns) em aberto</p>' +
+      '<div id="col' + lado + '"></div></div>';
+  }
+
+  function tabelaItens(lado, itens) {
+    const sel = lado === 'A' ? E.selA : E.selB;
+    return {
+      alta: true, porPagina: 200,
+      cabecalho: '<th class="caixa"><input type="checkbox" data-marca-todos="' + lado + '"></th><th>Fornecedor</th><th>Data</th><th>Doc</th><th>Origem</th><th class="num">Valor</th>',
+      linhas: itens, vazio: 'Nada em aberto neste lado.',
+      linha: (x) => '<tr class="' + (sel.has(x.id) ? 'destaque' : '') + '"><td class="caixa"><input type="checkbox" data-item="' + lado + '" data-id="' + T.esc(x.id) + '"' + (sel.has(x.id) ? ' checked' : '') + '></td>' +
+        '<td class="nome">' + (x.chave === SEM ? '<span class="falta">sem fornecedor</span>' : T.esc(x.nome)) + (x.historico ? '<br><span class="suave pequeno">' + T.esc(x.historico.slice(0, 60)) + '</span>' : '') + '</td>' +
+        '<td class="num">' + T.esc(x.data || '—') + '</td><td>' + T.nome(x.doc) + '</td><td class="pequeno suave">' + T.esc(x.fonte) + '</td>' +
+        '<td class="num ' + (x.valor < 0 ? 'negativo' : '') + '">' + U.formatarCentavos(x.valor) + '</td></tr>',
+    };
+  }
+
+  function somaSel(sel) { let s = 0; sel.forEach((id) => { const x = E.mapaItens.get(id); if (x) s += x.valor; }); return s; }
+
+  function atualizarBarraAB() {
+    const barra = E.el.querySelector('#barra-ab'); if (!barra) return;
+    const sa = somaSel(E.selA), sb = somaSel(E.selB), dif = sa - sb;
+    const nSel = E.selA.size + E.selB.size;
+    if (!nSel) { barra.innerHTML = '<p class="suave pequeno" style="margin:10px 0">Marque itens na Parte A e na Parte B. Quando o valor marcado dos dois lados bater, clique em <b>Conciliar</b>.</p>'; return; }
+    const bate = Math.abs(dif) < 1;
+    barra.innerHTML = '<div class="barra-selecao" style="position:static;transform:none;margin:12px 0;max-width:none">' +
+      '<span>A: <b class="num">' + U.formatarCentavos(sa) + '</b> (' + E.selA.size + ')</span>' +
+      '<span>B: <b class="num">' + U.formatarCentavos(sb) + '</b> (' + E.selB.size + ')</span>' +
+      '<span class="' + (bate ? 'ok' : 'falta') + '">' + (bate ? '✓ bate' : 'diferença ' + U.formatarCentavos(dif)) + '</span>' +
+      '<button type="button" class="botao primario" data-acao="conciliar-ab">Conciliar' + (bate ? '' : ' assim mesmo') + '</button>' +
+      '<button type="button" class="botao" data-acao="limpar-ab">Limpar</button></div>';
+  }
+
+  function conciliadosAB() {
+    const gs = E.decisoes.conciliacoesAB;
+    if (!gs.length) return '';
+    return '<h3 style="margin:18px 0 8px">Conciliados (' + gs.length + ')</h3><div class="tabela-caixa"><table class="tabela"><thead><tr><th>Quando</th><th>Quem</th><th class="num">Parte A</th><th class="num">Parte B</th><th class="num">Diferença</th><th>Itens</th><th></th></tr></thead><tbody>' +
+      gs.map((g, i) => '<tr><td class="pequeno">' + U.dataHoraLocal(g.quando) + '</td><td class="pequeno">' + T.esc(g.quem || '') + '</td>' +
+        T.tdValor(g.valorA) + T.tdValor(g.valorB) + '<td class="num ' + (Math.abs(g.valorA - g.valorB) < 1 ? 'zero' : 'negativo') + '">' + U.formatarCentavos(g.valorA - g.valorB) + '</td>' +
+        '<td class="pequeno">' + g.a.length + ' de A · ' + g.b.length + ' de B</td>' +
+        '<td class="num"><button type="button" class="botao pequeno perigo" data-desfazer-ab="' + i + '">Desfazer</button></td></tr>').join('') +
+      '</tbody></table></div>';
+  }
+
+  function conciliarAB() {
+    const a = Array.from(E.selA), b = Array.from(E.selB);
+    if (!a.length && !b.length) return;
+    const valorA = somaSel(E.selA), valorB = somaSel(E.selB);
+    E.decisoes.conciliacoesAB = E.decisoes.conciliacoesAB.concat([{ ids: a.concat(b), a, b, valorA, valorB, quem: app().usuario.nome, quando: U.agoraISO() }]);
+    E.selA = new Set(); E.selB = new Set();
+    historico('Conciliou A×B: ' + a.length + ' de A e ' + b.length + ' de B (' + U.formatarCentavos(valorA) + ' × ' + U.formatarCentavos(valorB) + ')');
+    desenharAba();
+    gravar('terceiro-ab-conciliar', a.length + '+' + b.length + ' · ' + U.formatarCentavos(valorA));
   }
 
   function abaFornecedores(alvo, soDiferencas) {
@@ -336,10 +452,47 @@
     if (juntar) { await juntarFornecedor(juntar.getAttribute('data-juntar')); return; }
     const donoLinha = ev.target.closest('[data-dono-linha]');
     if (donoLinha) { await trocarDonoLinha(Number(donoLinha.getAttribute('data-dono-linha'))); return; }
+    const acao = ev.target.closest('[data-acao]');
+    if (acao) {
+      const a = acao.getAttribute('data-acao');
+      if (a === 'conciliar-ab') conciliarAB();
+      else if (a === 'limpar-ab') { E.selA = new Set(); E.selB = new Set(); desenharAba(); }
+      return;
+    }
+    const desab = ev.target.closest('[data-desfazer-ab]');
+    if (desab) {
+      const i = Number(desab.getAttribute('data-desfazer-ab'));
+      E.decisoes.conciliacoesAB = E.decisoes.conciliacoesAB.filter((g, k) => k !== i);
+      historico('Desfez uma conciliação A×B');
+      desenharAba();
+      gravar('terceiro-ab-desfazer', '');
+      return;
+    }
   }
   function aoMudar(ev) {
     const sel = ev.target.closest('select[data-filtro]');
-    if (sel) { E.filtros[E.aba + '.' + sel.getAttribute('data-filtro')] = sel.value; desenharAba(); }
+    if (sel) { E.filtros[E.aba + '.' + sel.getAttribute('data-filtro')] = sel.value; desenharAba(); return; }
+    const antc = ev.target.closest('#ab-anterior');
+    if (antc) { E.incluirAnterior = antc.checked; app().gravarLocal('conciliador-solutta.ab-anterior', antc.checked ? '1' : '0'); desenharAba(); return; }
+    const item = ev.target.closest('[data-item]');
+    if (item) {
+      const lado = item.getAttribute('data-item'); const id = item.getAttribute('data-id');
+      const set = lado === 'A' ? E.selA : E.selB;
+      if (item.checked) set.add(id); else set.delete(id);
+      const tr = item.closest('tr'); if (tr) tr.classList.toggle('destaque', item.checked);
+      atualizarBarraAB();
+      return;
+    }
+    const todos = ev.target.closest('[data-marca-todos]');
+    if (todos) {
+      const lado = todos.getAttribute('data-marca-todos'); const set = lado === 'A' ? E.selA : E.selB;
+      E.el.querySelectorAll('#col' + lado + ' [data-item]').forEach((c) => {
+        c.checked = todos.checked; const id = c.getAttribute('data-id');
+        if (todos.checked) set.add(id); else set.delete(id);
+        c.closest('tr').classList.toggle('destaque', todos.checked);
+      });
+      atualizarBarraAB();
+    }
   }
 
   // Juntar um fornecedor inteiro (todas as suas linhas do razão) com outro (o mesmo dono).
