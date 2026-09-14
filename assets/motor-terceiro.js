@@ -202,6 +202,68 @@
     return novos;
   }
 
+  // Documento primeiro (sem documento no fim), depois fornecedor e data: o que casa fica perto.
+  function compararPorDocumento(x, y) {
+    if (!x.doc !== !y.doc) return x.doc ? -1 : 1;
+    return x.doc.length - y.doc.length || (x.doc < y.doc ? -1 : x.doc > y.doc ? 1 : 0) ||
+      (x.nome < y.nome ? -1 : x.nome > y.nome ? 1 : 0) || x.ordem - y.ordem;
+  }
+
+  // Conciliações gravadas antes do ID (versão 5): ids antigos viram os de agora e quem não tem
+  // número ganha o próximo. Devolve { grupos, mudou } sem mexer na lista recebida.
+  function arrumarGruposAB(grupos, legado) {
+    const traduz = (id) => (legado && legado.get(id)) || id;
+    let proximo = proximoIdAB(grupos);
+    let mudou = false;
+    const novos = (grupos || []).map((g) => {
+      const antesA = g.a || [], antesB = g.b || [];
+      const a = antesA.map(traduz), b = antesB.map(traduz);
+      const n = Object.assign({}, g, { a, b });
+      if (n.ids) { delete n.ids; mudou = true; }
+      if (!n.id) { n.id = proximo++; mudou = true; }
+      if (!n.tipo) { n.tipo = tipoAB(a.length, b.length); mudou = true; }
+      if (!n.regra) { n.regra = 'manual'; mudou = true; }
+      if (a.some((id, i) => id !== antesA[i]) || b.some((id, i) => id !== antesB[i])) mudou = true;
+      return n;
+    });
+    return { grupos: novos, mudou };
+  }
+
+  // Dados do RELATÓRIO da conciliação A × B (Dony, 14/09/2026: "relatório bem bonito,
+  // demonstrando o que foi conciliado manualmente e o que foi automático, agrupado por ID").
+  // Manuais e automáticas separadas, cada ID com os seus itens; o que ficou em aberto; totais.
+  function relatorioAB(itens, grupos) {
+    const porId = (grupos || []).slice().sort((x, y) => x.id - y.id).map((g) => {
+      const doGrupo = (g.a || []).concat(g.b || []).map((id) => itens.porId.get(id) || { id, faltando: true });
+      return { grupo: g, itens: doGrupo, faltando: doGrupo.filter((x) => x.faltando).length, diferenca: (g.valorA || 0) - (g.valorB || 0) };
+    });
+    const manuais = porId.filter((x) => x.grupo.regra === 'manual');
+    const automaticas = porId.filter((x) => x.grupo.regra !== 'manual');
+    const ab = emAbertoAB(itens, grupos);
+    const porRegra = {};
+    for (const x of automaticas) {
+      const k = x.grupo.regra;
+      if (!porRegra[k]) porRegra[k] = { conciliacoes: 0, itens: 0 };
+      porRegra[k].conciliacoes++;
+      porRegra[k].itens += x.itens.length;
+    }
+    const conta = (lista, pred) => lista.filter(pred).length;
+    return {
+      manuais, automaticas, porRegra,
+      abertosA: ab.abertosA.slice().sort(compararPorDocumento), abertosB: ab.abertosB.slice().sort(compararPorDocumento),
+      valorAbertoA: ab.valorA, valorAbertoB: ab.valorB,
+      totais: {
+        conciliacoes: porId.length, automaticas: automaticas.length, manuais: manuais.length,
+        itensConciliados: porId.reduce((s, x) => s + x.itens.length - x.faltando, 0),
+        itensAutomaticas: automaticas.reduce((s, x) => s + x.itens.length, 0), itensManuais: manuais.reduce((s, x) => s + x.itens.length, 0),
+        AxA: conta(porId, (x) => x.grupo.tipo === 'AxA'), AxB: conta(porId, (x) => x.grupo.tipo === 'AxB'), BxB: conta(porId, (x) => x.grupo.tipo === 'BxB'),
+        manuaisComDiferenca: conta(manuais, (x) => Math.abs(x.diferenca) >= 1),
+        paraConferir: porId.filter((x) => x.grupo.aviso === 'baixa-antes-da-nota').map((x) => x.grupo.id),
+        comItemFaltando: conta(porId, (x) => x.faltando > 0),
+      },
+    };
+  }
+
   // Em aberto de cada lado, depois das conciliações. A − B = a diferença da ponte, sempre
   // (cada conciliação que bate tira o mesmo valor dos dois lados).
   function emAbertoAB(itens, conciliacoes) {
@@ -363,5 +425,6 @@
   return {
     calcular, fornecedorDoHistorico, documentoDoHistorico, chaveDoTitulo,
     normalizarDocumento, documentoDaLinha, itensAB, conciliarAutomatico, emAbertoAB, tipoAB, proximoIdAB, REGRAS_AB,
+    compararPorDocumento, arrumarGruposAB, relatorioAB,
   };
 });

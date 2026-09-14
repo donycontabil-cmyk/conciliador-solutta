@@ -345,6 +345,7 @@
       '<p class="suave" style="line-height:1.5">' + T.esc(p.texto) + '</p><ul class="precisa">' + itens.join('') + '</ul>' + resumo +
       (porque ? '<p class="pequeno" style="color:var(--ambar)">' + T.esc(porque) + '</p>' : '') +
       '<div class="acoes">' + (pode ? '<a class="botao primario" href="' + base + 'passo3">Abrir →</a>' : '<span class="botao primario travado" title="' + T.esc(porque) + '">Abrir →</span>') +
+      (pode && passo3 ? '<a class="botao" href="' + base + 'passo3-relatorio" title="Relatório da conciliação para imprimir, salvar em PDF ou baixar em Excel">📄 Relatório</a>' : '') +
       '<button type="button" class="botao" data-subir>Subir arquivo</button>' + botaoInativar(p) + '</div></div>';
   }
   function linhaPrecisa(tem, texto) {

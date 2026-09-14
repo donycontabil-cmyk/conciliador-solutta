@@ -29,57 +29,70 @@
 
   let E = null;
 
-  async function mostrar(el, codigo, anoMes, conferir) {
+  // Tudo o que o Passo ③ precisa de um mês: arquivos, registro, cálculo e itens A e B.
+  // Usado pela tela e pelo relatório (tela-relatorio3.js). Devolve null se a rota mudou no meio.
+  async function carregarDados(codigo, anoMes, conferir) {
     const arm = app().armazenamento;
     const emp = app().empresas.find((e) => String(e.codigo) === String(codigo));
     const comp = anoMes + '-01';
-    const voltar = '#/empresa/' + encodeURIComponent(codigo) + '/fornecedores/' + anoMes;
-    if (!emp) { el.innerHTML = '<div class="aviso ambar">Empresa não cadastrada. <a href="#/">Voltar</a></div>'; return; }
-    T.carregando(el, 'Abrindo o Passo ③ de ' + U.nomeCompetencia(comp) + '…');
-
+    if (!emp) return { erro: 'Empresa não cadastrada.' };
     const metas = await arm.arquivos(codigo);
     const arqs = arquivosDoTerceiro(metas, comp);
-    if (conferir && !conferir()) return;
+    if (conferir && !conferir()) return null;
     const falta = [];
     if (!arqs.agingAnterior) falta.push('o aging (contas a pagar) de ' + U.nomeCompetencia(U.somarMeses(comp, -1)));
     if (!arqs.agingAtual) falta.push('o aging (contas a pagar) de ' + U.nomeCompetencia(comp));
     if (!arqs.razao) falta.push('o razão de fornecedores de ' + U.nomeCompetencia(comp));
-    if (falta.length) {
-      el.innerHTML = '<a class="voltar" href="' + voltar + '">← Fornecedores · ' + U.nomeCompetencia(comp) + '</a>' +
-        '<div class="aviso ambar"><span class="icone-aviso">📄</span><div><b>Falta arquivo para o Passo ③.</b><br>Suba ' + falta.map(T.esc).join(', ') + '. ' +
-        '<a href="' + voltar + '">Subir arquivos</a></div></div>';
-      return;
-    }
+    if (falta.length) return { emp, comp, falta };
     const carregar = async (m) => ({ meta: m, conteudo: await arm.conteudoDoArquivo(m.id) });
     const [aAnt, aAtu, raz] = await Promise.all([carregar(arqs.agingAnterior), carregar(arqs.agingAtual), carregar(arqs.razao)]);
-    if (conferir && !conferir()) return;
+    if (conferir && !conferir()) return null;
 
     const idReg = 'F-' + codigo + '-fornecedor_pagar-' + anoMes;
     const concs = await arm.conciliacoes(codigo, comp);
     const registro = concs.find((c) => c.id === idReg) || { id: idReg, codigo, tipo: 'fornecedor_pagar', competencia: comp, situacao: 'andamento', arquivos: [], decisoes: {}, resumo: {} };
     const d = registro.decisoes || {};
+    const decisoes = { donos: d.donos || {}, conciliadas: d.conciliadas || [], observacoes: d.observacoes || {}, conciliacoesAB: d.conciliacoesAB || [], historico: d.historico || [] };
+    const entrada = {
+      competencia: comp, natureza: 'fornecedores',
+      mesAnterior: U.nomeCompetencia(U.somarMeses(comp, -1)), mesAtual: U.nomeCompetencia(comp),
+      contaRazao: { conta: raz.conteudo.conta, lancamentos: raz.conteudo.conta.lancamentos },
+      agingAnterior: aAnt.conteudo, agingAtual: aAtu.conteudo, decisoes,
+    };
+    const r = M.calcular(entrada);
+    const itens = M.itensAB(entrada, r);
+    const arrumado = M.arrumarGruposAB(decisoes.conciliacoesAB, itens.legado);
+    decisoes.conciliacoesAB = arrumado.grupos;
+    return { emp, comp, arquivos: { aAnt, aAtu, raz }, registro, entrada, decisoes, r, itens, arrumou: arrumado.mudou };
+  }
+
+  async function mostrar(el, codigo, anoMes, conferir) {
+    const comp = anoMes + '-01';
+    const voltar = '#/empresa/' + encodeURIComponent(codigo) + '/fornecedores/' + anoMes;
+    T.carregando(el, 'Abrindo o Passo ③ de ' + U.nomeCompetencia(comp) + '…');
+    const dados = await carregarDados(codigo, anoMes, conferir);
+    if (!dados) return;
+    if (dados.erro) { el.innerHTML = '<div class="aviso ambar">' + T.esc(dados.erro) + ' <a href="#/">Voltar</a></div>'; return; }
+    if (dados.falta) {
+      el.innerHTML = '<a class="voltar" href="' + voltar + '">← Fornecedores · ' + U.nomeCompetencia(comp) + '</a>' +
+        '<div class="aviso ambar"><span class="icone-aviso">📄</span><div><b>Falta arquivo para o Passo ③.</b><br>Suba ' + dados.falta.map(T.esc).join(', ') + '. ' +
+        '<a href="' + voltar + '">Subir arquivos</a></div></div>';
+      return;
+    }
 
     el.innerHTML = '<div class="tela-passo3"></div>';
     E = {
-      el: el.firstChild, codigo, comp, emp, voltar, registro,
-      arquivos: { aAnt, aAtu, raz },
-      entrada: {
-        competencia: comp, natureza: 'fornecedores',
-        mesAnterior: U.nomeCompetencia(U.somarMeses(comp, -1)), mesAtual: U.nomeCompetencia(comp),
-        contaRazao: { conta: raz.conteudo.conta, lancamentos: raz.conteudo.conta.lancamentos },
-        agingAnterior: aAnt.conteudo, agingAtual: aAtu.conteudo,
-      },
-      decisoes: { donos: d.donos || {}, conciliadas: d.conciliadas || [], observacoes: d.observacoes || {}, conciliacoesAB: d.conciliacoesAB || [], historico: d.historico || [] },
+      el: el.firstChild, codigo, comp, emp: dados.emp, voltar, registro: dados.registro,
+      arquivos: dados.arquivos, entrada: dados.entrada, decisoes: dados.decisoes,
       aba: app().lerLocal('conciliador-solutta.aba-passo3') || 'ab',
-      filtros: {}, abertos: new Set(), guardadoEm: registro.atualizadoEm || null, fila: Promise.resolve(),
+      filtros: {}, abertos: new Set(), guardadoEm: dados.registro.atualizadoEm || null, fila: Promise.resolve(),
       incluirAnterior: app().lerLocal('conciliador-solutta.ab-anterior') !== '0',
       selA: new Set(), selB: new Set(), abertosAB: new Set(), idDoItem: new Map(),
+      r: dados.r, itens: dados.itens, porChave: new Map(dados.r.fornecedores.map((f) => [f.chave, f])),
     };
     if (E.aba !== 'ab' && abasOcultas().has(E.aba)) E.aba = 'ab';
-    calcular();
-    const arrumou = arrumarConciliacoes();
     desenharTudo();
-    if (arrumou) gravar(null);
+    if (dados.arrumou) gravar(null);
   }
 
   // Escolhe os arquivos do ③: aging do mês, aging do mês passado e o razão de fornecedores.
@@ -137,6 +150,7 @@
       '<p class="suave">' + T.esc(E.emp.codigo + ' · ' + E.emp.nome) + ' · ' + U.nomeCompetencia(E.comp) + '</p>' +
       '<p class="suave pequeno">Conta ' + T.esc(r.conta.codigo + ' · ' + r.conta.nome) + ' · aging de ' + T.esc(E.entrada.mesAnterior) + ' e de ' + T.esc(E.entrada.mesAtual) + '</p></div>' +
       '<div class="linha-flex" style="gap:12px"><span class="guardado" id="guardado" title="Cada decisão é gravada na hora">' + (E.guardadoEm ? 'guardado às ' + U.horaLocal(E.guardadoEm) : 'nenhuma decisão tomada ainda') + '</span>' +
+      '<a class="botao pequeno" href="#/empresa/' + encodeURIComponent(E.codigo) + '/fornecedores/' + U.anoMes(E.comp) + '/passo3-relatorio" title="Relatório da conciliação para imprimir, salvar em PDF ou baixar em Excel">📄 Relatório</a>' +
       '<button type="button" class="botao pequeno perigo" data-acao="limpar-conciliacao" title="Apagar tudo o que foi feito no Passo ③ de um mês e começar do zero">🧹 Limpar conciliação</button></div></div>' +
       desenharPonte() +
       '<div class="abas" id="abas" role="tablist"></div>' +
@@ -291,30 +305,8 @@
     return x.fonte;
   }
 
-  // Conciliações da versão 5: ids antigos viram os de agora; sem ID ganha o próximo número.
-  function arrumarConciliacoes() {
-    const traduz = (id) => E.itens.legado.get(id) || id;
-    let proximo = M.proximoIdAB(E.decisoes.conciliacoesAB);
-    let mudou = false;
-    E.decisoes.conciliacoesAB = E.decisoes.conciliacoesAB.map((g) => {
-      const a = (g.a || []).map(traduz), b = (g.b || []).map(traduz);
-      const n = Object.assign({}, g, { a, b });
-      if (n.ids) { delete n.ids; mudou = true; }
-      if (!n.id) { n.id = proximo++; mudou = true; }
-      if (!n.tipo) { n.tipo = M.tipoAB(a.length, b.length); mudou = true; }
-      if (!n.regra) { n.regra = 'manual'; mudou = true; }
-      if (a.some((id, i) => id !== g.a[i]) || b.some((id, i) => id !== g.b[i])) mudou = true;
-      return n;
-    });
-    return mudou;
-  }
-
   // Documento primeiro (sem documento no fim), depois fornecedor e data: o que casa fica perto.
-  function ordemDoc(x, y) {
-    if (!x.doc !== !y.doc) return x.doc ? -1 : 1;
-    return x.doc.length - y.doc.length || (x.doc < y.doc ? -1 : x.doc > y.doc ? 1 : 0) ||
-      (x.nome < y.nome ? -1 : x.nome > y.nome ? 1 : 0) || x.ordem - y.ordem;
-  }
+  const ordemDoc = M.compararPorDocumento;
 
   // Filtros de valor e de data (Dony, 14/09/2026: "filtrar por valor, por data, por fornecedor
   // ou por documento, tanto na parte A quanto na parte B").
@@ -962,5 +954,5 @@
     });
   }
 
-  raiz.TelaPasso3 = { mostrar, arquivosDoTerceiro, estado: () => E };
+  raiz.TelaPasso3 = { mostrar, arquivosDoTerceiro, carregarDados, estado: () => E, TIPO_AB, COMO_AB };
 })(self);

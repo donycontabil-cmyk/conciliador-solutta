@@ -11,7 +11,7 @@
   // Aqui se confere: faltando algum, a tela diz qual.
   const MODULOS = ['CONFIG', 'XLSX', 'Util', 'LerPlanilha', 'LerRazao', 'LerFinanceiro', 'Familias', 'Leitor', 'MotorNomes',
     'MotorReclass', 'MotorFechamento', 'MotorTerceiro', 'LayoutAjustes', 'Demonstracao', 'Diagnostico', 'Armazenamento', 'ArmazenamentoPasta', 'ArmazenamentoMemoria',
-    'Tela', 'TelaPasta', 'TelaCarteira', 'TelaEmpresa', 'TelaFamilia', 'TelaSubir', 'TelaPasso1', 'TelaPasso3', 'TelaSuporte'];
+    'Tela', 'TelaPasta', 'TelaCarteira', 'TelaEmpresa', 'TelaFamilia', 'TelaSubir', 'TelaPasso1', 'TelaPasso3', 'TelaRelatorio3', 'TelaSuporte'];
 
   const CHAVE_USUARIO = 'conciliador-solutta.usuario';
 
@@ -147,6 +147,7 @@
       else if (r.nome === 'familia') await raiz.TelaFamilia.mostrar(conteudo, r.codigo, r.familia, r.anoMes, conferir);
       else if (r.nome === 'passo' && r.passo === 'passo1') await raiz.TelaPasso1.mostrar(conteudo, r.codigo, r.anoMes, conferir);
       else if (r.nome === 'passo' && r.passo === 'passo3') await raiz.TelaPasso3.mostrar(conteudo, r.codigo, r.anoMes, conferir);
+      else if (r.nome === 'passo' && r.passo === 'passo3-relatorio') await raiz.TelaRelatorio3.mostrar(conteudo, r.codigo, r.anoMes, conferir);
       else conteudo.innerHTML = '<div class="aviso ambar">Esta tela não existe. <a href="#/">Voltar para as empresas</a>.</div>';
     } catch (e) {
       console.error(e);
