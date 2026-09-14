@@ -328,6 +328,9 @@ td.num.forte { font-weight: 700; }
 .filtros-lado input:focus { outline: 2px solid #b9cde0; border-color: var(--primaria); }
 .filtros-lado input.ativo { border-color: var(--primaria); background: var(--primaria-clara); }
 .filtros-lado .lapis[disabled] { opacity: .35; cursor: default; }
+.dica-lado { margin: -2px 0 8px; font-size: 12px; color: var(--texto-suave); }
+/* Marcado com outro filtro: fica no topo da lista */
+table.tabela tr.fixo td:first-child { box-shadow: inset 3px 0 0 var(--ambar); }
 /* Barra de "Conciliar manualmente": fixa no rodapé enquanto houver item marcado */
 .espaco-barra { height: 70px; }
 .barra-selecao .ok { color: #8fe3b0; }

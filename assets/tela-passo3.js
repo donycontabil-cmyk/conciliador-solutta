@@ -311,15 +311,21 @@
   }
 
   // Filtros de UMA parte (cada lado tem os seus: o nome muda de um lado para o outro).
+  // Mais de um de uma vez (Dony, 14/09/2026: a perninha que falta pode estar em OUTRO
+  // fornecedor — "selecionei um fornecedor e a outra perninha está em outro"): fornecedor e
+  // documento separados por vírgula ("POSTO CENTRAL, SILVA"); valor e data por ponto e vírgula
+  // (a vírgula já é a dos centavos).
   const CAMPOS_LADO = ['doc', 'forn', 'valor', 'data'];
+  function termos(texto, separador) { return String(texto || '').split(separador).map((s) => s.trim()).filter(Boolean); }
   function filtroDoLado(lado) {
-    const docTexto = String(filtro(lado + '.doc') || '').trim();
-    const doc = M.normalizarDocumento(docTexto);
-    const forn = String(filtro(lado + '.forn') || '').trim();
-    const fv = filtroValor(filtro(lado + '.valor'));
-    const fd = filtroData(filtro(lado + '.data'));
-    return (x) => (!docTexto || (!!doc && x.doc.indexOf(doc) >= 0)) && (!forn || combina(forn, x.nome, x.historico || '')) &&
-      (!fv || fv(x)) && (!fd || fd(x));
+    const docTexto = termos(filtro(lado + '.doc'), /[,;]/);
+    const docs = docTexto.map((d) => M.normalizarDocumento(d)).filter(Boolean);
+    const forns = termos(filtro(lado + '.forn'), /[,;]/);
+    const valores = termos(filtro(lado + '.valor'), /;/).map(filtroValor).filter(Boolean);
+    const datas = termos(filtro(lado + '.data'), /;/).map(filtroData).filter(Boolean);
+    return (x) => (!docTexto.length || docs.some((d) => x.doc.indexOf(d) >= 0)) &&
+      (!forns.length || forns.some((f) => combina(f, x.nome, x.historico || ''))) &&
+      (!valores.length || valores.some((f) => f(x))) && (!datas.length || datas.some((f) => f(x)));
   }
   function filtrosDoLadoHtml(lado) {
     const campo = (nome, texto, dica) => {
@@ -328,12 +334,13 @@
     };
     const algum = CAMPOS_LADO.some((n) => filtro(lado + '.' + n));
     return '<div class="filtros-lado">' +
-      campo('doc', 'Documento', 'Número do documento, ou parte dele') +
-      campo('forn', 'Fornecedor', 'Nome do fornecedor, ou pedaço do histórico') +
-      campo('valor', 'Valor', 'Valor (1.236,55), parte dele, ou faixa: 100 a 500 — com ou sem sinal') +
-      campo('data', 'Data', 'Data (08/07/2026), parte dela (07/2026), ou faixa: 01/07 a 15/07') +
+      campo('doc', 'Documento', 'Número do documento, ou parte dele. Mais de um: 107, 207') +
+      campo('forn', 'Fornecedor', 'Nome do fornecedor, ou pedaço do histórico. Mais de um: POSTO CENTRAL, SILVA') +
+      campo('valor', 'Valor', 'Valor (1.236,55), parte dele, ou faixa: 100 a 500 — com ou sem sinal. Mais de um: 791,43; 5.105,88') +
+      campo('data', 'Data', 'Data (08/07/2026), parte dela (07/2026), ou faixa: 01/07 a 15/07. Mais de uma: 08/07; 22/07') +
       '<button type="button" class="lapis" data-limpar-lado="' + lado + '" title="Limpar os filtros desta parte"' + (algum ? '' : ' disabled') + '>✕</button>' +
-      '</div>';
+      '</div>' +
+      (algum ? '<p class="dica-lado">Mais de um fornecedor ou documento: separe com vírgula (<b>POSTO CENTRAL, SILVA</b>). Os itens marcados ficam no topo, mesmo fora do filtro.</p>' : '');
   }
 
   // Busca de cima (vale para os dois lados e para a lista): "#12" = a conciliação 12;
@@ -368,9 +375,18 @@
     const b = buscaAB(busca);
     const naLista = (x) => (mostrar === 'todos' || (mostrar === 'conciliados' ? E.idDoItem.has(x.id) : !E.idDoItem.has(x.id))) && b.item(x);
     const doLadoA = filtroDoLado('A'), doLadoB = filtroDoLado('B');
-    const listaA = it.A.filter((x) => (E.incluirAnterior || x.fonte !== 'anterior') && naLista(x) && doLadoA(x)).sort(ordemDoc);
-    const listaB = it.B.filter((x) => naLista(x) && doLadoB(x)).sort(ordemDoc);
+    const passaA = (x) => (E.incluirAnterior || x.fonte !== 'anterior') && naLista(x) && doLadoA(x);
+    const passaB = (x) => naLista(x) && doLadoB(x);
+    const filtradosA = it.A.filter(passaA).sort(ordemDoc);
+    const filtradosB = it.B.filter(passaB).sort(ordemDoc);
+    // O que está marcado fica no topo mesmo fora do filtro: marca as perninhas de um
+    // fornecedor, troca o filtro para o outro, e as de antes continuam à vista.
+    const fixosA = it.A.filter((x) => E.selA.has(x.id) && !passaA(x)).sort(ordemDoc);
+    const fixosB = it.B.filter((x) => E.selB.has(x.id) && !passaB(x)).sort(ordemDoc);
+    const listaA = fixosA.concat(filtradosA);
+    const listaB = fixosB.concat(filtradosB);
     E.listaA = listaA; E.listaB = listaB;
+    E.fixos = new Set(fixosA.concat(fixosB).map((x) => x.id));
 
     E.el.querySelector('#filtros').innerHTML =
       '<input type="search" class="busca" data-filtro="busca" placeholder="Busca nos dois lados: documento, fornecedor, valor, data ou #ID" title="Vale para a Parte A, a Parte B e a lista de conciliações. Cada parte tem também os seus filtros." value="' + T.esc(busca) + '">' +
@@ -382,8 +398,8 @@
     const rot = mostrar === 'todos' ? 'item(ns)' : (mostrar === 'conciliados' ? 'conciliado(s)' : 'em aberto');
     alvo.innerHTML = resumoAB(ab, grupos) +
       '<div class="grade-ab">' +
-      colunaAB('A', 'Parte A · contabilidade', E.incluirAnterior ? 'aging ' + E.entrada.mesAnterior + ' + razão de ' + E.entrada.mesAtual : 'só o razão de ' + E.entrada.mesAtual, listaA, rot) +
-      colunaAB('B', 'Parte B · financeiro', 'aging ' + E.entrada.mesAtual, listaB, rot) +
+      colunaAB('A', 'Parte A · contabilidade', E.incluirAnterior ? 'aging ' + E.entrada.mesAnterior + ' + razão de ' + E.entrada.mesAtual : 'só o razão de ' + E.entrada.mesAtual, filtradosA, fixosA, rot) +
+      colunaAB('B', 'Parte B · financeiro', 'aging ' + E.entrada.mesAtual, filtradosB, fixosB, rot) +
       '</div>' +
       '<div id="barra-ab"></div>' +
       '<div id="lista-ab"></div>';
@@ -421,12 +437,13 @@
       '</p></div>';
   }
 
-  function colunaAB(lado, titulo, sub, itens, rot) {
+  function colunaAB(lado, titulo, sub, itens, fixos, rot) {
     const total = itens.reduce((s, x) => s + x.valor, 0);
     const filtrado = CAMPOS_LADO.some((n) => filtro(lado + '.' + n));
     return '<div class="cartao corpo coluna-ab"><div class="linha-flex" style="margin-bottom:6px"><h3 style="flex:1">' + T.esc(titulo) + '</h3>' +
-      '<span class="pilula ' + (lado === 'A' ? 'azul' : 'ambar') + '" title="Soma da lista abaixo">' + U.formatarCentavos(total) + '</span></div>' +
-      '<p class="suave pequeno" style="margin:0 0 8px">' + T.esc(sub) + ' · ' + itens.length.toLocaleString('pt-BR') + ' ' + rot + (filtrado ? ' <b>(filtrado)</b>' : '') + '</p>' +
+      '<span class="pilula ' + (lado === 'A' ? 'azul' : 'ambar') + '" title="Soma da lista (sem os marcados de fora do filtro)">' + U.formatarCentavos(total) + '</span></div>' +
+      '<p class="suave pequeno" style="margin:0 0 8px">' + T.esc(sub) + ' · ' + itens.length.toLocaleString('pt-BR') + ' ' + rot + (filtrado ? ' <b>(filtrado)</b>' : '') +
+      (fixos.length ? ' · <b>+' + fixos.length + ' marcado(s)</b> de fora do filtro, no topo' : '') + '</p>' +
       filtrosDoLadoHtml(lado) +
       '<div id="col' + lado + '"></div></div>';
   }
@@ -440,9 +457,11 @@
       linha: (x) => {
         const g = E.idDoItem.get(x.id);
         const marcado = sel.has(x.id);
-        return '<tr class="' + (marcado ? 'destaque' : '') + '"><td class="caixa">' + (g ? '' : '<input type="checkbox" data-item="' + lado + '" data-id="' + T.esc(x.id) + '"' + (marcado ? ' checked' : '') + '>') + '</td>' +
+        const fixo = E.fixos && E.fixos.has(x.id);
+        return '<tr class="' + (marcado ? 'destaque' : '') + (fixo ? ' fixo' : '') + '"><td class="caixa">' + (g ? '' : '<input type="checkbox" data-item="' + lado + '" data-id="' + T.esc(x.id) + '"' + (marcado ? ' checked' : '') + '>') + '</td>' +
           '<td class="num"><b>' + T.nome(x.doc) + '</b></td>' +
-          '<td class="nome">' + (x.chave === SEM ? '<span class="falta">sem fornecedor</span>' : T.esc(x.nome)) + (x.historico ? '<br><span class="suave pequeno">' + T.esc(x.historico.slice(0, 70)) + '</span>' : '') + '</td>' +
+          '<td class="nome">' + (fixo ? '<span class="selo suspeita" title="Marcado antes, com outro filtro">marcado</span> ' : '') +
+          (x.chave === SEM ? '<span class="falta">sem fornecedor</span>' : T.esc(x.nome)) + (x.historico ? '<br><span class="suave pequeno">' + T.esc(x.historico.slice(0, 70)) + '</span>' : '') + '</td>' +
           '<td class="num" title="' + T.esc(rotuloFonte(x)) + '">' + T.esc(x.data || '—') + '<br><span class="pequeno suave">' + T.esc(rotuloCurto(x)) + '</span></td>' +
           '<td class="num ' + (x.valor < 0 ? 'negativo' : '') + '">' + U.formatarCentavos(x.valor) + '</td>' +
           '<td style="white-space:nowrap">' + (g ? '<button type="button" class="lapis" data-ver-id="' + g.id + '" title="Ver a conciliação #' + g.id + ' (' + T.esc(M.REGRAS_AB[g.regra] || '') + ')"><b>#' + g.id + '</b></button><br><span class="selo opcional">' + TIPO_AB[g.tipo] + '</span>' : '') + '</td></tr>';
@@ -458,6 +477,7 @@
     const nSel = E.selA.size + E.selB.size;
     if (!nSel) { barra.innerHTML = '<p class="suave pequeno" style="margin:10px 0">Para conciliar à mão: marque os itens na Parte A e/ou na Parte B — aparece embaixo a opção <b>Conciliar manualmente</b>, que cria o próximo ID.</p>'; return; }
     const bate = Math.abs(dif) < 1;
+    // Marcado fora da lista só acontece com a busca de cima ou o "Mostrar" (os filtros de cada parte deixam no topo).
     const naTela = new Set((E.listaA || []).concat(E.listaB || []).map((x) => x.id));
     const fora = Array.from(E.selA).concat(Array.from(E.selB)).filter((id) => !naTela.has(id)).length;
     // Barra fixa no rodapé: aparece assim que marca, sem precisar rolar a tela.
