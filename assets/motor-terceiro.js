@@ -42,6 +42,177 @@
     return p.length ? 'nome:' + p.join(' ') : 'nome:' + Util.normalizarNome(t.nome);
   }
 
+  // Documento comparável dos dois lados: só os dígitos, sem zeros à esquerda ("011719" = "11719").
+  function normalizarDocumento(s) {
+    return String(s === null || s === undefined ? '' : s).replace(/\D+/g, '').replace(/^0+/, '');
+  }
+
+  // Documento de uma linha do razão (medido num razão real, 14/09/2026):
+  //  1) o número depois de "NF:" ou "REF." (nota e baixa: "CONF. NF: 011719", "BAIXA PGTO. REF. 2458");
+  //  2) na baixa por compensação, o número que vem DEPOIS do código da operação: em
+  //     "BAIXA POR COMPENSAÇÃO NA TOP 1703 81" a nota é a 81 (1703 é a operação; a coluna
+  //     Núm. Documento traz o número da compensação, que não existe no aging) — regra do Dony;
+  //  3) senão, a coluna Núm. Documento ("DESPESAS COM 072026", "RENEGOCIAÇÃO ... 062026").
+  function documentoDaLinha(l) {
+    const h = documentoDoHistorico(l.historico);
+    if (h) return normalizarDocumento(h);
+    const top = Util.semAcento(String(l.historico || '')).toUpperCase().match(/COMPENSACAO\s+NA\s+TOP\s+\d+\s+0*(\d+)/);
+    if (top) return normalizarDocumento(top[1]);
+    return normalizarDocumento(l.documento);
+  }
+
+  // ------------------------------------------------------------------
+  // Conciliar A × B pelo DOCUMENTO (pedido do Dony, 14/09/2026): "um botão de conciliar, que
+  // quando eu apertar ele acha tudo e já marca tudo que está conciliado" — casando pelo
+  // documento, que nesse relatório está dos dois lados, e não pelo nome do fornecedor. Cada
+  // conciliação ganha um ID sequencial (1, 2, 3…): A com A é um ID, A com B é outro.
+  //   Parte A (contabilidade) = títulos do aging do mês passado (+) e linhas do razão do mês
+  //   (nota = crédito, +; baixa = débito, −). Parte B (financeiro) = títulos do aging do mês.
+  // Camadas, da mais segura para a mais larga (a simples primeiro, para não gastar nota numa
+  // combinação — Parte 7.11):
+  //   1. doc-fornecedor-par — mesmo documento e fornecedor: a baixa mata a nota (ou o título do
+  //      mês passado) de mesmo valor; a mais antiga primeiro; baixa antes da nota não mata;
+  //   2. doc-fornecedor — o que sobrou do mesmo documento e fornecedor soma igual em A e em B;
+  //   3. doc-par e 4. doc — as mesmas duas só pelo documento (o nome muda de um lado para o
+  //      outro: nome fantasia × razão social, a marca do aplicativo × a empresa que emite a nota).
+  // O fornecedor entra primeiro porque há documento GENÉRICO: "072026" (despesas de julho)
+  // aparece em muitos fornecedores, e a NF 60 de pessoas diferentes também.
+  // ------------------------------------------------------------------
+  const REGRAS_AB = {
+    'doc-fornecedor-par': 'mesmo documento e fornecedor: a baixa mata a nota de mesmo valor',
+    'doc-fornecedor': 'mesmo documento e fornecedor: soma igual nos dois lados',
+    'doc-par': 'mesmo documento, nome diferente: a baixa mata a nota de mesmo valor',
+    'doc': 'mesmo documento, nome diferente: soma igual nos dois lados',
+    'manual': 'marcado à mão',
+  };
+
+  // Itens das partes A e B, com identidade que nasce do CONTEÚDO (Parte 4): trocar a ordem
+  // das linhas do arquivo não troca o ID de ninguém. `legado` traduz os ids da versão 5
+  // (posição no aging e digital do razão) para os de agora.
+  function itensAB(entrada, r) {
+    const A = [], B = [];
+    const porId = new Map();
+    const legado = new Map();
+    const lancs = (entrada.contaRazao && entrada.contaRazao.lancamentos) || [];
+    function guardar(x) {
+      let id = x.id, n = 1;
+      while (porId.has(id)) id = x.id + '~' + (n++);
+      x.id = id;
+      porId.set(id, x);
+      (x.lado === 'A' ? A : B).push(x);
+      return x;
+    }
+    function titulos(lista, lado, fonte, prefixo, prefixoLegado) {
+      const vezes = new Map();
+      (lista || []).forEach((t, i) => {
+        const doc = normalizarDocumento(t.documento);
+        const base = [doc, t.parcela || '', Util.soDigitos(t.cnpj), t.valor, t.vencimento || '', Util.normalizarNome(t.nome)].join('|');
+        const n = vezes.get(base) || 0; vezes.set(base, n + 1);
+        const x = guardar({ id: prefixo + ':' + Util.hash8(base + '|' + n), lado, fonte, doc, parcela: t.parcela || '',
+          chave: chaveDoTitulo(t), nome: t.nome, cnpj: t.cnpj || '', data: t.vencimento || '', ordem: 0, historico: '', valor: t.valor });
+        legado.set(prefixoLegado + ':' + i, x.id);
+      });
+    }
+    titulos(entrada.agingAnterior && entrada.agingAnterior.titulos, 'A', 'anterior', 'TA', 'AGA');
+    r.linhas.forEach((l) => {
+      const lc = lancs[l.i];
+      const d = r.porLinha.get(l.digital);
+      const x = guardar({ id: 'RZ:' + Util.hash8(l.digital), lado: 'A', fonte: lc.credito > 0 ? 'nota' : 'baixa',
+        doc: documentoDaLinha(lc), parcela: '', chave: d.chave, nome: d.nome, cnpj: '', data: lc.data, ordem: l.dia,
+        historico: lc.historico || '', valor: lc.credito > 0 ? lc.credito : -lc.debito, linha: l.i });
+      legado.set('RAZ:' + l.digital, x.id);
+    });
+    titulos(entrada.agingAtual && entrada.agingAtual.titulos, 'B', 'atual', 'TB', 'AGB');
+    return { A, B, porId, legado };
+  }
+
+  function tipoAB(qtdA, qtdB) { return qtdA && qtdB ? 'AxB' : (qtdA ? 'AxA' : 'BxB'); }
+  function proximoIdAB(grupos) { return (grupos || []).reduce((m, g) => Math.max(m, Number(g.id) || 0), 0) + 1; }
+
+  // Ordem estável dos grupos (o mesmo arquivo dá sempre os mesmos IDs): documento, depois fornecedor.
+  function compararChave(x, y) {
+    const [dx, fx] = x[0].split('|'), [dy, fy] = y[0].split('|');
+    return dx.length - dy.length || (dx < dy ? -1 : dx > dy ? 1 : 0) || ((fx || '') < (fy || '') ? -1 : (fx || '') > (fy || '') ? 1 : 0);
+  }
+
+  /**
+   * Acha tudo o que concilia pelo documento entre os itens ainda em aberto.
+   * @param itens     resultado de itensAB
+   * @param existentes conciliações já feitas [{ id, a:[ids], b:[ids] }] (os itens delas não entram)
+   * @param quem, quando  gravados em cada conciliação nova
+   * @returns lista de conciliações novas, com IDs a partir do próximo livre
+   */
+  function conciliarAutomatico(itens, existentes, quem, quando) {
+    const usados = new Set();
+    (existentes || []).forEach((g) => (g.a || []).concat(g.b || []).forEach((id) => usados.add(id)));
+    let proximo = proximoIdAB(existentes);
+    const candidatos = itens.A.concat(itens.B).filter((x) => x.doc && !usados.has(x.id));
+    const livre = new Set(candidatos.map((x) => x.id));
+    const novos = [];
+    const soma = (xs) => xs.reduce((s, x) => s + x.valor, 0);
+    const porOrdem = (p, q) => p.ordem - q.ordem;
+
+    function registrar(xs, regra) {
+      const a = xs.filter((x) => x.lado === 'A'), b = xs.filter((x) => x.lado === 'B');
+      const nomeDe = (a.find((x) => x.chave !== SEM) || b[0] || a[0]).nome;
+      const g = { id: proximo++, tipo: tipoAB(a.length, b.length), regra, documento: xs[0].doc, nome: nomeDe,
+        a: a.map((x) => x.id), b: b.map((x) => x.id), valorA: soma(a), valorB: soma(b), quem: quem || '', quando: quando || '' };
+      // "A nota nasce ANTES do pagamento" (7.11): baixa com data anterior a todas as notas do
+      // razão (sem título do mês passado no grupo) concilia, mas fica marcada para conferir.
+      // Caso real: despesa lançada no último dia do mês e paga antes.
+      const notas = a.filter((x) => x.valor > 0);
+      const baixas = a.filter((x) => x.valor < 0);
+      if (baixas.length && notas.length && !notas.some((x) => x.fonte === 'anterior')) {
+        const primeira = Math.min.apply(null, notas.map((x) => x.ordem));
+        if (baixas.some((x) => x.ordem < primeira)) g.aviso = 'baixa-antes-da-nota';
+      }
+      novos.push(g);
+      xs.forEach((x) => livre.delete(x.id));
+    }
+    function agrupar(comFornecedor) {
+      const m = new Map();
+      for (const x of candidatos) {
+        if (!livre.has(x.id) || (comFornecedor && x.chave === SEM)) continue;
+        const k = comFornecedor ? x.doc + '|' + x.chave : x.doc;
+        if (!m.has(k)) m.set(k, []);
+        m.get(k).push(x);
+      }
+      return Array.from(m.entries()).sort(compararChave).map((e) => e[1]);
+    }
+    function pares(regra, comFornecedor) {
+      for (const xs of agrupar(comFornecedor)) {
+        const notas = xs.filter((x) => x.lado === 'A' && x.valor > 0).sort(porOrdem);
+        const baixas = xs.filter((x) => x.lado === 'A' && x.valor < 0).sort(porOrdem);
+        for (const bx of baixas) {
+          const j = notas.findIndex((n) => n.valor === -bx.valor && n.ordem <= bx.ordem);
+          if (j >= 0) { registrar([notas[j], bx], regra); notas.splice(j, 1); }
+        }
+      }
+    }
+    function grupos(regra, comFornecedor) {
+      for (const xs of agrupar(comFornecedor)) {
+        if (xs.length < 2) continue;
+        if (soma(xs.filter((x) => x.lado === 'A')) === soma(xs.filter((x) => x.lado === 'B'))) registrar(xs, regra);
+      }
+    }
+    pares('doc-fornecedor-par', true);
+    grupos('doc-fornecedor', true);
+    pares('doc-par', false);
+    grupos('doc', false);
+    return novos;
+  }
+
+  // Em aberto de cada lado, depois das conciliações. A − B = a diferença da ponte, sempre
+  // (cada conciliação que bate tira o mesmo valor dos dois lados).
+  function emAbertoAB(itens, conciliacoes) {
+    const usados = new Set();
+    (conciliacoes || []).forEach((g) => (g.a || []).concat(g.b || []).forEach((id) => usados.add(id)));
+    const abertosA = itens.A.filter((x) => !usados.has(x.id));
+    const abertosB = itens.B.filter((x) => !usados.has(x.id));
+    const soma = (xs) => xs.reduce((s, x) => s + x.valor, 0);
+    return { abertosA, abertosB, valorA: soma(abertosA), valorB: soma(abertosB), usados };
+  }
+
   // Os leitores (ler-financeiro, ler-razao) já entregam os valores em CENTAVOS inteiros;
   // aqui não se multiplica de novo.
 
@@ -189,5 +360,8 @@
     };
   }
 
-  return { calcular, fornecedorDoHistorico, documentoDoHistorico, chaveDoTitulo };
+  return {
+    calcular, fornecedorDoHistorico, documentoDoHistorico, chaveDoTitulo,
+    normalizarDocumento, documentoDaLinha, itensAB, conciliarAutomatico, emAbertoAB, tipoAB, proximoIdAB, REGRAS_AB,
+  };
 });
