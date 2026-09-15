@@ -58,7 +58,7 @@
           (falta ? ' — os arquivos já podem subir aqui embaixo.' : '') + '</div></div>') +
         (falta ? '<div class="aviso info" style="margin-bottom:12px"><span class="icone-aviso">📁</span><div><b>Suba cada razão no seu lugar.</b> ' +
           'O programa sabe o que é pelo lugar onde você coloca. Falta: ' + [!arqs.F.length ? 'o razão de fornecedores' : '', !arqs.A.length ? 'o razão de adiantamento a fornecedores' : ''].filter(Boolean).join(' e ') + '.</div></div>' : '') +
-        painelDoPasso1(codigo, comp, arqs, falta);
+        painelDoPasso1(codigo, comp, arqs, true);
       ligarPainelDoPasso1(el.querySelector('.arquivos-passo'), codigo, comp, arqs);
       return;
     }
@@ -128,9 +128,12 @@
     return !!(app().demonstracao && raiz.Demonstracao && String(raiz.Demonstracao.EMPRESA.codigo) === String(codigo));
   }
 
-  function painelDoPasso1(codigo, comp, arqs, aberto) {
+  function chaveDoPainel1(codigo, comp) { return codigo + '|passo1|' + comp; }
+
+  // fixo = sempre à vista, sem "Fechar" (tela de falta de arquivo ou do checklist).
+  function painelDoPasso1(codigo, comp, arqs, fixo) {
     return raiz.TelaSubir.painel({
-      titulo: 'Arquivos do passo', resumo: U.nomeCompetencia(comp), aberto, lugares: lugaresDoPasso1(comp, arqs),
+      chave: chaveDoPainel1(codigo, comp), titulo: 'Arquivos do passo', resumo: U.nomeCompetencia(comp), fixo, lugares: lugaresDoPasso1(comp, arqs),
       depois: eDemonstracao(codigo)
         ? '<div class="linha-flex" style="margin-top:10px"><button type="button" class="botao" data-exemplo>🧪 Usar os razões de exemplo</button>' +
           '<span class="suave pequeno">Os razões de fornecedores e de adiantamento da empresa de demonstração (janeiro a julho/2026), com fornecedores, CNPJs e valores inventados.</span></div>'
@@ -203,7 +206,9 @@
       '<p class="suave">' + T.esc(E.emp.codigo + ' · ' + E.emp.nome) + ' · ' + U.nomeCompetencia(E.comp) + '</p>' +
       '<p class="suave pequeno">Fornecedores: ' + contaTxt(E.arquivos.F) + ' · Adiantamento: ' + contaTxt(E.arquivos.A) +
       (E.arquivos.pagar ? ' · Contas a pagar: ' + E.arquivos.pagar.meta.titulos + ' títulos (ajuda a reconhecer nomes)' : '') + '</p></div>' +
-      '<span class="guardado" id="guardado" title="Cada decisão é gravada na hora, sozinha">' + (E.guardadoEm ? 'guardado às ' + U.horaLocal(E.guardadoEm) : 'nenhuma decisão tomada ainda') + '</span></div>' +
+      '<div class="linha-flex" style="gap:12px"><span class="guardado" id="guardado" title="Cada decisão é gravada na hora, sozinha">' + (E.guardadoEm ? 'guardado às ' + U.horaLocal(E.guardadoEm) : 'nenhuma decisão tomada ainda') + '</span>' +
+      // Arquivos em cima à direita (Dony, 15/09/2026: "um lugar de carregar novos arquivos" e excluir).
+      raiz.TelaSubir.botao(chaveDoPainel1(E.codigo, E.comp)) + '</div></div>' +
       painelDoPasso1(E.codigo, E.comp, E.arqs, false) +
       '<div id="avisos"></div>' +
       '<div class="grade-4" id="cartoes" style="margin-top:14px"></div>' +
@@ -212,6 +217,7 @@
       '<div id="aba"></div>' +
       '<div id="barra"></div>';
     ligarPainelDoPasso1(E.el.querySelector('.arquivos-passo'), E.codigo, E.comp, E.arqs);
+    raiz.TelaSubir.ligarBotao(E.el.querySelector('[data-abrir-arquivos]'));
     desenharAvisos();
     desenharCartoes();
     desenharAbas();

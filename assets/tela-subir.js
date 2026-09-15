@@ -14,7 +14,8 @@
  *     papel (razão: 'principal' | 'adiantamento'), varias (razão com mais de uma conta), opcional,
  *     periodo: { de, ate } (razão: confere se há lançamento; de = null → tudo até o fim do mês),
  *     nomePeriodo, arquivos: [meta, ...] (o que o passo usa agora) }
- * e usa painel() para desenhar e ligar() para os botões, o arrastar e o apagar.
+ * e usa painel() para desenhar o quadro, ligar() para os lugares (carregar, arrastar, excluir) e, no
+ * cabeçalho do passo, botao() + ligarBotao() para abrir e fechar o quadro ("📁 Carregar ou excluir arquivos").
  */
 (function (raiz) {
   'use strict';
@@ -65,16 +66,35 @@
       ? 'conta ' + T.esc(m.conta.codigo + ' ' + (m.conta.nome || '')) + ' · ' + (m.lancamentos || 0) + ' lanç.' + (m.periodo ? ' · ' + T.esc(m.periodo.de + ' a ' + m.periodo.ate) : '')
       : (m.titulos || 0) + ' títulos · ' + T.moeda(m.total || 0);
     return '<div class="arquivo-lugar"><div><b>' + T.esc(m.arquivo) + '</b><br><span class="suave">' + detalhe + outroMes + quem + '</span></div>' +
-      '<button type="button" class="botao pequeno leve" data-apagar-arquivo="' + T.esc(m.id) + '" title="Tirar este arquivo (a cópia vai para _apagados)">Apagar</button></div>';
+      '<button type="button" class="botao pequeno perigo" data-apagar-arquivo="' + T.esc(m.id) + '" title="Excluir este arquivo (a cópia vai para _apagados)">🗑 Excluir</button></div>';
   }
 
-  // op: { titulo, resumo, aberto, lugares, antes (html antes dos lugares), depois (html depois) }
+  // Quadros abertos pelo botão de cima (continuam abertos quando a tela redesenha depois de carregar ou excluir).
+  const abertos = new Set();
+
+  // O botão de cima, à direita, no cabeçalho do passo (Dony, 15/09/2026: "quero ali em cima à direita
+  // um lugar de carregar novos arquivos" e "excluir os anexos que eu coloquei").
+  function botao(chave) {
+    const aberto = abertos.has(chave);
+    return '<button type="button" class="botao pequeno primario" data-abrir-arquivos="' + T.esc(chave) + '" aria-expanded="' + aberto + '" ' +
+      'title="Ver os arquivos desta conciliação, carregar novos ou excluir">' + (aberto ? '📁 Fechar os arquivos' : '📁 Carregar ou excluir arquivos') + '</button>';
+  }
+
+  // op: { chave, titulo, resumo, lugares, antes (html antes dos lugares), depois (html depois),
+  //       aberto (abre sozinho), fixo (sempre à vista e sem "Fechar": quando falta arquivo) }
   function painel(op) {
     const lugares = op.lugares;
     const faltam = lugares.filter((l) => !l.opcional && !l.arquivos.length).length;
-    return '<details class="cartao corpo arquivos-passo"' + (op.aberto ? ' open' : '') + '>' +
-      '<summary><b>📁 ' + T.esc(op.titulo || 'Arquivos deste passo') + '</b> <span class="suave pequeno">· ' + (op.resumo ? T.esc(op.resumo) + ' · ' : '') +
-      (faltam ? '<span class="falta">' + faltam + ' arquivo(s) faltando</span>' : 'arquivos guardados') + '</span></summary>' +
+    const guardados = lugares.reduce((s, l) => s + l.arquivos.length, 0);
+    if (op.aberto && op.chave) abertos.add(op.chave);
+    const visivel = op.fixo || (op.chave && abertos.has(op.chave));
+    return '<section class="cartao corpo arquivos-passo" data-painel-arquivos="' + T.esc(op.chave || '') + '"' + (visivel ? '' : ' hidden') + '>' +
+      '<div class="cab-arquivos"><h3>📁 ' + T.esc(op.titulo || 'Arquivos deste passo') + '</h3>' +
+      '<span class="suave pequeno">' + (op.resumo ? T.esc(op.resumo) + ' · ' : '') +
+      (faltam ? '<span class="falta">' + faltam + ' arquivo(s) faltando</span>' : guardados + ' arquivo(s) guardado(s)') + '</span>' +
+      (op.fixo ? '' : '<button type="button" class="botao pequeno" data-fechar-arquivos>✕ Fechar</button>') + '</div>' +
+      '<p class="suave pequeno" style="margin:0 0 10px">Cada arquivo tem o seu lugar: <b>⬆ Carregar</b> (ou arraste o arquivo em cima do lugar) e <b>🗑 Excluir</b>. ' +
+      'Carregar num lugar que já tem arquivo troca o arquivo; o antigo vai para a pasta _apagados.</p>' +
       (op.antes || '') +
       '<div class="lugares">' + lugares.map((l) => {
         const tem = l.arquivos.length > 0;
@@ -84,12 +104,35 @@
           '<div class="arquivos-do-lugar pequeno">' + (tem ? l.arquivos.map((m) => descreverArquivo(m, l)).join('')
             : l.opcional ? '<span class="suave">opcional</span>' : '<span class="falta">falta</span>') + '</div>' +
           '<div class="linha-flex" style="margin-top:auto"><button type="button" class="botao pequeno' + (tem || l.opcional ? '' : ' primario') + '" data-subir-lugar="' + l.id + '"' +
-          (l.varias && tem ? ' title="A mesma conta troca o arquivo; outra conta soma"' : '') + '>' + (!tem ? '⬆ Subir' : l.varias ? '⬆ Subir outra conta' : 'Trocar') + '</button>' +
+          (l.varias && tem ? ' title="A mesma conta troca o arquivo; outra conta soma"' : '') + '>' + (!tem ? '⬆ Carregar' : l.varias ? '⬆ Carregar outra conta' : '⬆ Trocar') + '</button>' +
           '<span class="suave pequeno">ou arraste o arquivo aqui</span></div>' +
           '<input type="file" class="escondido" data-arquivo-lugar="' + l.id + '"' + (l.varias ? ' multiple' : '') + ' accept=".xls,.xlsx,.xlsm,.csv,.txt"></div>';
       }).join('') + '</div>' +
       (op.depois || '') +
-      '</details>';
+      '</section>';
+  }
+
+  // Mostra ou esconde o quadro (e acerta o botão de cima).
+  function mostrarPainel(p, abrir) {
+    if (!p) return;
+    const chave = p.getAttribute('data-painel-arquivos');
+    p.hidden = !abrir;
+    if (chave) { if (abrir) abertos.add(chave); else abertos.delete(chave); }
+    const bt = chave && Array.from(document.querySelectorAll('[data-abrir-arquivos]')).find((b) => b.getAttribute('data-abrir-arquivos') === chave);
+    if (bt) {
+      bt.setAttribute('aria-expanded', String(abrir));
+      bt.textContent = abrir ? '📁 Fechar os arquivos' : '📁 Carregar ou excluir arquivos';
+    }
+    if (abrir && p.scrollIntoView) p.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }
+
+  function ligarBotao(bt) {
+    if (!bt) return;
+    bt.addEventListener('click', () => {
+      const chave = bt.getAttribute('data-abrir-arquivos');
+      const p = Array.from(document.querySelectorAll('[data-painel-arquivos]')).find((x) => x.getAttribute('data-painel-arquivos') === chave);
+      mostrarPainel(p, !!(p && p.hidden));
+    });
   }
 
   function ligar(el, codigo, lugares) {
@@ -111,6 +154,7 @@
       await subirVarios(doLugar(inp.getAttribute('data-arquivo-lugar')), arquivos);
     });
     el.addEventListener('click', async (ev) => {
+      if (ev.target.closest('[data-fechar-arquivos]')) { mostrarPainel(el, false); return; }
       const b = ev.target.closest('[data-subir-lugar]');
       if (b) { const inp = el.querySelector('[data-arquivo-lugar="' + b.getAttribute('data-subir-lugar') + '"]'); if (inp) inp.click(); return; }
       const ap = ev.target.closest('[data-apagar-arquivo]');
@@ -119,7 +163,7 @@
         await apagar(codigo, l, l && l.arquivos.find((m) => m.id === ap.getAttribute('data-apagar-arquivo')));
       }
     });
-    // Arquivo solto no painel, fora de um lugar: não deixa o navegador abrir o arquivo no lugar do programa.
+    // Arquivo solto no quadro, fora de um lugar: não deixa o navegador abrir o arquivo no lugar do programa.
     el.addEventListener('dragover', (ev) => ev.preventDefault());
     el.addEventListener('drop', (ev) => { ev.preventDefault(); T.avisoRapido('Solte o arquivo em cima do lugar dele.', null, 4000); });
     el.querySelectorAll('.lugar').forEach((s) => {
@@ -266,18 +310,18 @@
     const juntos = doMesmoLugar(await arm.arquivos(codigo), meta);
     const outros = juntos.filter((m) => m.id !== meta.id).length;
     const sim = await T.confirmar({
-      titulo: 'Apagar este arquivo?',
+      titulo: 'Excluir este arquivo?',
       texto: '<b>' + T.esc(meta.arquivo) + '</b>' + (meta.conta ? ' · conta ' + T.esc(meta.conta.codigo + ' ' + (meta.conta.nome || '')) : '') +
         ' — ' + T.esc(lugar.nome) + (meta.competencia !== lugar.competencia ? ' (guardado em ' + U.nomeCompetencia(meta.competencia) + ')' : '') + '.' +
         (outros ? ' Vão junto ' + outros + ' versão(ões) antiga(s) do mesmo lugar.' : '') +
         '<br><br>Ele sai de todos os passos que usam este arquivo. A cópia vai para a pasta <b>_apagados</b> da pasta de dados (nada some de verdade).',
-      botao: 'Apagar', perigo: true,
+      botao: 'Excluir', perigo: true,
     });
     if (!sim) return false;
     try {
       for (const m of (juntos.some((m) => m.id === meta.id) ? juntos : juntos.concat([meta]))) await arm.apagarArquivo(m.id);
       await arm.registrarNoLog({ codigo, acao: 'arquivo-apagado-do-lugar', alvo: (lugar.log || lugar.id) + '/' + U.anoMes(lugar.competencia), detalhe: meta.arquivo });
-      T.avisoRapido('Arquivo apagado: ' + meta.arquivo, 'ok');
+      T.avisoRapido('Arquivo excluído: ' + meta.arquivo, 'ok');
       if (!(op && op.semRota)) app().mostrarRota();
       return true;
     } catch (e) {
@@ -286,5 +330,5 @@
     }
   }
 
-  raiz.TelaSubir = { painel, ligar, subir, apagar, guardarContaDoRazao, guardarTitulos, doMesmoLugar };
+  raiz.TelaSubir = { painel, botao, ligar, ligarBotao, subir, apagar, guardarContaDoRazao, guardarTitulos, doMesmoLugar };
 })(self);

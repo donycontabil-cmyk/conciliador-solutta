@@ -158,7 +158,7 @@
         '<p class="suave">' + T.esc(dados.emp.codigo + ' · ' + dados.emp.nome) + ' · ' + U.nomeCompetencia(comp) + '</p></div></div>' +
         '<div class="aviso info" style="margin-bottom:12px"><span class="icone-aviso">📁</span><div><b>Escolha o período e suba cada arquivo no seu lugar.</b> ' +
         'O programa sabe o que é pelo lugar onde você coloca — não precisa adivinhar nada. Falta: ' + dados.falta.map(T.esc).join('; ') + '.</div></div>' +
-        painelArquivos(ctx, true);
+        painelArquivos(ctx, false, true);
       ligarPainel(el.querySelector('.arquivos-passo'), ctx);
       return;
     }
@@ -235,7 +235,10 @@
     ];
   }
 
-  function painelArquivos(ctx, aberto) {
+  function chaveDoPainel(ctx) { return ctx.codigo + '|' + ctx.cfg.id + '|' + ctx.comp; }
+
+  // aberto = abre sozinho; fixo = sempre à vista, sem "Fechar" (quando falta arquivo).
+  function painelArquivos(ctx, aberto, fixo) {
     const { cfg, comp, arqs, periodoDe } = ctx;
     const opcoes = [['', 'Só ' + U.nomeCompetencia(comp)]];
     for (let i = 1; i <= 23; i++) { const de = U.somarMeses(comp, -i); opcoes.push([de, nomeDoPeriodo(de, comp)]); }
@@ -243,7 +246,7 @@
       ? '<div class="aviso info" style="margin:0 0 10px"><span class="icone-aviso">📅</span><div>O razão guardado vai de <b>' + T.esc(arqs.razao.periodo.de) + ' a ' + T.esc(arqs.razao.periodo.ate) + '</b>. ' +
         '<button type="button" class="botao pequeno" data-usar-periodo="' + arqs.sugestaoDe + '">Conciliar o período ' + T.esc(nomeDoPeriodo(arqs.sugestaoDe, comp)) + '</button></div></div>' : '';
     return raiz.TelaSubir.painel({
-      titulo: 'Período e arquivos desta conciliação', resumo: nomeDoPeriodo(periodoDe, comp), aberto, lugares: lugaresDoPasso(ctx),
+      chave: chaveDoPainel(ctx), titulo: 'Período e arquivos desta conciliação', resumo: nomeDoPeriodo(periodoDe, comp), aberto, fixo, lugares: lugaresDoPasso(ctx),
       antes: '<div class="linha-flex periodo-passo"><label class="pequeno" for="periodo-de"><b>Período da conciliação</b></label>' +
         '<select class="filtro" id="periodo-de" data-periodo-de>' + opcoes.map((o) => '<option value="' + o[0] + '"' + ((periodoDe || '') === o[0] ? ' selected' : '') + '>' + T.esc(o[1]) + '</option>').join('') + '</select>' +
         '<span class="suave pequeno">Parte A = ' + T.esc(cfg.nomeAging) + ' de ' + T.esc(U.nomeCompetencia(arqs.compAnterior)) + ' + razão de ' + T.esc(nomeDoPeriodo(periodoDe, comp)) +
@@ -339,6 +342,9 @@
   // ------------------------------------------------------------------
   function desenharTudo() {
     const r = E.r;
+    // Quadro de arquivos escondido (abre pelo botão de cima); abre sozinho quando o razão guardado
+    // começa antes do período e nada foi conciliado ainda. Vem antes do cabeçalho: o botão mostra se está aberto.
+    const painel = painelArquivos(contextoDoPainel(), !!(E.arqs && E.arqs.sugestaoDe) && !(E.decisoes.conciliacoesAB || []).length, false);
     E.el.innerHTML =
       '<a class="voltar" href="' + E.voltar + '">← Fornecedores · ' + U.nomeCompetencia(E.comp) + '</a>' +
       '<div class="cabecalho"><div class="titulos"><h1>Passo ' + E.cfg.numero + ' · ' + T.esc(E.cfg.titulo) + '</h1>' +
@@ -352,15 +358,17 @@
             ': a Parte A usa só os <b>' + E.razaoDoMes.doMes + '</b> lançamentos de ' + T.esc(E.entrada.mesAtual) + ' (de ' + E.razaoDoMes.total + ' no arquivo).</p>' : '') +
       '</div>' +
       '<div class="linha-flex" style="gap:12px"><span class="guardado" id="guardado" title="Cada decisão é gravada na hora">' + (E.guardadoEm ? 'guardado às ' + U.horaLocal(E.guardadoEm) : 'nenhuma decisão tomada ainda') + '</span>' +
+      // Arquivos em cima à direita (Dony, 15/09/2026: "um lugar de carregar novos arquivos" e excluir).
+      raiz.TelaSubir.botao(chaveDoPainel(contextoDoPainel())) +
       '<a class="botao pequeno" href="#/empresa/' + encodeURIComponent(E.codigo) + '/fornecedores/' + U.anoMes(E.comp) + '/' + E.cfg.id + '-relatorio" title="Relatório da conciliação para imprimir, salvar em PDF ou baixar em Excel">📄 Relatório</a>' +
       '<button type="button" class="botao pequeno perigo" data-acao="limpar-conciliacao" title="Apagar tudo o que foi feito neste passo num mês e começar do zero">🧹 Limpar conciliação</button></div></div>' +
-      // Painel fechado; abre sozinho quando o razão guardado começa antes do período e nada foi conciliado ainda.
-      painelArquivos(contextoDoPainel(), !!(E.arqs && E.arqs.sugestaoDe) && !(E.decisoes.conciliacoesAB || []).length) +
+      painel +
       desenharPonte() +
       '<div class="abas" id="abas" role="tablist"></div>' +
       '<div class="filtros" id="filtros"></div>' +
       '<div id="aba"></div>';
     ligarPainel(E.el.querySelector('.arquivos-passo'), contextoDoPainel());
+    raiz.TelaSubir.ligarBotao(E.el.querySelector('[data-abrir-arquivos]'));
     desenharAbas();
     desenharAba();
     E.el.addEventListener('click', aoClicar);
