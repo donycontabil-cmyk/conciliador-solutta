@@ -81,10 +81,27 @@
   const REGRAS_AB = {
     'doc-fornecedor-par': 'mesmo documento e fornecedor: a baixa mata a nota de mesmo valor',
     'doc-fornecedor': 'mesmo documento e fornecedor: soma igual nos dois lados',
+    'doc-fornecedor-valor': 'mesmo documento e fornecedor: uma nota e um título de mesmo valor (sobra outro título do mesmo documento)',
+    'doc-nome-par': 'mesmo documento e mesmo nome de fornecedor: a baixa mata a nota de mesmo valor',
+    'doc-nome': 'mesmo documento e mesmo nome de fornecedor: soma igual nos dois lados',
+    'doc-nome-valor': 'mesmo documento e mesmo nome de fornecedor: uma nota e um título de mesmo valor',
     'doc-par': 'mesmo documento, nome diferente: a baixa mata a nota de mesmo valor',
     'doc': 'mesmo documento, nome diferente: soma igual nos dois lados',
     'manual': 'marcado à mão',
   };
+  // Rótulo curto de cada regra na tela e no relatório.
+  const COMO_AB = {
+    'doc-fornecedor-par': 'doc + fornecedor · par', 'doc-fornecedor': 'doc + fornecedor', 'doc-fornecedor-valor': 'doc + fornecedor · valor',
+    'doc-nome-par': 'doc + nome · par', 'doc-nome': 'doc + nome', 'doc-nome-valor': 'doc + nome · valor',
+    'doc-par': 'só doc · par', 'doc': 'só doc', 'manual': 'à mão',
+  };
+
+  // Nome do fornecedor comparável dos dois lados ("AGUA VIVA" = "Agua Viva"): as palavras próprias
+  // do nome que aparece na tela (o do aging na Parte B; o que a régua deu, na Parte A).
+  function nomeComparavel(x) {
+    const p = MotorNomes.palavrasProprias(MotorNomes.limparNome(x.nome || ''));
+    return p.length ? p.join(' ') : Util.normalizarNome(x.nome || '');
+  }
 
   // Identidade de cada título de um aging (Parte 4): nasce do conteúdo (documento, parcela,
   // CNPJ, valor, vencimento e nome) + quantas vezes o mesmo conteúdo já apareceu. O mesmo
@@ -254,18 +271,24 @@
       novos.push(g);
       xs.forEach((x) => livre.delete(x.id));
     }
-    function agrupar(comFornecedor) {
+    // Como separar os itens de um mesmo documento: 'fornecedor' (a chave da régua, quase sempre o
+    // CNPJ), 'nome' (o nome do fornecedor escrito igual nos dois lados) ou só o documento.
+    function agrupar(por) {
       const m = new Map();
       for (const x of candidatos) {
-        if (!livre.has(x.id) || (comFornecedor && x.chave === SEM)) continue;
-        const k = comFornecedor ? x.doc + '|' + x.chave : x.doc;
+        if (!livre.has(x.id)) continue;
+        // Linha sem fornecedor não tem nome de verdade ("Sem fornecedor"): fica para o "só doc".
+        if (por !== 'doc' && x.chave === SEM) continue;
+        let k = x.doc;
+        if (por === 'fornecedor') k += '|' + x.chave;
+        else if (por === 'nome') { const n = nomeComparavel(x); if (!n) continue; k += '|' + n; }
         if (!m.has(k)) m.set(k, []);
         m.get(k).push(x);
       }
       return Array.from(m.entries()).sort(compararChave).map((e) => e[1]);
     }
-    function pares(regra, comFornecedor) {
-      for (const xs of agrupar(comFornecedor)) {
+    function pares(regra, por) {
+      for (const xs of agrupar(por)) {
         const notas = xs.filter((x) => x.lado === 'A' && x.valor > 0).sort(porOrdem);
         const baixas = xs.filter((x) => x.lado === 'A' && x.valor < 0).sort(porOrdem);
         for (const bx of baixas) {
@@ -274,17 +297,43 @@
         }
       }
     }
-    function grupos(regra, comFornecedor) {
-      for (const xs of agrupar(comFornecedor)) {
+    function grupos(regra, por) {
+      for (const xs of agrupar(por)) {
         if (xs.length < 2) continue;
         if (soma(xs.filter((x) => x.lado === 'A')) === soma(xs.filter((x) => x.lado === 'B'))) registrar(xs, regra);
       }
     }
-    pares('doc-fornecedor-par', true);
-    grupos('doc-fornecedor', true);
-    pares('doc-par', false);
-    grupos('doc', false);
+    // Documento e fornecedor iguais, mas a soma do grupo não bate (sobrou outro título do mesmo
+    // documento): casa uma nota (ou título do mês passado) com um título de MESMO valor.
+    // Pedido do Dony (15/09/2026): uma despesa 82026 ficou em aberto porque o 82026 também é de
+    // outro fornecedor; com documento e fornecedor ele acha. No caso real o aging do mês veio sem
+    // CNPJ para esse fornecedor e a régua ligou a nota ao CNPJ: por isso existe também o "doc + nome".
+    function valores(regra, por) {
+      for (const xs of agrupar(por)) {
+        const ladoA = xs.filter((x) => x.lado === 'A').sort(porOrdem);
+        const ladoB = xs.filter((x) => x.lado === 'B').sort(porData);
+        if (!ladoA.length || !ladoB.length) continue;
+        for (const a of ladoA) {
+          const j = ladoB.findIndex((b) => b.valor === a.valor && a.valor !== 0);
+          if (j >= 0) { registrar([a, ladoB[j]], regra); ladoB.splice(j, 1); }
+        }
+      }
+    }
+    pares('doc-fornecedor-par', 'fornecedor');
+    grupos('doc-fornecedor', 'fornecedor');
+    valores('doc-fornecedor-valor', 'fornecedor');
+    pares('doc-nome-par', 'nome');
+    grupos('doc-nome', 'nome');
+    valores('doc-nome-valor', 'nome');
+    pares('doc-par', 'doc');
+    grupos('doc', 'doc');
     return novos;
+  }
+
+  // Vencimento (dd/mm/aaaa) em número, para ordenar os títulos do mais antigo para o mais novo.
+  function porData(p, q) {
+    const n = (x) => { const d = Util.lerData(x.data); return d ? d.numero : 0; };
+    return n(p) - n(q);
   }
 
   // Documento primeiro (sem documento no fim), depois fornecedor e data: o que casa fica perto.
@@ -517,6 +566,6 @@
   return {
     calcular, fornecedorDoHistorico, documentoDoHistorico, chaveDoTitulo,
     normalizarDocumento, documentoDaLinha, itensAB, conciliarAutomatico, emAbertoAB, tipoAB, proximoIdAB, REGRAS_AB,
-    compararPorDocumento, arrumarGruposAB, relatorioAB, pendenciasAB, saldoInicialAB, idsDeTitulos,
+    compararPorDocumento, arrumarGruposAB, relatorioAB, pendenciasAB, saldoInicialAB, idsDeTitulos, COMO_AB, nomeComparavel,
   };
 });

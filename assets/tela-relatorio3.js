@@ -15,7 +15,7 @@
   function app() { return raiz.App; }
 
   const TIPO = { AxA: 'A×A', AxB: 'A×B', BxB: 'B×B' };
-  const COMO = { 'doc-fornecedor-par': 'doc + fornecedor · par', 'doc-fornecedor': 'doc + fornecedor', 'doc-par': 'só doc · par', 'doc': 'só doc', 'manual': 'à mão' };
+  const COMO = M.COMO_AB; // rótulo curto de cada regra (definido no motor)
   const CHAVE_OPCOES = 'conciliador-solutta.relatorio3';
   const PADRAO = { manuais: true, automaticas: true, itens: true, abertos: true };
 
@@ -154,7 +154,7 @@
     const titulo = manuais ? 'Conciliações manuais' : 'Conciliações automáticas';
     const explica = manuais
       ? 'Feitas à mão: quem marcou os itens, quando, e a observação quando concilia com diferença.'
-      : 'Achadas pelo ⚡ Conciliar, pelo número do documento: primeiro com o mesmo fornecedor, depois só pelo documento.';
+      : 'Achadas pelo ⚡ Conciliar, pelo número do documento: primeiro com o mesmo fornecedor, depois com o mesmo nome de fornecedor, depois só pelo documento.';
     let corpo;
     if (!lista.length) corpo = '<p class="rel-vazio">Nenhuma conciliação ' + (manuais ? 'manual' : 'automática') + ' neste mês.</p>';
     else if (R.opcoes.itens) corpo = lista.map((x) => blocoDoId(x, manuais)).join('');

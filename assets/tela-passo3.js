@@ -327,7 +327,7 @@
   // ganha o próximo ID. O que não concilia fica em aberto: o da A na A, o da B na B.
   // ------------------------------------------------------------------
   const TIPO_AB = { AxA: 'A×A', AxB: 'A×B', BxB: 'B×B' };
-  const COMO_AB = { 'doc-fornecedor-par': 'doc + fornecedor · par', 'doc-fornecedor': 'doc + fornecedor', 'doc-par': 'só doc · par', 'doc': 'só doc', 'manual': 'à mão' };
+  const COMO_AB = M.COMO_AB; // rótulo curto de cada regra (definido no motor)
 
   const NOME_FONTE = { anterior: 'aging', atual: 'aging', nota: 'razão · nota', baixa: 'razão · baixa' };
   function rotuloFonte(x) {
@@ -600,7 +600,7 @@
       '</div></div>' +
       '<p class="suave pequeno" style="margin:10px 0 0">' +
       (grupos.length ? '<b>' + grupos.length.toLocaleString('pt-BR') + '</b> conciliação(ões) com ID: ' + conta('AxA') + ' A×A · ' + conta('AxB') + ' A×B' + (conta('BxB') ? ' · ' + conta('BxB') + ' B×B' : '') + ' · ' + aMao + ' à mão · em aberto: <b>' + ab.abertosA.length + '</b> na A e <b>' + ab.abertosB.length + '</b> na B. ' : 'Nada conciliado ainda. ') +
-      'O <b>⚡ Conciliar</b> casa pelo <b>documento</b> — primeiro com o mesmo fornecedor, depois só pelo documento — e dá um ID para cada conciliação (1, 2, 3…).' +
+      'O <b>⚡ Conciliar</b> casa pelo <b>documento</b> — primeiro com o mesmo fornecedor, depois com o mesmo nome de fornecedor, depois só pelo documento — e dá um ID para cada conciliação (1, 2, 3…).' +
       (Math.abs(forcado) >= 1 ? ' <span class="falta">Conciliações à mão sem bater: ' + U.formatarCentavos(forcado) + '.</span>' : '') +
       (conferir.length ? '<br><span style="color:var(--ambar)">⚠ Para conferir — baixa com data antes da nota:</span> ' +
         conferir.slice(0, 15).map((g) => '<button type="button" class="lapis" data-ver-id="' + g.id + '" title="Ver a conciliação #' + g.id + '"><b>#' + g.id + '</b></button>').join(' ') + (conferir.length > 15 ? ' …' : '') : '') +
