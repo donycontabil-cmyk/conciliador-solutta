@@ -100,7 +100,8 @@
       '<h2 style="margin:22px 0 12px">Passos</h2>' +
       '<div class="grade-3" id="passos"></div>' +
       '<h2 style="margin:26px 0 12px">Arquivos de ' + U.nomeCompetencia(comp) + '</h2>' +
-      '<div class="soltar" id="soltar" tabindex="0" role="button"><b>Arraste os arquivos aqui</b> ou clique para escolher<br><span class="pequeno">Razões (.xls, .xlsx, .csv), aging de contas a pagar e aging de adiantamentos. Pode subir vários de uma vez.</span></div>' +
+      '<div class="soltar" id="soltar" tabindex="0" role="button"><b>Arraste os arquivos aqui</b> ou clique para escolher<br><span class="pequeno">Razões (.xls, .xlsx, .csv), aging de contas a pagar e aging de adiantamentos. Pode subir vários de uma vez.' +
+        (raiz.TelaPasso3 ? '<br>Para o ② e o ③ é mais fácil abrir o passo e subir cada arquivo no lugar dele.' : '') + '</span></div>' +
       '<input type="file" id="escolher-arquivos" multiple class="escondido" accept=".xls,.xlsx,.xlsm,.csv,.txt">' +
       (app().demonstracao && raiz.Demonstracao
         ? '<div class="linha-flex" style="margin-top:10px"><button type="button" class="botao" id="bt-exemplo">🧪 Usar os razões de exemplo</button>' +
@@ -117,8 +118,9 @@
     if (raiz.TelaPasso3) {
       for (const id of Object.keys(raiz.TelaPasso3.PASSOS_AB)) {
         const cfg = raiz.TelaPasso3.configDoPasso(id);
-        ab[id] = { cfg, arqs: raiz.TelaPasso3.arquivosDoPasso(metas, comp, id),
-          registro: concs.find((c) => c.id === 'F-' + codigo + '-' + cfg.tipo + '-' + U.anoMes(comp)) || null };
+        const registro = concs.find((c) => c.id === 'F-' + codigo + '-' + cfg.tipo + '-' + U.anoMes(comp)) || null;
+        // O período escolhido dentro do passo fica no registro dele.
+        ab[id] = { cfg, registro, arqs: raiz.TelaPasso3.arquivosDoPasso(metas, comp, id, { de: registro && registro.decisoes && registro.decisoes.periodoDe }) };
       }
     }
     const inativos = passosInativos(emp, fam);
@@ -354,7 +356,7 @@
     let estado, porque = '';
     if (pode && passo3) estado = '<span class="pilula azul">em andamento</span>';
     else if (pode) estado = '<span class="pilula verde">pronta para conciliar</span>';
-    else { estado = '<span class="pilula ambar">falta arquivo</span>'; porque = 'Suba os dois ' + cfg.nomeAging.replace(/^aging/, 'agings') + ' e o ' + cfg.nomeRazao + '.'; }
+    else { estado = '<span class="pilula ambar">falta arquivo</span>'; porque = 'Abra o passo, escolha o período e suba cada arquivo no lugar dele.'; }
     const rs = passo3 && passo3.resumo;
     // Com o Conciliar A × B gravado, o resumo é o dele (conciliações e o que sobra em aberto).
     const resumo = rs && typeof rs.conciliacoesAB === 'number'
@@ -366,9 +368,10 @@
     return '<div class="cartao passo"><div class="linha-flex"><span class="numero">' + p.numero + '</span><h3 style="flex:1">' + T.esc(p.titulo) + '</h3>' + estado + '</div>' +
       '<p class="suave" style="line-height:1.5">' + T.esc(p.texto) + '</p><ul class="precisa">' + itens.join('') + '</ul>' + resumo +
       (porque ? '<p class="pequeno" style="color:var(--ambar)">' + T.esc(porque) + '</p>' : '') +
-      '<div class="acoes">' + (pode ? '<a class="botao primario" href="' + base + p.id + '">Abrir →</a>' : '<span class="botao primario travado" title="' + T.esc(porque) + '">Abrir →</span>') +
+      // Os arquivos destes passos sobem DENTRO do passo (Dony, 15/09/2026): Abrir fica sempre liberado.
+      '<div class="acoes"><a class="botao primario" href="' + base + p.id + '">' + (pode ? 'Abrir →' : '📁 Abrir e subir arquivos') + '</a>' +
       (pode && passo3 ? '<a class="botao" href="' + base + p.id + '-relatorio" title="Relatório da conciliação para imprimir, salvar em PDF ou baixar em Excel">📄 Relatório</a>' : '') +
-      '<button type="button" class="botao" data-subir>Subir arquivo</button>' + botaoInativar(p) + '</div></div>';
+      botaoInativar(p) + '</div></div>';
   }
   function linhaPrecisa(tem, texto) {
     return '<li>' + (tem ? '<span class="ok">✓</span>' : '<span class="falta">✗</span>') + '<span>' + T.esc(texto) + (tem ? '' : ' <span class="falta pequeno">falta</span>') + '</span></li>';

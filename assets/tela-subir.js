@@ -103,6 +103,30 @@
       '</div>';
   }
 
+  // Guarda UMA conta de um razão lido (Leitor.ler) na competência dada, com o papel dado.
+  // Usado aqui e pelos lugares de arquivo de cada conciliação (tela-passo3.js).
+  function guardarContaDoRazao(codigo, r, c, papel, comp) {
+    const rz = r.razao;
+    const conta = Object.assign({}, c);
+    delete conta.papel;
+    delete conta.papelAutomatico;
+    const meta = {
+      tipo: 'razao', arquivo: r.nomeArquivo, periodo: rz.periodo, competencia: comp, desenho: rz.desenho,
+      conta: { codigo: c.codigo, classificacao: c.classificacao, nome: c.nome, papel: papel.papel, familia: papel.familia, banco: papel.banco || null },
+      lancamentos: c.lancamentos.length, saldoAnterior: c.saldoAnterior, saldoFinal: c.saldoFinal, confere: c.confere,
+      empresaNoArquivo: rz.empresa, cnpjNoArquivo: rz.cnpj, hashDoConteudo: r.hash,
+    };
+    const conteudo = { tipo: 'razao', desenho: rz.desenho, empresa: rz.empresa, cnpj: rz.cnpj, periodo: rz.periodo, periodoOrigem: rz.periodoOrigem, conta };
+    return app().armazenamento.guardarArquivo(codigo, meta, conteudo, r.bytes);
+  }
+
+  // Guarda um relatório de títulos em aberto (aging) com o tipo e a competência dados.
+  function guardarTitulos(codigo, r, tipo, comp) {
+    const f = r.financeiro;
+    const meta = { tipo, arquivo: r.nomeArquivo, competencia: comp, titulos: f.titulos.length, total: f.total, posicao: f.posicao, hashDoConteudo: r.hash };
+    return app().armazenamento.guardarArquivo(codigo, meta, { tipo, titulos: f.titulos, total: f.total, descartados: f.descartados, posicao: f.posicao }, r.bytes);
+  }
+
   async function abrir(codigo, arquivos, opcoes) {
     const empresa = app().empresas.find((e) => String(e.codigo) === String(codigo));
     const resultados = [];
@@ -200,16 +224,7 @@
               }
               if (!c.papel.familia) { saida.push({ arquivo: r.nomeArquivo, tipo: 'cinza', texto: 'Conta ' + c.codigo + ' ' + c.nome + ': ficou de fora (nenhuma conciliação usa).' }); continue; }
               if (!cx || !cx.checked) { saida.push({ arquivo: r.nomeArquivo, tipo: 'cinza', texto: 'Conta ' + c.codigo + ' ' + c.nome + ': desmarcada, não foi guardada.' }); continue; }
-              const conta = Object.assign({}, c);
-              delete conta.papel;
-              const meta = {
-                tipo: 'razao', arquivo: r.nomeArquivo, periodo: rz.periodo, competencia: comp, desenho: rz.desenho,
-                conta: { codigo: c.codigo, classificacao: c.classificacao, nome: c.nome, papel: c.papel.papel, familia: c.papel.familia, banco: c.papel.banco },
-                lancamentos: c.lancamentos.length, saldoAnterior: c.saldoAnterior, saldoFinal: c.saldoFinal, confere: c.confere,
-                empresaNoArquivo: rz.empresa, cnpjNoArquivo: rz.cnpj, hashDoConteudo: r.hash,
-              };
-              const conteudo = { tipo: 'razao', desenho: rz.desenho, empresa: rz.empresa, cnpj: rz.cnpj, periodo: rz.periodo, periodoOrigem: rz.periodoOrigem, conta };
-              const g = await arm.guardarArquivo(codigo, meta, conteudo, r.bytes);
+              const g = await guardarContaDoRazao(codigo, r, c, c.papel, comp);
               guardadas++;
               competenciasGuardadas.add(comp);
               guardados.push({ tipo: 'razao', competencia: comp });
@@ -222,8 +237,7 @@
             const selTipo = janelaEl.querySelector('[data-tipo="' + i + '"]');
             const tipo = selTipo ? selTipo.value : r.tipo;
             const f = r.financeiro;
-            const meta = { tipo, arquivo: r.nomeArquivo, competencia: comp, titulos: f.titulos.length, total: f.total, posicao: f.posicao, hashDoConteudo: r.hash };
-            const g = await arm.guardarArquivo(codigo, meta, { tipo, titulos: f.titulos, total: f.total, descartados: f.descartados, posicao: f.posicao }, r.bytes);
+            const g = await guardarTitulos(codigo, r, tipo, comp);
             competenciasGuardadas.add(comp);
             guardados.push({ tipo, competencia: comp });
             if (g.jaExistia) saida.push({ arquivo: r.nomeArquivo, tipo: 'cinza', texto: 'Este relatório já estava guardado. Nada foi duplicado.' });
@@ -270,5 +284,5 @@
     if (opcoes && typeof opcoes.aoTerminar === 'function') opcoes.aoTerminar({ fechou: r, competencias: Array.from(competenciasGuardadas), guardados });
   }
 
-  raiz.TelaSubir = { abrir };
+  raiz.TelaSubir = { abrir, guardarContaDoRazao, guardarTitulos };
 })(self);

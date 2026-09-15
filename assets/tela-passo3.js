@@ -69,27 +69,29 @@
     const emp = app().empresas.find((e) => String(e.codigo) === String(codigo));
     const comp = anoMes + '-01';
     if (!emp) return { erro: 'Empresa não cadastrada.' };
-    const metas = await arm.arquivos(codigo);
-    const arqs = arquivosDoPasso(metas, comp, cfg.id);
-    if (conferir && !conferir()) return null;
-    const falta = [];
-    if (!arqs.agingAnterior) falta.push('o ' + cfg.nomeAging + ' de ' + U.nomeCompetencia(arqs.compAnterior) + (arqs.periodo ? ' (o razão começa em ' + U.nomeCompetencia(arqs.periodo.de) + ')' : ''));
-    if (!arqs.agingAtual) falta.push('o ' + cfg.nomeAging + ' de ' + U.nomeCompetencia(comp));
-    if (!arqs.razao) falta.push('o ' + cfg.nomeRazao + ' de ' + U.nomeCompetencia(comp));
-    if (falta.length) return { emp, comp, falta, cfg, arqs };
-    const carregar = async (m) => ({ meta: m, conteudo: await arm.conteudoDoArquivo(m.id) });
-    const [aAnt, aAtu, raz] = await Promise.all([carregar(arqs.agingAnterior), carregar(arqs.agingAtual), carregar(arqs.razao)]);
-    if (conferir && !conferir()) return null;
-
+    // O registro vem primeiro: nele está o PERÍODO escolhido na tela (Dony, 15/09/2026: "lá dentro
+    // eu escolho o período que estou conciliando, um mês ou um período; aí ele já sabe o que é").
     const idReg = idDoRegistro(codigo, anoMes, cfg);
     const concs = await arm.conciliacoes(codigo, comp);
     const registro = concs.find((c) => c.id === idReg) || { id: idReg, codigo, tipo: cfg.tipo, competencia: comp, situacao: 'andamento', arquivos: [], decisoes: {}, resumo: {} };
     const d = registro.decisoes || {};
+    const periodoDe = inicioDoPeriodo(d.periodoDe, comp);
+    const metas = await arm.arquivos(codigo);
+    const arqs = arquivosDoPasso(metas, comp, cfg.id, { de: periodoDe });
+    if (conferir && !conferir()) return null;
+    const falta = [];
+    if (!arqs.agingAnterior) falta.push('o ' + cfg.nomeAging + ' de ' + U.nomeCompetencia(arqs.compAnterior));
+    if (!arqs.agingAtual) falta.push('o ' + cfg.nomeAging + ' de ' + U.nomeCompetencia(comp));
+    if (!arqs.razao) falta.push('o ' + cfg.nomeRazao + ' de ' + nomeDoPeriodo(periodoDe, comp));
+    if (falta.length) return { emp, comp, falta, cfg, arqs, registro, periodoDe };
+    const carregar = async (m) => ({ meta: m, conteudo: await arm.conteudoDoArquivo(m.id) });
+    const [aAnt, aAtu, raz] = await Promise.all([carregar(arqs.agingAnterior), carregar(arqs.agingAtual), carregar(arqs.razao)]);
+    if (conferir && !conferir()) return null;
+
     const decisoes = { donos: d.donos || {}, conciliadas: d.conciliadas || [], observacoes: d.observacoes || {}, conciliacoesAB: d.conciliacoesAB || [], historico: d.historico || [], inicio: d.inicio || null };
-    // Lançamentos da Parte A. Conciliação de PERÍODO (o razão guardado nesta competência começa
-    // antes do mês — Dony, 15/09/2026: "aging de março e aging de agosto, mais o razão de abril a
-    // agosto"): todos os lançamentos do começo do razão até o fim do mês. Razão de vários meses
-    // usado para um mês do meio: só os lançamentos do mês.
+    if (periodoDe) decisoes.periodoDe = periodoDe;
+    // Lançamentos da Parte A: os do PERÍODO escolhido (do começo do período ao fim do mês). Sem
+    // período, só os do mês (vale também para um razão de vários meses usado num mês do meio).
     const todosLancamentos = raz.conteudo.conta.lancamentos || [];
     const deNum = U.inicioDaCompetencia(arqs.periodo ? arqs.periodo.de : comp).numero, ateNum = U.fimDaCompetencia(comp).numero;
     const lancamentosDoMes = todosLancamentos.filter((l) => { const n = U.montarData(l.dia, l.mes, l.ano); return !!n && n.numero >= deNum && n.numero <= ateNum; });
@@ -97,10 +99,7 @@
     // Mês anterior (o do aging anterior): o que ficou em aberto nele, para o saldo inicial conforme o razão.
     const anterior = (opcoes && opcoes.semAnterior) ? null : await pendenciasDoMesAnterior(codigo, arqs.compAnterior, cfg);
     if (conferir && !conferir()) return null;
-    const inicioRazao = arqs.periodo ? arqs.periodo.de : comp;
-    const nomeRazao = arqs.periodo
-      ? (U.partesCompetencia(inicioRazao).ano === U.partesCompetencia(comp).ano ? U.nomeCompetencia(inicioRazao).replace(/\/\d{4}$/, '') : U.nomeCompetencia(inicioRazao)) + ' a ' + U.nomeCompetencia(comp)
-      : U.nomeCompetencia(comp);
+    const nomeRazao = nomeDoPeriodo(periodoDe, comp);
     const entrada = {
       competencia: comp, natureza: cfg.natureza,
       mesAnterior: U.nomeCompetencia(arqs.compAnterior), mesAtual: U.nomeCompetencia(comp), nomeRazao,
@@ -112,10 +111,21 @@
     const itens = M.itensAB(entrada, r);
     const arrumado = M.arrumarGruposAB(decisoes.conciliacoesAB, itens.legado);
     decisoes.conciliacoesAB = arrumado.grupos;
-    return { emp, comp, arquivos: { aAnt, aAtu, raz }, registro, entrada, decisoes, r, itens, arrumou: arrumado.mudou, anterior, cfg, razaoDoMes };
+    return { emp, comp, arquivos: { aAnt, aAtu, raz }, registro, entrada, decisoes, r, itens, arrumou: arrumado.mudou, anterior, cfg, razaoDoMes, arqs, periodoDe };
   }
 
   function idDoRegistro(codigo, anoMes, cfg) { return 'F-' + codigo + '-' + cfg.tipo + '-' + anoMes; }
+
+  // Começo do período escolhido ('AAAA-MM-01'), só se for antes do mês da conciliação.
+  function inicioDoPeriodo(de, comp) {
+    return /^\d{4}-\d{2}-01$/.test(String(de || '')) && de < comp ? de : null;
+  }
+  // "agosto/2026" ou "abril a agosto/2026" (ou "novembro/2025 a agosto/2026").
+  function nomeDoPeriodo(de, comp) {
+    if (!de) return U.nomeCompetencia(comp);
+    const mesmoAno = de.slice(0, 4) === comp.slice(0, 4);
+    return (mesmoAno ? U.nomeCompetencia(de).replace(/\/\d{4}$/, '') : U.nomeCompetencia(de)) + ' a ' + U.nomeCompetencia(comp);
+  }
 
   // Pendências do mês anterior (o que ficou em aberto na A e na B dele), do MESMO passo. Vêm do
   // registro do mês anterior; registro de antes desta versão (sem pendências) é calculado com os
@@ -141,9 +151,15 @@
     if (!dados) return;
     if (dados.erro) { el.innerHTML = '<div class="aviso ambar">' + T.esc(dados.erro) + ' <a href="#/">Voltar</a></div>'; return; }
     if (dados.falta) {
+      // Os arquivos sobem AQUI, cada um no seu lugar (Dony, 15/09/2026).
+      const ctx = { cfg, codigo, comp, arqs: dados.arqs, periodoDe: dados.periodoDe, registro: dados.registro };
       el.innerHTML = '<a class="voltar" href="' + voltar + '">← Fornecedores · ' + U.nomeCompetencia(comp) + '</a>' +
-        '<div class="aviso ambar"><span class="icone-aviso">📄</span><div><b>Falta arquivo para o Passo ' + cfg.numero + ' · ' + T.esc(cfg.titulo) + '.</b><br>Suba ' + dados.falta.map(T.esc).join(', ') + '. ' +
-        '<a href="' + voltar + '">Subir arquivos</a></div></div>';
+        '<div class="cabecalho"><div class="titulos"><h1>Passo ' + cfg.numero + ' · ' + T.esc(cfg.titulo) + '</h1>' +
+        '<p class="suave">' + T.esc(dados.emp.codigo + ' · ' + dados.emp.nome) + ' · ' + U.nomeCompetencia(comp) + '</p></div></div>' +
+        '<div class="aviso info" style="margin-bottom:12px"><span class="icone-aviso">📁</span><div><b>Escolha o período e suba cada arquivo no seu lugar.</b> ' +
+        'O programa sabe o que é pelo lugar onde você coloca — não precisa adivinhar nada. Falta: ' + dados.falta.map(T.esc).join('; ') + '.</div></div>' +
+        painelArquivos(ctx, true);
+      ligarPainel(el.querySelector('.arquivos-passo'), ctx);
       return;
     }
 
@@ -156,7 +172,7 @@
       incluirAnterior: app().lerLocal('conciliador-solutta.ab-anterior') !== '0',
       selA: new Set(), selB: new Set(), abertosAB: new Set(), idDoItem: new Map(),
       r: dados.r, itens: dados.itens, porChave: new Map(dados.r.fornecedores.map((f) => [f.chave, f])),
-      anterior: dados.anterior, razaoDoMes: dados.razaoDoMes,
+      anterior: dados.anterior, razaoDoMes: dados.razaoDoMes, arqs: dados.arqs, periodoDe: dados.periodoDe,
     };
     if (E.aba !== 'ab' && abasOcultas().has(E.aba)) E.aba = 'ab';
     desenharTudo();
@@ -166,35 +182,252 @@
     if (dados.arrumou || (dados.registro.atualizadoEm && JSON.stringify(dados.registro.pendencias || null) !== pendenciasDeAgora)) gravar(null);
   }
 
-  // Escolhe os arquivos de um passo A × B: aging do mês, aging do mês passado e o razão da conta.
+  // Escolhe os arquivos de um passo A × B para o período escolhido (opcoes.de = começo do
+  // período; sem ele, só o mês):
+  //  - aging anterior = o do mês ANTES do começo do período (período abril a agosto → março);
+  //  - aging do mês = o do fim do período;
+  //  - razão = o guardado nesta conciliação (competência do fim). Só para um mês, vale também um
+  //    razão de vários meses guardado em outra competência que cobre o mês inteiro.
   //  ③: contas a pagar + razão de fornecedores · ②: aging de adiantamentos + razão de adiantamento.
-  function arquivosDoPasso(metas, comp, passoId) {
+  function arquivosDoPasso(metas, comp, passoId, opcoes) {
     const cfg = configDoPasso(passoId);
-    const compAnt = U.somarMeses(comp, -1);
+    const de = inicioDoPeriodo(opcoes && opcoes.de, comp);
+    const compAnterior = U.somarMeses(de || comp, -1);
     const maisNovo = (lista) => lista.slice().sort((a, b) => U.paraMs(b.enviadoEm) - U.paraMs(a.enviadoEm))[0] || null;
     const agings = (c) => metas.filter((m) => m.tipo === cfg.tipoFinanceiro && m.competencia === c);
     const daConta = (m) => m.tipo === 'razao' && m.conta && m.conta.familia === 'fornecedores' && m.conta.papel === cfg.papelRazao;
-    const razoes = (c) => metas.filter((m) => daConta(m) && m.competencia === c);
-    // Razão de VÁRIOS meses (Dony, 15/09/2026: o razão de adiantamento vem de abril a agosto)
-    // fica guardado na competência do fim, mas serve para qualquer mês que ele cobre inteiro.
     const inicio = U.inicioDaCompetencia(comp), fim = U.fimDaCompetencia(comp);
     const cobre = (m) => {
-      const de = m.periodo && U.lerData(m.periodo.de), ate = m.periodo && U.lerData(m.periodo.ate);
-      return !!(de && ate && de.numero <= inicio.numero && ate.numero >= fim.numero);
+      const a = m.periodo && U.lerData(m.periodo.de), b = m.periodo && U.lerData(m.periodo.ate);
+      return !!(a && b && a.numero <= inicio.numero && b.numero >= fim.numero);
     };
-    const exato = maisNovo(razoes(comp));
-    const razao = exato || maisNovo(metas.filter((m) => daConta(m) && cobre(m)));
-    // Conciliação de PERÍODO: o razão guardado NESTA competência começa antes do mês (ex.: abril a
-    // agosto, guardado em agosto). O aging anterior é o do mês antes do começo do razão (março).
-    let compAnterior = compAnt, periodo = null;
-    const deRazao = exato && exato.periodo && U.lerData(exato.periodo.de);
-    if (deRazao && deRazao.numero < inicio.numero) {
-      periodo = { de: U.competenciaDe(deRazao), ate: comp };
-      compAnterior = U.somarMeses(periodo.de, -1);
-    }
-    return { agingAnterior: maisNovo(agings(compAnterior)), agingAtual: maisNovo(agings(comp)), razao, compAnterior, periodo };
+    const exato = maisNovo(metas.filter((m) => daConta(m) && m.competencia === comp));
+    const razao = exato || (de ? null : maisNovo(metas.filter((m) => daConta(m) && cobre(m))));
+    // O razão guardado aqui começa antes do período escolhido: a tela oferece conciliar o período dele.
+    const inicioRazao = razao && razao.periodo && U.lerData(razao.periodo.de);
+    const sugestaoDe = exato && inicioRazao && U.competenciaDe(inicioRazao) < (de || comp) ? U.competenciaDe(inicioRazao) : null;
+    return { agingAnterior: maisNovo(agings(compAnterior)), agingAtual: maisNovo(agings(comp)), razao, compAnterior,
+      periodo: de ? { de, ate: comp } : null, sugestaoDe };
   }
   function arquivosDoTerceiro(metas, comp) { return arquivosDoPasso(metas, comp, 'passo3'); }
+
+  // ------------------------------------------------------------------
+  // PERÍODO e ARQUIVOS da conciliação (Dony, 15/09/2026): "quero subir os arquivos quando estiver
+  // dentro da conciliação; o sistema fica tentando adivinhar o que é o quê. Lá dentro eu escolho o
+  // período (um mês ou um período) e aí, quando receber o arquivo, ele já sabe o que é."
+  // Cada arquivo tem o seu lugar: o lugar diz o tipo, a competência e o papel da conta.
+  // ------------------------------------------------------------------
+  function contextoDoPainel() {
+    return { cfg: E.cfg, codigo: E.codigo, comp: E.comp, arqs: E.arqs, periodoDe: E.periodoDe, registro: E.registro };
+  }
+
+  function lugaresDoPasso(ctx) {
+    const { cfg, comp, arqs, periodoDe } = ctx;
+    return [
+      { id: 'razao', parte: 'Parte A · contabilidade', titulo: primeiraMaiuscula(cfg.nomeRazao), sub: nomeDoPeriodo(periodoDe, comp), meta: arqs.razao },
+      { id: 'anterior', parte: 'Parte A · saldo inicial', titulo: primeiraMaiuscula(cfg.nomeAging), sub: U.nomeCompetencia(arqs.compAnterior) + (periodoDe ? ' (mês antes do período)' : ' (mês anterior)'), meta: arqs.agingAnterior },
+      { id: 'atual', parte: 'Parte B · financeiro', titulo: primeiraMaiuscula(cfg.nomeAging), sub: U.nomeCompetencia(comp), meta: arqs.agingAtual },
+    ];
+  }
+
+  function painelArquivos(ctx, aberto) {
+    const { cfg, comp, arqs, periodoDe } = ctx;
+    const lugares = lugaresDoPasso(ctx);
+    const faltam = lugares.filter((s) => !s.meta).length;
+    const opcoes = [['', 'Só ' + U.nomeCompetencia(comp)]];
+    for (let i = 1; i <= 23; i++) { const de = U.somarMeses(comp, -i); opcoes.push([de, nomeDoPeriodo(de, comp)]); }
+    const descreve = (s) => {
+      const m = s.meta;
+      if (!m) return '<span class="falta">falta</span>';
+      const quem = m.enviadoEm ? ' · ' + T.esc(m.enviadoPor || '') + ' em ' + U.dataHoraLocal(m.enviadoEm) : '';
+      if (s.id === 'razao') {
+        return '<b>' + T.esc(m.arquivo) + '</b><br><span class="suave">conta ' + T.esc(m.conta.codigo + ' ' + (m.conta.nome || '')) + ' · ' + (m.lancamentos || 0) + ' lanç.' +
+          (m.periodo ? ' · ' + T.esc(m.periodo.de + ' a ' + m.periodo.ate) : '') + (m.competencia !== comp ? ' · guardado em ' + U.nomeCompetencia(m.competencia) : '') + quem + '</span>';
+      }
+      return '<b>' + T.esc(m.arquivo) + '</b><br><span class="suave">' + (m.titulos || 0) + ' títulos · ' + T.moeda(m.total || 0) + quem + '</span>';
+    };
+    const sugestao = arqs.sugestaoDe && arqs.razao && arqs.razao.periodo
+      ? '<div class="aviso info" style="margin:0 0 10px"><span class="icone-aviso">📅</span><div>O razão guardado vai de <b>' + T.esc(arqs.razao.periodo.de) + ' a ' + T.esc(arqs.razao.periodo.ate) + '</b>. ' +
+        '<button type="button" class="botao pequeno" data-usar-periodo="' + arqs.sugestaoDe + '">Conciliar o período ' + T.esc(nomeDoPeriodo(arqs.sugestaoDe, comp)) + '</button></div></div>' : '';
+    return '<details class="cartao corpo arquivos-passo"' + (aberto ? ' open' : '') + '>' +
+      '<summary><b>📁 Período e arquivos desta conciliação</b> <span class="suave pequeno">· ' + T.esc(nomeDoPeriodo(periodoDe, comp)) + ' · ' +
+      (faltam ? '<span class="falta">' + faltam + ' arquivo(s) faltando</span>' : 'os 3 arquivos guardados') + '</span></summary>' +
+      '<div class="linha-flex periodo-passo"><label class="pequeno" for="periodo-de"><b>Período da conciliação</b></label>' +
+      '<select class="filtro" id="periodo-de" data-periodo-de>' + opcoes.map((o) => '<option value="' + o[0] + '"' + ((periodoDe || '') === o[0] ? ' selected' : '') + '>' + T.esc(o[1]) + '</option>').join('') + '</select>' +
+      '<span class="suave pequeno">Parte A = ' + T.esc(cfg.nomeAging) + ' de ' + T.esc(U.nomeCompetencia(arqs.compAnterior)) + ' + razão de ' + T.esc(nomeDoPeriodo(periodoDe, comp)) +
+      ' · Parte B = ' + T.esc(cfg.nomeAging) + ' de ' + T.esc(U.nomeCompetencia(comp)) + '</span></div>' +
+      sugestao +
+      '<div class="lugares">' + lugares.map((s) =>
+        '<div class="lugar' + (s.meta ? ' ok' : '') + '" data-lugar="' + s.id + '">' +
+        '<div class="parte">' + T.esc(s.parte) + '</div>' +
+        '<h4>' + (s.meta ? '✓ ' : '') + T.esc(s.titulo) + '</h4><div class="pequeno"><b>' + T.esc(s.sub) + '</b></div>' +
+        '<div class="arquivo pequeno">' + descreve(s) + '</div>' +
+        '<div class="linha-flex" style="margin-top:auto"><button type="button" class="botao pequeno' + (s.meta ? '' : ' primario') + '" data-subir-lugar="' + s.id + '">' + (s.meta ? 'Trocar' : '⬆ Subir') + '</button>' +
+        '<span class="suave pequeno">ou arraste o arquivo aqui</span></div>' +
+        '<input type="file" class="escondido" data-arquivo-lugar="' + s.id + '" accept=".xls,.xlsx,.xlsm,.csv,.txt"></div>').join('') + '</div>' +
+      '</details>';
+  }
+
+  function ligarPainel(el, ctx) {
+    if (!el) return;
+    el.addEventListener('change', async (ev) => {
+      const per = ev.target.closest('[data-periodo-de]');
+      if (per) { await mudarPeriodo(ctx, per.value, per); return; }
+      const inp = ev.target.closest('[data-arquivo-lugar]');
+      if (inp && inp.files && inp.files[0]) { const f = inp.files[0]; inp.value = ''; await subirNoLugar(ctx, inp.getAttribute('data-arquivo-lugar'), f); }
+    });
+    el.addEventListener('click', async (ev) => {
+      const b = ev.target.closest('[data-subir-lugar]');
+      if (b) { const inp = el.querySelector('[data-arquivo-lugar="' + b.getAttribute('data-subir-lugar') + '"]'); if (inp) inp.click(); return; }
+      const u = ev.target.closest('[data-usar-periodo]');
+      if (u) await mudarPeriodo(ctx, u.getAttribute('data-usar-periodo'));
+    });
+    // Arquivo solto no painel, fora de um lugar: não deixa o navegador abrir o arquivo no lugar do programa.
+    el.addEventListener('dragover', (ev) => ev.preventDefault());
+    el.addEventListener('drop', (ev) => { ev.preventDefault(); T.avisoRapido('Solte o arquivo em cima do lugar dele (razão, aging anterior ou aging do mês).', null, 4000); });
+    el.querySelectorAll('.lugar').forEach((s) => {
+      s.addEventListener('dragover', (ev) => { ev.preventDefault(); s.classList.add('por-cima'); });
+      s.addEventListener('dragleave', () => s.classList.remove('por-cima'));
+      s.addEventListener('drop', async (ev) => {
+        ev.preventDefault(); ev.stopPropagation(); s.classList.remove('por-cima');
+        const f = ev.dataTransfer && ev.dataTransfer.files && ev.dataTransfer.files[0];
+        if (f) await subirNoLugar(ctx, s.getAttribute('data-lugar'), f);
+      });
+    });
+  }
+
+  async function mudarPeriodo(ctx, valor, select) {
+    const arm = app().armazenamento;
+    const novo = inicioDoPeriodo(valor, ctx.comp);
+    const atual = ctx.periodoDe || null;
+    if (novo === atual) return;
+    try {
+      // Lê o registro de agora (a tela aberta pode ter gravado conciliações depois de desenhar o painel).
+      if (E && E.registro && E.registro.id === ctx.registro.id) await E.fila;
+      const guardado = (await arm.conciliacoes(ctx.codigo, ctx.comp)).find((c) => c.id === ctx.registro.id) || ctx.registro;
+      const qtd = ((guardado.decisoes && guardado.decisoes.conciliacoesAB) || []).length;
+      if (qtd) {
+        const ok = await T.confirmar({
+          titulo: 'Mudar o período da conciliação?',
+          texto: 'O período passa a ser <b>' + T.esc(nomeDoPeriodo(novo, ctx.comp)) + '</b>. Os itens da Parte A mudam, então as <b>' + qtd + '</b> conciliações deste passo serão <b>desfeitas</b> para conciliar de novo.',
+          botao: 'Mudar o período', perigo: true,
+        });
+        if (!ok) { if (select) select.value = atual || ''; return; }
+      }
+      const decisoes = Object.assign({}, guardado.decisoes || {});
+      if (novo) decisoes.periodoDe = novo; else delete decisoes.periodoDe;
+      if (qtd) decisoes.conciliacoesAB = [];
+      decisoes.historico = (decisoes.historico || []).concat([{ quando: U.agoraISO(), quem: app().usuario.nome,
+        texto: 'Período: ' + nomeDoPeriodo(novo, ctx.comp) + (qtd ? ' (desfez ' + qtd + ' conciliações)' : '') }]).slice(-200);
+      await arm.salvarConciliacao(Object.assign({}, guardado, { decisoes, situacao: 'andamento' }));
+      await arm.registrarNoLog({ codigo: ctx.codigo, acao: 'periodo-da-conciliacao', alvo: ctx.registro.id, detalhe: nomeDoPeriodo(novo, ctx.comp) });
+      T.avisoRapido('Período: ' + nomeDoPeriodo(novo, ctx.comp) + '.', 'ok');
+      app().mostrarRota();
+    } catch (e) {
+      if (select) select.value = atual || '';
+      T.avisoRapido('Não foi possível mudar o período: ' + T.mensagemDeErro(e), 'erro');
+    }
+  }
+
+  // Várias contas no razão: escolher qual é a deste passo (a reconhecida vem marcada).
+  function escolherConta(r, cfg) {
+    const reconhecida = r.contas.findIndex((c) => c.papel && c.papel.familia === 'fornecedores' && c.papel.papel === cfg.papelRazao);
+    return T.janela({
+      titulo: 'Qual conta deste razão é a do Passo ' + cfg.numero + '?',
+      corpo: '<p class="suave" style="margin-bottom:8px">' + T.esc(r.nomeArquivo) + ' tem ' + r.contas.length + ' contas.</p>' +
+        r.contas.map((c, k) => '<label class="item-aba"><input type="radio" name="conta-razao" value="' + k + '"' + (k === (reconhecida >= 0 ? reconhecida : 0) ? ' checked' : '') + '> ' +
+          '<b>' + T.esc(c.codigo) + '</b> ' + T.esc(c.nome || '') + ' <span class="suave pequeno">· ' + c.lancamentos.length + ' lanç.' + (c.papel && c.papel.familia ? ' · ' + T.esc(c.papel.familia + '/' + c.papel.papel) : '') + '</span></label>').join(''),
+      botoes: [{ texto: 'Cancelar', valor: null }, { texto: 'Usar esta conta', tipo: 'primario', antes: (j) => { const x = j.querySelector('input[name="conta-razao"]:checked'); return x ? r.contas[Number(x.value)] : false; } }],
+    });
+  }
+
+  async function subirNoLugar(ctx, lugar, arquivo) {
+    const { cfg, codigo, comp, arqs, periodoDe } = ctx;
+    const arm = app().armazenamento;
+    const compLugar = lugar === 'anterior' ? arqs.compAnterior : comp;
+    const nomeLugar = lugar === 'razao' ? cfg.nomeRazao + ' de ' + nomeDoPeriodo(periodoDe, comp) : cfg.nomeAging + ' de ' + U.nomeCompetencia(compLugar);
+    T.avisoRapido('Lendo ' + arquivo.name + '…', null, 2500);
+    let r;
+    try {
+      const bytes = await T.lerArquivoComoBytes(arquivo);
+      r = raiz.Leitor.ler(bytes, arquivo.name);
+      r.bytes = bytes;
+    } catch (e) { T.avisoRapido('Não consegui ler ' + arquivo.name + ': ' + T.mensagemDeErro(e), 'erro'); return; }
+    const naoServe = (esperado, outroTipo) => T.janela({
+      titulo: 'Esse arquivo não é ' + esperado,
+      corpo: '<p style="line-height:1.5">Este lugar é o do <b>' + T.esc(nomeLugar) + '</b>, mas <b>' + T.esc(arquivo.name) + '</b> ' +
+        (outroTipo ? 'é de outro tipo: ' + T.esc(r.nomeDoTipo || r.tipo) + '.' : 'não foi entendido pelo programa' + (r.motivo ? ': ' + T.esc(r.motivo) : '.')) + '</p>' +
+        '<p class="suave pequeno" style="margin-top:8px">Confira se é o arquivo certo. Se for, mas o programa não entendeu, mande o desenho pelo menu “Ver o desenho de um arquivo”.</p>' });
+    // Já guardado, mas não é o que este lugar usa agora (trocou e voltou ao antigo, ou estava com
+    // outro papel): guarda de novo para passar a ser o deste lugar.
+    const doLugarAgora = { razao: arqs.razao, anterior: arqs.agingAnterior, atual: arqs.agingAtual }[lugar];
+    const guardarNoLugar = async (guardar) => {
+      let g = await guardar();
+      if (g.jaExistia && (!doLugarAgora || doLugarAgora.id !== g.meta.id)) { await arm.apagarArquivo(g.meta.id); g = await guardar(); g.deNovo = true; }
+      return g;
+    };
+    try {
+      let g, resumo;
+      if (lugar === 'razao') {
+        if (r.tipo !== 'razao' || !r.contas || !r.contas.length) { await naoServe('um razão', r.tipo !== 'razao' && r.tipo !== 'desconhecido'); return; }
+        const emp = app().empresas.find((e) => String(e.codigo) === String(codigo)) || {};
+        const rz = r.razao;
+        if (rz.cnpj && emp.cnpj && String(rz.cnpj).slice(0, 8) !== String(emp.cnpj).slice(0, 8)) {
+          const ok = await T.confirmar({ titulo: 'Esse razão é de outra empresa?',
+            texto: 'O CNPJ do razão (' + U.formatarCnpj(rz.cnpj) + ') não é o de <b>' + T.esc(emp.nome) + '</b> (' + U.formatarCnpj(emp.cnpj) + ').',
+            botao: 'Guardar mesmo assim', perigo: true });
+          if (!ok) return;
+        }
+        // Papel escolhido antes para esta empresa (igual à janela de subir).
+        const escolhidos = emp.papeisDeConta || {};
+        r.contas.forEach((c) => { const e = escolhidos[c.codigo]; if (e && e.familia) c.papel = { familia: e.familia, papel: e.papel, regra: 'escolhido para esta empresa', banco: null, escolhido: true }; });
+        let conta = r.contas.length === 1 ? r.contas[0] : null;
+        if (!conta) {
+          const doPapel = r.contas.filter((c) => c.papel && c.papel.familia === 'fornecedores' && c.papel.papel === cfg.papelRazao);
+          conta = doPapel.length === 1 ? doPapel[0] : await escolherConta(r, cfg);
+        }
+        if (!conta) return;
+        // O arquivo tem lançamentos no período escolhido?
+        const iniNum = U.inicioDaCompetencia(periodoDe || comp).numero, fimNum = U.fimDaCompetencia(comp).numero;
+        const noPeriodo = conta.lancamentos.filter((l) => { const n = U.montarData(l.dia, l.mes, l.ano); return !!n && n.numero >= iniNum && n.numero <= fimNum; }).length;
+        const per = r.razao.periodo;
+        if (!noPeriodo) {
+          const ok = await T.confirmar({ titulo: 'Esse razão não tem lançamento no período',
+            texto: T.esc(arquivo.name) + (per ? ' vai de <b>' + T.esc(per.de) + ' a ' + T.esc(per.ate) + '</b>' : '') + ' e não tem nenhum lançamento em <b>' + T.esc(nomeDoPeriodo(periodoDe, comp)) + '</b>. É o arquivo certo?',
+            botao: 'Guardar assim mesmo', perigo: true });
+          if (!ok) return;
+        }
+        const papel = { familia: 'fornecedores', papel: cfg.papelRazao };
+        g = await guardarNoLugar(() => raiz.TelaSubir.guardarContaDoRazao(codigo, r, conta, papel, comp));
+        // A empresa passa a saber o papel desta conta (vale também para os razões subidos pela família).
+        const auto = conta.papel || {};
+        if (auto.familia !== papel.familia || auto.papel !== papel.papel) {
+          const cad = (await arm.empresas()).find((e) => String(e.codigo) === String(codigo)); // relido: outra pessoa pode ter mexido
+          const papeis = Object.assign({}, cad.papeisDeConta || {}, { [conta.codigo]: papel });
+          const salvo = await arm.salvarEmpresa(Object.assign({}, cad, { papeisDeConta: papeis }));
+          const ix = app().empresas.findIndex((e) => String(e.codigo) === String(codigo));
+          if (ix >= 0) app().empresas[ix] = salvo;
+        }
+        resumo = 'conta ' + conta.codigo + ' · ' + noPeriodo + ' lançamento(s) em ' + nomeDoPeriodo(periodoDe, comp) + (per ? ' (arquivo de ' + per.de + ' a ' + per.ate + ')' : '');
+      } else {
+        if (!r.financeiro) { await naoServe('um relatório de títulos em aberto (aging)', !/^financeiro|^desconhecido$/.test(r.tipo)); return; }
+        const pos = r.financeiro.posicao && U.lerData(r.financeiro.posicao);
+        if (pos && U.competenciaDe(pos) !== compLugar) {
+          const ok = await T.confirmar({ titulo: 'A data do relatório é de outro mês',
+            texto: 'O relatório diz posição em <b>' + T.esc(pos.texto) + '</b>, mas este lugar é o <b>' + T.esc(nomeLugar) + '</b>. É o arquivo certo?',
+            botao: 'Guardar como ' + U.nomeCompetencia(compLugar), perigo: true });
+          if (!ok) return;
+        }
+        g = await guardarNoLugar(() => raiz.TelaSubir.guardarTitulos(codigo, r, cfg.tipoFinanceiro, compLugar));
+        resumo = r.financeiro.titulos.length + ' títulos · ' + T.moeda(r.financeiro.total);
+      }
+      await arm.registrarNoLog({ codigo, acao: 'arquivo-na-conciliacao', alvo: cfg.id + '/' + lugar + '/' + U.anoMes(compLugar), detalhe: arquivo.name + ' → ' + nomeLugar });
+      T.avisoRapido('✓ ' + primeiraMaiuscula(nomeLugar) + ': ' + arquivo.name + ' (' + resumo + ')' + (g && g.jaExistia ? ' — já era este arquivo' : ''), 'ok', 7000);
+      app().mostrarRota();
+    } catch (e) {
+      T.avisoRapido('Não foi possível guardar ' + arquivo.name + ': ' + T.mensagemDeErro(e), 'erro');
+    }
+  }
 
   function calcular() {
     E.entrada.decisoes = E.decisoes;
@@ -253,10 +486,13 @@
       '<div class="linha-flex" style="gap:12px"><span class="guardado" id="guardado" title="Cada decisão é gravada na hora">' + (E.guardadoEm ? 'guardado às ' + U.horaLocal(E.guardadoEm) : 'nenhuma decisão tomada ainda') + '</span>' +
       '<a class="botao pequeno" href="#/empresa/' + encodeURIComponent(E.codigo) + '/fornecedores/' + U.anoMes(E.comp) + '/' + E.cfg.id + '-relatorio" title="Relatório da conciliação para imprimir, salvar em PDF ou baixar em Excel">📄 Relatório</a>' +
       '<button type="button" class="botao pequeno perigo" data-acao="limpar-conciliacao" title="Apagar tudo o que foi feito neste passo num mês e começar do zero">🧹 Limpar conciliação</button></div></div>' +
+      // Painel fechado; abre sozinho quando o razão guardado começa antes do período e nada foi conciliado ainda.
+      painelArquivos(contextoDoPainel(), !!(E.arqs && E.arqs.sugestaoDe) && !(E.decisoes.conciliacoesAB || []).length) +
       desenharPonte() +
       '<div class="abas" id="abas" role="tablist"></div>' +
       '<div class="filtros" id="filtros"></div>' +
       '<div id="aba"></div>';
+    ligarPainel(E.el.querySelector('.arquivos-passo'), contextoDoPainel());
     desenharAbas();
     desenharAba();
     E.el.addEventListener('click', aoClicar);
@@ -278,7 +514,7 @@
     const dicaInicial = ini.modo === 'razao'
       ? 'Conforme o RAZÃO de ' + E.entrada.mesAnterior + ' (saldo da contabilidade): aging ' + T.moeda(ini.aging) + ' − ' + ini.qtdTirados + ' título(s) que ficaram em aberto na Parte B (' + T.moeda(ini.tirados) + ') + ' + ini.qtdPendentes + ' pendência(s) da Parte A (' + T.moeda(ini.pendentesA) + ')'
       : 'Conforme o AGING de ' + E.entrada.mesAnterior + ': o que estava em aberto no financeiro no fim do mês passado';
-    return '<div class="cartao corpo" style="margin-bottom:14px;border-left:4px solid var(--' + (bate ? 'verde' : 'vermelho') + ')">' +
+    return '<div class="cartao corpo cartao-ponte" style="margin-bottom:14px;border-left:4px solid var(--' + (bate ? 'verde' : 'vermelho') + ')">' +
       '<div class="ponte">' +
       pedaco(rotuloInicial, p.anterior, dicaInicial) +
       ' <b>+</b> ' + pedaco('Movimento do razão', p.movimento, E.cfg.aumentos + ' (' + E.cfg.ladoAumento + ', ' + T.moeda(p.notas) + ') menos ' + E.cfg.reducoes + ' (' + E.cfg.ladoReducao + ', ' + T.moeda(p.baixas) + ') do mês') +
@@ -355,7 +591,7 @@
       if (i >= 0) app().empresas[i] = salvo;
       await arm.registrarNoLog({ codigo: E.codigo, acao: 'abas-ocultas', alvo: E.cfg.id, detalhe: escolha.join(', ') || '(nenhuma)' });
       if (escolha.indexOf(E.aba) >= 0) { E.aba = 'ab'; app().gravarLocal('conciliador-solutta.aba-' + E.cfg.id, 'ab'); }
-      E.el.querySelector('.cartao.corpo').outerHTML = '';
+      E.el.querySelector('.cartao-ponte').outerHTML = '';
       E.el.querySelector('#abas').insertAdjacentHTML('beforebegin', desenharPonte());
       desenharAbas();
       desenharAba();
@@ -829,7 +1065,7 @@
       corpo: '<div class="campo"><label for="mes-limpar">Mês da conciliação</label><select id="mes-limpar">' +
         registros.map((c) => '<option value="' + T.esc(c.id) + '"' + (c === inicial ? ' selected' : '') + '>' + T.esc(descreve(c)) + '</option>').join('') + '</select></div>' +
         '<p style="line-height:1.55;margin-top:12px">Apaga <b>tudo</b> o que foi feito no Passo ' + E.cfg.numero + ' desse mês: as conciliações com ID (automáticas e à mão), as observações e os fornecedores ajustados à mão. Depois é como começar do zero.</p>' +
-        '<p class="suave pequeno" style="line-height:1.5">Os arquivos (agings e razão) continuam guardados. Uma cópia do que foi apagado vai para a pasta <b>_apagados</b> da pasta de dados — nada some de verdade.</p>',
+        '<p class="suave pequeno" style="line-height:1.5">Os arquivos (agings e razão) e o período escolhido continuam guardados. Uma cópia do que foi apagado vai para a pasta <b>_apagados</b> da pasta de dados — nada some de verdade.</p>',
       botoes: [{ texto: 'Cancelar', valor: null }, { texto: 'Limpar ' + mesDe(inicial.id), tipo: 'perigo', antes: (j) => j.querySelector('#mes-limpar').value }],
       aoAbrir: (j) => {
         const sel = j.querySelector('#mes-limpar');
@@ -842,6 +1078,12 @@
     try {
       await E.fila; // gravação pendente termina antes (senão ela recriaria o registro apagado)
       const ok = await arm.apagarConciliacao(reg.id);
+      // O período é da conciliação, não uma decisão: continua escolhido depois de limpar.
+      const per = reg.decisoes && inicioDoPeriodo(reg.decisoes.periodoDe, reg.competencia);
+      if (per) {
+        await arm.salvarConciliacao({ id: reg.id, codigo: reg.codigo, tipo: reg.tipo, competencia: reg.competencia, situacao: 'andamento', arquivos: [], resumo: {},
+          decisoes: { periodoDe: per, historico: [{ quando: U.agoraISO(), quem: app().usuario.nome, texto: 'Conciliação limpa; período mantido: ' + nomeDoPeriodo(per, reg.competencia) }] } });
+      }
       const gs = (reg.decisoes && reg.decisoes.conciliacoesAB) || [];
       await arm.registrarNoLog({ codigo: E.codigo, acao: 'terceiro-limpar', alvo: reg.id, detalhe: U.nomeCompetencia(reg.competencia) + ' · ' + gs.length + ' conciliações' });
       T.avisoRapido('Conciliação de ' + U.nomeCompetencia(reg.competencia) + ' limpa' + (ok ? ' (cópia em _apagados).' : '.'), 'ok', 6000);
@@ -1011,7 +1253,7 @@
   // ------------------------------------------------------------------
   function recalcularEDesenhar() {
     calcular();
-    E.el.querySelector('.cartao.corpo').outerHTML = ''; // remove ponte antiga
+    E.el.querySelector('.cartao-ponte').outerHTML = ''; // remove ponte antiga
     // redesenha ponte no lugar
     const abas = E.el.querySelector('#abas');
     abas.insertAdjacentHTML('beforebegin', desenharPonte());
