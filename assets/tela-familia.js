@@ -1,7 +1,8 @@
 /*
  * Conciliador Solutta — tela-familia.js
  * Família (Fornecedores): competência ‹ mês ›, nota "Primeiro fechamento" ou "Mês a mês",
- * checklist "Antes de conciliar", cartões dos passos e os arquivos da família (Parte 7.0, 7.1 e 8).
+ * checklist "Antes de conciliar" e cartões dos passos (Parte 7.0, 7.1 e 8). Os arquivos sobem e
+ * aparecem dentro de cada passo, cada um no seu lugar (tela-subir.js).
  */
 (function (raiz) {
   'use strict';
@@ -80,8 +81,6 @@
     const completo = checklistCompleto(checklist);
     const fechadaAntes = todasConcs.some((c) => c.tipo === 'fornecedor_adiantamento' && c.situacao === 'fechada' && c.competencia < comp);
     const arqs = arquivosDoPasso1(metas, comp);
-    const doMes = metas.filter((m) => m.competencia === comp && daFamilia(m));
-    const outrosMeses = Array.from(new Set(metas.filter((m) => daFamilia(m) && m.competencia !== comp).map((m) => U.anoMes(m.competencia)))).sort().reverse();
     const base = '#/empresa/' + encodeURIComponent(codigo) + '/fornecedores/';
 
     el.innerHTML =
@@ -94,20 +93,10 @@
         : '<span class="pilula ambar" title="Primeiro fechamento da empresa: o que está no razão até o fim do mês é confrontado com a posição do financeiro dessa data, e a diferença vira ajuste de exercícios anteriores.">Primeiro fechamento</span>') +
       '<div class="competencia"><button type="button" id="mes-antes" title="Mês anterior">‹</button><span>' + U.nomeCompetencia(comp) + '</span><button type="button" id="mes-depois" title="Mês seguinte">›</button></div>' +
       '</div></div>' +
-      (outrosMeses.length ? '<p class="suave pequeno" style="margin:-8px 0 14px">Arquivos também em: ' +
-        outrosMeses.map((m) => '<a href="' + base + m + '">' + U.nomeCompetencia(m + '-01') + '</a>').join(' · ') + '</p>' : '') +
+      // Tela limpa (Dony, 15/09/2026): os arquivos sobem e aparecem DENTRO de cada passo.
       '<div class="cartao checklist" id="checklist"></div>' +
       '<h2 style="margin:22px 0 12px">Passos</h2>' +
       '<div class="grade-3" id="passos"></div>' +
-      '<h2 style="margin:26px 0 12px">Arquivos de ' + U.nomeCompetencia(comp) + '</h2>' +
-      '<div class="soltar" id="soltar" tabindex="0" role="button"><b>Arraste os arquivos aqui</b> ou clique para escolher<br><span class="pequeno">Razões (.xls, .xlsx, .csv), aging de contas a pagar e aging de adiantamentos. Pode subir vários de uma vez.' +
-        (raiz.TelaPasso3 ? '<br>Para o ② e o ③ é mais fácil abrir o passo e subir cada arquivo no lugar dele.' : '') + '</span></div>' +
-      '<input type="file" id="escolher-arquivos" multiple class="escondido" accept=".xls,.xlsx,.xlsm,.csv,.txt">' +
-      (app().demonstracao && raiz.Demonstracao
-        ? '<div class="linha-flex" style="margin-top:10px"><button type="button" class="botao" id="bt-exemplo">🧪 Usar os razões de exemplo</button>' +
-          '<span class="suave pequeno">Gera os razões de fornecedores e de adiantamento da empresa de demonstração (janeiro a julho/2026), com fornecedores, CNPJs e valores inventados.</span></div>'
-        : '') +
-      '<div id="arquivos" style="margin-top:12px"></div>' +
       '<div id="inativos"></div>';
 
     el.querySelector('#mes-antes').addEventListener('click', () => app().ir(base + U.anoMes(U.somarMeses(comp, -1))));
@@ -126,7 +115,6 @@
     const inativos = passosInativos(emp, fam);
     desenharChecklist(el.querySelector('#checklist'), codigo, comp, checklist, fam, inativos);
     desenharPassos(el.querySelector('#passos'), codigo, comp, fam, arqs, completo, passo1, ab, inativos);
-    desenharArquivos(el.querySelector('#arquivos'), doMes);
     desenharInativos(el.querySelector('#inativos'), fam, inativos);
     const alternar = (ev) => {
       const b = ev.target.closest('[data-inativar], [data-ativar]');
@@ -136,72 +124,6 @@
     };
     el.querySelector('#passos').addEventListener('click', alternar);
     el.querySelector('#inativos').addEventListener('click', alternar);
-
-    // Subir arquivo continua liberado mesmo com o checklist pendente (Parte 7.1).
-    const zona = el.querySelector('#soltar');
-    const input = el.querySelector('#escolher-arquivos');
-    // Depois de subir: se tudo foi para outra competência, a tela vai para ela (senão o arquivo "sumiria" da vista).
-    const subir = (lista) => raiz.TelaSubir.abrir(codigo, Array.from(lista), {
-      competencia: comp,
-      aoTerminar: (fim) => {
-        const comps = (fim && fim.competencias) || [];
-        const guardados = (fim && fim.guardados) || [];
-        // Aging do mês anterior subido daqui (ex.: aging de julho estando em agosto): ele é o saldo
-        // inicial do ③ deste mês, então a tela fica aqui (antes ia para julho e parecia que não pegou).
-        const compAnterior = U.somarMeses(comp, -1);
-        const soDoMesOuAgingAnterior = guardados.length && guardados.every((g) => g.competencia === comp || (g.competencia === compAnterior && (g.tipo === 'financeiro_pagar' || g.tipo === 'financeiro_adiantamento')));
-        if (soDoMesOuAgingAnterior && guardados.some((g) => g.competencia === compAnterior)) {
-          T.avisoRapido('Aging de ' + U.nomeCompetencia(compAnterior) + ' guardado: é o aging do mês anterior do Passo ③ de ' + U.nomeCompetencia(comp) + '.', 'ok', 6000);
-          app().mostrarRota();
-        } else if (comps.length && comps.indexOf(comp) < 0) {
-          const destino = comps.slice().sort().reverse()[0];
-          T.avisoRapido('Os arquivos foram guardados em ' + U.nomeCompetencia(destino) + ': abrindo essa competência.', 'ok', 5000);
-          app().ir(base + U.anoMes(destino));
-        } else {
-          app().mostrarRota();
-        }
-      },
-    });
-    zona.addEventListener('click', () => input.click());
-    const btExemplo = el.querySelector('#bt-exemplo');
-    if (btExemplo) {
-      btExemplo.addEventListener('click', () => {
-        const razoes = raiz.Demonstracao.gerarRazoes();
-        subir(razoes.map((x) => new File([x.bytes], x.nome, { type: 'application/vnd.ms-excel' })));
-      });
-    }
-    zona.addEventListener('keydown', (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); input.click(); } });
-    input.addEventListener('change', () => { if (input.files.length) subir(input.files); input.value = ''; });
-    zona.addEventListener('dragover', (ev) => { ev.preventDefault(); zona.classList.add('por-cima'); });
-    zona.addEventListener('dragleave', () => zona.classList.remove('por-cima'));
-    zona.addEventListener('drop', (ev) => {
-      ev.preventDefault();
-      zona.classList.remove('por-cima');
-      if (ev.dataTransfer && ev.dataTransfer.files.length) subir(ev.dataTransfer.files);
-    });
-    el.querySelector('#passos').addEventListener('click', (ev) => {
-      const b = ev.target.closest('[data-subir]');
-      if (b) input.click();
-    });
-    el.querySelector('#arquivos').addEventListener('click', async (ev) => {
-      const b = ev.target.closest('[data-apagar]');
-      if (!b) return;
-      const meta = doMes.find((m) => m.id === b.getAttribute('data-apagar'));
-      const sim = await T.confirmar({
-        titulo: 'Apagar este arquivo?',
-        texto: '<b>' + T.esc(meta.arquivo) + '</b>' + (meta.conta ? ' · conta ' + T.esc(meta.conta.codigo + ' ' + meta.conta.nome) : '') +
-          '<br><br>Ele sai das listas e dos passos desta competência. A cópia vai para a pasta <b>_apagados</b> dentro da pasta de dados (nada some de verdade).',
-        botao: 'Apagar', perigo: true,
-      });
-      if (!sim) return;
-      try {
-        await arm.apagarArquivo(meta.id);
-        T.avisoRapido('Arquivo apagado: ' + meta.arquivo, 'ok');
-        app().mostrarRota();
-      } catch (e) {
-        T.avisoRapido(T.mensagemDeErro(e), 'erro');
-      }
-    });
   }
 
   // ------------------------------------------------------------------
@@ -322,8 +244,8 @@
         '<li>' + (arqs.pagar ? '<span class="ok">✓</span>' : '<span class="fraco">·</span>') + '<span>Contas a pagar em aberto <span class="selo opcional">opcional</span></span></li>',
       ];
       let estado, pode = false, porque = '';
-      if (!completo) { estado = '<span class="pilula cinza">espera o checklist</span>'; porque = 'Marque os dois itens de "Antes de conciliar".'; }
-      else if (!temF || !temA) { estado = '<span class="pilula ambar">falta arquivo</span>'; porque = 'Suba o razão de fornecedores e o de adiantamento desta competência.'; }
+      if (!completo) { estado = '<span class="pilula cinza">espera o checklist</span>'; porque = 'Marque os dois itens de "Antes de conciliar"' + (temF && temA ? '.' : ' (os razões já podem subir dentro do passo).'); }
+      else if (!temF || !temA) { estado = '<span class="pilula ambar">falta arquivo</span>'; porque = 'Abra o passo e suba cada razão no lugar dele.'; }
       else if (passo1) { estado = '<span class="pilula azul">em andamento</span>'; pode = true; }
       else { estado = '<span class="pilula verde">pronta para conciliar</span>'; pode = true; }
       const r = passo1 && passo1.resumo;
@@ -332,8 +254,8 @@
       return '<div class="cartao passo"><div class="linha-flex"><span class="numero">' + p.numero + '</span><h3 style="flex:1">' + T.esc(p.titulo) + '</h3>' + estado + '</div>' +
         '<p class="suave" style="line-height:1.5">' + T.esc(p.texto) + '</p><ul class="precisa">' + itens.join('') + '</ul>' + resumo +
         (porque ? '<p class="pequeno" style="color:var(--ambar)">' + T.esc(porque) + '</p>' : '') +
-        '<div class="acoes">' + (pode ? '<a class="botao primario" href="' + base + 'passo1">Abrir →</a>' : '<span class="botao primario travado" title="' + T.esc(porque) + '">Abrir →</span>') +
-        '<button type="button" class="botao" data-subir>Subir o razão</button>' + botaoInativar(p) + '</div></div>';
+        // Os razões sobem DENTRO do passo (Dony, 15/09/2026): Abrir fica sempre liberado.
+        '<div class="acoes"><a class="botao primario" href="' + base + 'passo1">' + (temF && temA ? 'Abrir →' : '📁 Abrir e subir arquivos') + '</a>' + botaoInativar(p) + '</div></div>';
     }).join('');
   }
 
@@ -375,30 +297,6 @@
   }
   function linhaPrecisa(tem, texto) {
     return '<li>' + (tem ? '<span class="ok">✓</span>' : '<span class="falta">✗</span>') + '<span>' + T.esc(texto) + (tem ? '' : ' <span class="falta pequeno">falta</span>') + '</span></li>';
-  }
-
-  function desenharArquivos(el, doMes) {
-    if (!doMes.length) {
-      el.innerHTML = '<div class="cartao"><div class="vazio">Nenhum arquivo desta família nesta competência.</div></div>';
-      return;
-    }
-    const lista = doMes.slice().sort((a, b) => U.paraMs(b.enviadoEm) - U.paraMs(a.enviadoEm));
-    T.tabelaPaginada(el, {
-      alta: false,
-      cabecalho: '<th>Arquivo</th><th>Tipo</th><th>Conta</th><th>Período</th><th class="num">Linhas</th><th class="num">Saldo final</th><th>Enviado</th><th class="num">Versão</th><th></th>',
-      linhas: lista,
-      linha: (m) => {
-        const tipo = m.tipo === 'razao' ? 'Razão · ' + (m.conta.papel === 'principal' ? 'fornecedores' : 'adiantamento') : raiz.Leitor.NOMES_DOS_TIPOS[m.tipo] || m.tipo;
-        return '<tr><td class="nome">' + T.esc(m.arquivo) + (m.original && m.original !== m.arquivo ? '<br><span class="suave pequeno">guardado como ' + T.esc(m.original) + '</span>' : '') + '</td>' +
-          '<td>' + T.esc(tipo) + '</td><td>' + (m.conta ? T.esc(m.conta.codigo + ' · ' + m.conta.nome) : '—') + '</td>' +
-          '<td class="num">' + (m.periodo ? T.esc(m.periodo.de + ' a ' + m.periodo.ate) : '—') + '</td>' +
-          '<td class="num">' + (m.tipo === 'razao' ? (m.lancamentos || 0) : (m.titulos || 0)) + '</td>' +
-          (m.tipo === 'razao' ? T.tdValor(m.saldoFinal) : T.tdValor(m.total)) +
-          '<td>' + T.esc(m.enviadoPor || '') + '<br><span class="suave pequeno">' + U.dataHoraLocal(m.enviadoEm) + '</span></td>' +
-          '<td class="num">' + (m.versao > 1 ? '<span class="pilula ambar">versão ' + m.versao + '</span>' : '1') + '</td>' +
-          '<td class="num"><button class="botao pequeno perigo" data-apagar="' + T.esc(m.id) + '">Apagar</button></td></tr>';
-      },
-    });
   }
 
   raiz.TelaFamilia = { mostrar, arquivosDoPasso1, checklistCompleto, idChecklist, idPasso1 };

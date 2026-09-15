@@ -221,78 +221,46 @@
     return { cfg: E.cfg, codigo: E.codigo, comp: E.comp, arqs: E.arqs, periodoDe: E.periodoDe, registro: E.registro };
   }
 
+  // Os lugares de arquivo do passo (desenhados e subidos pela peça comum, TelaSubir).
   function lugaresDoPasso(ctx) {
     const { cfg, comp, arqs, periodoDe } = ctx;
+    const periodo = nomeDoPeriodo(periodoDe, comp);
     return [
-      { id: 'razao', parte: 'Parte A · contabilidade', titulo: primeiraMaiuscula(cfg.nomeRazao), sub: nomeDoPeriodo(periodoDe, comp), meta: arqs.razao },
-      { id: 'anterior', parte: 'Parte A · saldo inicial', titulo: primeiraMaiuscula(cfg.nomeAging), sub: U.nomeCompetencia(arqs.compAnterior) + (periodoDe ? ' (mês antes do período)' : ' (mês anterior)'), meta: arqs.agingAnterior },
-      { id: 'atual', parte: 'Parte B · financeiro', titulo: primeiraMaiuscula(cfg.nomeAging), sub: U.nomeCompetencia(comp), meta: arqs.agingAtual },
+      { id: 'razao', parte: 'Parte A · contabilidade', titulo: primeiraMaiuscula(cfg.nomeRazao), sub: periodo, nome: cfg.nomeRazao + ' de ' + periodo, log: cfg.id + '/razao',
+        tipo: 'razao', papel: cfg.papelRazao, competencia: comp, periodo: { de: periodoDe || comp, ate: comp }, nomePeriodo: periodo, arquivos: arqs.razao ? [arqs.razao] : [] },
+      { id: 'anterior', parte: 'Parte A · saldo inicial', titulo: primeiraMaiuscula(cfg.nomeAging), sub: U.nomeCompetencia(arqs.compAnterior) + (periodoDe ? ' (mês antes do período)' : ' (mês anterior)'),
+        nome: cfg.nomeAging + ' de ' + U.nomeCompetencia(arqs.compAnterior), log: cfg.id + '/anterior', tipo: cfg.tipoFinanceiro, competencia: arqs.compAnterior, arquivos: arqs.agingAnterior ? [arqs.agingAnterior] : [] },
+      { id: 'atual', parte: 'Parte B · financeiro', titulo: primeiraMaiuscula(cfg.nomeAging), sub: U.nomeCompetencia(comp),
+        nome: cfg.nomeAging + ' de ' + U.nomeCompetencia(comp), log: cfg.id + '/atual', tipo: cfg.tipoFinanceiro, competencia: comp, arquivos: arqs.agingAtual ? [arqs.agingAtual] : [] },
     ];
   }
 
   function painelArquivos(ctx, aberto) {
     const { cfg, comp, arqs, periodoDe } = ctx;
-    const lugares = lugaresDoPasso(ctx);
-    const faltam = lugares.filter((s) => !s.meta).length;
     const opcoes = [['', 'Só ' + U.nomeCompetencia(comp)]];
     for (let i = 1; i <= 23; i++) { const de = U.somarMeses(comp, -i); opcoes.push([de, nomeDoPeriodo(de, comp)]); }
-    const descreve = (s) => {
-      const m = s.meta;
-      if (!m) return '<span class="falta">falta</span>';
-      const quem = m.enviadoEm ? ' · ' + T.esc(m.enviadoPor || '') + ' em ' + U.dataHoraLocal(m.enviadoEm) : '';
-      if (s.id === 'razao') {
-        return '<b>' + T.esc(m.arquivo) + '</b><br><span class="suave">conta ' + T.esc(m.conta.codigo + ' ' + (m.conta.nome || '')) + ' · ' + (m.lancamentos || 0) + ' lanç.' +
-          (m.periodo ? ' · ' + T.esc(m.periodo.de + ' a ' + m.periodo.ate) : '') + (m.competencia !== comp ? ' · guardado em ' + U.nomeCompetencia(m.competencia) : '') + quem + '</span>';
-      }
-      return '<b>' + T.esc(m.arquivo) + '</b><br><span class="suave">' + (m.titulos || 0) + ' títulos · ' + T.moeda(m.total || 0) + quem + '</span>';
-    };
     const sugestao = arqs.sugestaoDe && arqs.razao && arqs.razao.periodo
       ? '<div class="aviso info" style="margin:0 0 10px"><span class="icone-aviso">📅</span><div>O razão guardado vai de <b>' + T.esc(arqs.razao.periodo.de) + ' a ' + T.esc(arqs.razao.periodo.ate) + '</b>. ' +
         '<button type="button" class="botao pequeno" data-usar-periodo="' + arqs.sugestaoDe + '">Conciliar o período ' + T.esc(nomeDoPeriodo(arqs.sugestaoDe, comp)) + '</button></div></div>' : '';
-    return '<details class="cartao corpo arquivos-passo"' + (aberto ? ' open' : '') + '>' +
-      '<summary><b>📁 Período e arquivos desta conciliação</b> <span class="suave pequeno">· ' + T.esc(nomeDoPeriodo(periodoDe, comp)) + ' · ' +
-      (faltam ? '<span class="falta">' + faltam + ' arquivo(s) faltando</span>' : 'os 3 arquivos guardados') + '</span></summary>' +
-      '<div class="linha-flex periodo-passo"><label class="pequeno" for="periodo-de"><b>Período da conciliação</b></label>' +
-      '<select class="filtro" id="periodo-de" data-periodo-de>' + opcoes.map((o) => '<option value="' + o[0] + '"' + ((periodoDe || '') === o[0] ? ' selected' : '') + '>' + T.esc(o[1]) + '</option>').join('') + '</select>' +
-      '<span class="suave pequeno">Parte A = ' + T.esc(cfg.nomeAging) + ' de ' + T.esc(U.nomeCompetencia(arqs.compAnterior)) + ' + razão de ' + T.esc(nomeDoPeriodo(periodoDe, comp)) +
-      ' · Parte B = ' + T.esc(cfg.nomeAging) + ' de ' + T.esc(U.nomeCompetencia(comp)) + '</span></div>' +
-      sugestao +
-      '<div class="lugares">' + lugares.map((s) =>
-        '<div class="lugar' + (s.meta ? ' ok' : '') + '" data-lugar="' + s.id + '">' +
-        '<div class="parte">' + T.esc(s.parte) + '</div>' +
-        '<h4>' + (s.meta ? '✓ ' : '') + T.esc(s.titulo) + '</h4><div class="pequeno"><b>' + T.esc(s.sub) + '</b></div>' +
-        '<div class="arquivo pequeno">' + descreve(s) + '</div>' +
-        '<div class="linha-flex" style="margin-top:auto"><button type="button" class="botao pequeno' + (s.meta ? '' : ' primario') + '" data-subir-lugar="' + s.id + '">' + (s.meta ? 'Trocar' : '⬆ Subir') + '</button>' +
-        '<span class="suave pequeno">ou arraste o arquivo aqui</span></div>' +
-        '<input type="file" class="escondido" data-arquivo-lugar="' + s.id + '" accept=".xls,.xlsx,.xlsm,.csv,.txt"></div>').join('') + '</div>' +
-      '</details>';
+    return raiz.TelaSubir.painel({
+      titulo: 'Período e arquivos desta conciliação', resumo: nomeDoPeriodo(periodoDe, comp), aberto, lugares: lugaresDoPasso(ctx),
+      antes: '<div class="linha-flex periodo-passo"><label class="pequeno" for="periodo-de"><b>Período da conciliação</b></label>' +
+        '<select class="filtro" id="periodo-de" data-periodo-de>' + opcoes.map((o) => '<option value="' + o[0] + '"' + ((periodoDe || '') === o[0] ? ' selected' : '') + '>' + T.esc(o[1]) + '</option>').join('') + '</select>' +
+        '<span class="suave pequeno">Parte A = ' + T.esc(cfg.nomeAging) + ' de ' + T.esc(U.nomeCompetencia(arqs.compAnterior)) + ' + razão de ' + T.esc(nomeDoPeriodo(periodoDe, comp)) +
+        ' · Parte B = ' + T.esc(cfg.nomeAging) + ' de ' + T.esc(U.nomeCompetencia(comp)) + '</span></div>' + sugestao,
+    });
   }
 
   function ligarPainel(el, ctx) {
     if (!el) return;
+    raiz.TelaSubir.ligar(el, ctx.codigo, lugaresDoPasso(ctx));
     el.addEventListener('change', async (ev) => {
       const per = ev.target.closest('[data-periodo-de]');
-      if (per) { await mudarPeriodo(ctx, per.value, per); return; }
-      const inp = ev.target.closest('[data-arquivo-lugar]');
-      if (inp && inp.files && inp.files[0]) { const f = inp.files[0]; inp.value = ''; await subirNoLugar(ctx, inp.getAttribute('data-arquivo-lugar'), f); }
+      if (per) await mudarPeriodo(ctx, per.value, per);
     });
     el.addEventListener('click', async (ev) => {
-      const b = ev.target.closest('[data-subir-lugar]');
-      if (b) { const inp = el.querySelector('[data-arquivo-lugar="' + b.getAttribute('data-subir-lugar') + '"]'); if (inp) inp.click(); return; }
       const u = ev.target.closest('[data-usar-periodo]');
       if (u) await mudarPeriodo(ctx, u.getAttribute('data-usar-periodo'));
-    });
-    // Arquivo solto no painel, fora de um lugar: não deixa o navegador abrir o arquivo no lugar do programa.
-    el.addEventListener('dragover', (ev) => ev.preventDefault());
-    el.addEventListener('drop', (ev) => { ev.preventDefault(); T.avisoRapido('Solte o arquivo em cima do lugar dele (razão, aging anterior ou aging do mês).', null, 4000); });
-    el.querySelectorAll('.lugar').forEach((s) => {
-      s.addEventListener('dragover', (ev) => { ev.preventDefault(); s.classList.add('por-cima'); });
-      s.addEventListener('dragleave', () => s.classList.remove('por-cima'));
-      s.addEventListener('drop', async (ev) => {
-        ev.preventDefault(); ev.stopPropagation(); s.classList.remove('por-cima');
-        const f = ev.dataTransfer && ev.dataTransfer.files && ev.dataTransfer.files[0];
-        if (f) await subirNoLugar(ctx, s.getAttribute('data-lugar'), f);
-      });
     });
   }
 
@@ -326,106 +294,6 @@
     } catch (e) {
       if (select) select.value = atual || '';
       T.avisoRapido('Não foi possível mudar o período: ' + T.mensagemDeErro(e), 'erro');
-    }
-  }
-
-  // Várias contas no razão: escolher qual é a deste passo (a reconhecida vem marcada).
-  function escolherConta(r, cfg) {
-    const reconhecida = r.contas.findIndex((c) => c.papel && c.papel.familia === 'fornecedores' && c.papel.papel === cfg.papelRazao);
-    return T.janela({
-      titulo: 'Qual conta deste razão é a do Passo ' + cfg.numero + '?',
-      corpo: '<p class="suave" style="margin-bottom:8px">' + T.esc(r.nomeArquivo) + ' tem ' + r.contas.length + ' contas.</p>' +
-        r.contas.map((c, k) => '<label class="item-aba"><input type="radio" name="conta-razao" value="' + k + '"' + (k === (reconhecida >= 0 ? reconhecida : 0) ? ' checked' : '') + '> ' +
-          '<b>' + T.esc(c.codigo) + '</b> ' + T.esc(c.nome || '') + ' <span class="suave pequeno">· ' + c.lancamentos.length + ' lanç.' + (c.papel && c.papel.familia ? ' · ' + T.esc(c.papel.familia + '/' + c.papel.papel) : '') + '</span></label>').join(''),
-      botoes: [{ texto: 'Cancelar', valor: null }, { texto: 'Usar esta conta', tipo: 'primario', antes: (j) => { const x = j.querySelector('input[name="conta-razao"]:checked'); return x ? r.contas[Number(x.value)] : false; } }],
-    });
-  }
-
-  async function subirNoLugar(ctx, lugar, arquivo) {
-    const { cfg, codigo, comp, arqs, periodoDe } = ctx;
-    const arm = app().armazenamento;
-    const compLugar = lugar === 'anterior' ? arqs.compAnterior : comp;
-    const nomeLugar = lugar === 'razao' ? cfg.nomeRazao + ' de ' + nomeDoPeriodo(periodoDe, comp) : cfg.nomeAging + ' de ' + U.nomeCompetencia(compLugar);
-    T.avisoRapido('Lendo ' + arquivo.name + '…', null, 2500);
-    let r;
-    try {
-      const bytes = await T.lerArquivoComoBytes(arquivo);
-      r = raiz.Leitor.ler(bytes, arquivo.name);
-      r.bytes = bytes;
-    } catch (e) { T.avisoRapido('Não consegui ler ' + arquivo.name + ': ' + T.mensagemDeErro(e), 'erro'); return; }
-    const naoServe = (esperado, outroTipo) => T.janela({
-      titulo: 'Esse arquivo não é ' + esperado,
-      corpo: '<p style="line-height:1.5">Este lugar é o do <b>' + T.esc(nomeLugar) + '</b>, mas <b>' + T.esc(arquivo.name) + '</b> ' +
-        (outroTipo ? 'é de outro tipo: ' + T.esc(r.nomeDoTipo || r.tipo) + '.' : 'não foi entendido pelo programa' + (r.motivo ? ': ' + T.esc(r.motivo) : '.')) + '</p>' +
-        '<p class="suave pequeno" style="margin-top:8px">Confira se é o arquivo certo. Se for, mas o programa não entendeu, mande o desenho pelo menu “Ver o desenho de um arquivo”.</p>' });
-    // Já guardado, mas não é o que este lugar usa agora (trocou e voltou ao antigo, ou estava com
-    // outro papel): guarda de novo para passar a ser o deste lugar.
-    const doLugarAgora = { razao: arqs.razao, anterior: arqs.agingAnterior, atual: arqs.agingAtual }[lugar];
-    const guardarNoLugar = async (guardar) => {
-      let g = await guardar();
-      if (g.jaExistia && (!doLugarAgora || doLugarAgora.id !== g.meta.id)) { await arm.apagarArquivo(g.meta.id); g = await guardar(); g.deNovo = true; }
-      return g;
-    };
-    try {
-      let g, resumo;
-      if (lugar === 'razao') {
-        if (r.tipo !== 'razao' || !r.contas || !r.contas.length) { await naoServe('um razão', r.tipo !== 'razao' && r.tipo !== 'desconhecido'); return; }
-        const emp = app().empresas.find((e) => String(e.codigo) === String(codigo)) || {};
-        const rz = r.razao;
-        if (rz.cnpj && emp.cnpj && String(rz.cnpj).slice(0, 8) !== String(emp.cnpj).slice(0, 8)) {
-          const ok = await T.confirmar({ titulo: 'Esse razão é de outra empresa?',
-            texto: 'O CNPJ do razão (' + U.formatarCnpj(rz.cnpj) + ') não é o de <b>' + T.esc(emp.nome) + '</b> (' + U.formatarCnpj(emp.cnpj) + ').',
-            botao: 'Guardar mesmo assim', perigo: true });
-          if (!ok) return;
-        }
-        // Papel escolhido antes para esta empresa (igual à janela de subir).
-        const escolhidos = emp.papeisDeConta || {};
-        r.contas.forEach((c) => { const e = escolhidos[c.codigo]; if (e && e.familia) c.papel = { familia: e.familia, papel: e.papel, regra: 'escolhido para esta empresa', banco: null, escolhido: true }; });
-        let conta = r.contas.length === 1 ? r.contas[0] : null;
-        if (!conta) {
-          const doPapel = r.contas.filter((c) => c.papel && c.papel.familia === 'fornecedores' && c.papel.papel === cfg.papelRazao);
-          conta = doPapel.length === 1 ? doPapel[0] : await escolherConta(r, cfg);
-        }
-        if (!conta) return;
-        // O arquivo tem lançamentos no período escolhido?
-        const iniNum = U.inicioDaCompetencia(periodoDe || comp).numero, fimNum = U.fimDaCompetencia(comp).numero;
-        const noPeriodo = conta.lancamentos.filter((l) => { const n = U.montarData(l.dia, l.mes, l.ano); return !!n && n.numero >= iniNum && n.numero <= fimNum; }).length;
-        const per = r.razao.periodo;
-        if (!noPeriodo) {
-          const ok = await T.confirmar({ titulo: 'Esse razão não tem lançamento no período',
-            texto: T.esc(arquivo.name) + (per ? ' vai de <b>' + T.esc(per.de) + ' a ' + T.esc(per.ate) + '</b>' : '') + ' e não tem nenhum lançamento em <b>' + T.esc(nomeDoPeriodo(periodoDe, comp)) + '</b>. É o arquivo certo?',
-            botao: 'Guardar assim mesmo', perigo: true });
-          if (!ok) return;
-        }
-        const papel = { familia: 'fornecedores', papel: cfg.papelRazao };
-        g = await guardarNoLugar(() => raiz.TelaSubir.guardarContaDoRazao(codigo, r, conta, papel, comp));
-        // A empresa passa a saber o papel desta conta (vale também para os razões subidos pela família).
-        const auto = conta.papel || {};
-        if (auto.familia !== papel.familia || auto.papel !== papel.papel) {
-          const cad = (await arm.empresas()).find((e) => String(e.codigo) === String(codigo)); // relido: outra pessoa pode ter mexido
-          const papeis = Object.assign({}, cad.papeisDeConta || {}, { [conta.codigo]: papel });
-          const salvo = await arm.salvarEmpresa(Object.assign({}, cad, { papeisDeConta: papeis }));
-          const ix = app().empresas.findIndex((e) => String(e.codigo) === String(codigo));
-          if (ix >= 0) app().empresas[ix] = salvo;
-        }
-        resumo = 'conta ' + conta.codigo + ' · ' + noPeriodo + ' lançamento(s) em ' + nomeDoPeriodo(periodoDe, comp) + (per ? ' (arquivo de ' + per.de + ' a ' + per.ate + ')' : '');
-      } else {
-        if (!r.financeiro) { await naoServe('um relatório de títulos em aberto (aging)', !/^financeiro|^desconhecido$/.test(r.tipo)); return; }
-        const pos = r.financeiro.posicao && U.lerData(r.financeiro.posicao);
-        if (pos && U.competenciaDe(pos) !== compLugar) {
-          const ok = await T.confirmar({ titulo: 'A data do relatório é de outro mês',
-            texto: 'O relatório diz posição em <b>' + T.esc(pos.texto) + '</b>, mas este lugar é o <b>' + T.esc(nomeLugar) + '</b>. É o arquivo certo?',
-            botao: 'Guardar como ' + U.nomeCompetencia(compLugar), perigo: true });
-          if (!ok) return;
-        }
-        g = await guardarNoLugar(() => raiz.TelaSubir.guardarTitulos(codigo, r, cfg.tipoFinanceiro, compLugar));
-        resumo = r.financeiro.titulos.length + ' títulos · ' + T.moeda(r.financeiro.total);
-      }
-      await arm.registrarNoLog({ codigo, acao: 'arquivo-na-conciliacao', alvo: cfg.id + '/' + lugar + '/' + U.anoMes(compLugar), detalhe: arquivo.name + ' → ' + nomeLugar });
-      T.avisoRapido('✓ ' + primeiraMaiuscula(nomeLugar) + ': ' + arquivo.name + ' (' + resumo + ')' + (g && g.jaExistia ? ' — já era este arquivo' : ''), 'ok', 7000);
-      app().mostrarRota();
-    } catch (e) {
-      T.avisoRapido('Não foi possível guardar ' + arquivo.name + ': ' + T.mensagemDeErro(e), 'erro');
     }
   }
 

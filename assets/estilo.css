@@ -258,12 +258,6 @@ table.tabela .caixa { width: 32px; text-align: center; }
 }
 .soltar:hover, .soltar.por-cima { border-color: var(--primaria); background: var(--primaria-clara); color: var(--primaria-escura); }
 .soltar b { color: var(--texto); }
-.lido { padding: 14px 16px; }
-.lido + .lido { margin-top: 12px; }
-.lido .titulo-lido { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
-.lido dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; margin: 8px 0; font-size: 13.5px; }
-.lido dt { color: var(--texto-suave); }
-.lido dd { margin: 0; }
 
 /* ---------- Barra de seleção (rodapé) ---------- */
 .barra-selecao {
@@ -346,7 +340,6 @@ table.tabela tr.fixo td:first-child { box-shadow: inset 3px 0 0 var(--ambar); }
 .opcao-inicio { text-align: left; border: 1px solid var(--borda-forte); background: #fff; border-radius: 8px; padding: 12px 14px; cursor: pointer; display: flex; flex-direction: column; gap: 4px; }
 .opcao-inicio:hover { border-color: var(--primaria); background: var(--primaria-clara); }
 .opcao-inicio b { font-size: 14px; color: var(--primaria-escura); }
-.atalhos-competencia { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 6px; }
 .opcao-inicio .valor-inicio { font-style: normal; font-size: 18px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--texto); }
 .opcao-inicio span { font-size: 12.5px; color: var(--texto-suave); line-height: 1.45; }
 .linha-inicio { margin: 0 0 10px; padding: 8px 12px; border-radius: 8px; background: var(--primaria-clara); color: var(--primaria-escura); font-size: 13px; }
@@ -362,7 +355,11 @@ details.arquivos-passo[open] summary { margin-bottom: 12px; }
 .lugar { display: flex; flex-direction: column; gap: 4px; min-height: 150px; padding: 12px 14px; border: 2px dashed var(--borda-forte); border-radius: 10px; background: #fbfcfd; }
 .lugar h4 { margin: 0; font-size: 14px; }
 .lugar .parte { font-size: 11px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--texto-suave); }
-.lugar .arquivo { margin: 4px 0 8px; line-height: 1.45; overflow-wrap: anywhere; }
+.lugar .arquivos-do-lugar { margin: 4px 0 8px; line-height: 1.45; overflow-wrap: anywhere; }
+.arquivo-lugar { display: flex; gap: 6px; align-items: flex-start; justify-content: space-between; }
+.arquivo-lugar + .arquivo-lugar { margin-top: 6px; padding-top: 6px; border-top: 1px solid #cfe7d8; }
+.arquivo-lugar .botao.leve { color: var(--texto-suave); flex: none; }
+.arquivo-lugar .botao.leve:hover { color: var(--vermelho); background: #fff; }
 .lugar.ok { border-style: solid; border-color: #bfe2cd; background: var(--verde-fundo); }
 .lugar.ok h4 { color: var(--verde); }
 .lugar.por-cima { border-color: var(--primaria); background: var(--primaria-clara); }

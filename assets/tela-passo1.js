@@ -41,21 +41,25 @@
     T.carregando(el, 'Abrindo o Passo ① de ' + U.nomeCompetencia(comp) + '…');
 
     const concs = await arm.conciliacoes(codigo, comp);
-    // A função de abrir TAMBÉM confere o checklist, não só o botão (Parte 7.1).
-    const checklist = concs.find((c) => c.id === raiz.TelaFamilia.idChecklist(codigo, comp));
-    if (!raiz.TelaFamilia.checklistCompleto(checklist)) {
-      el.innerHTML = '<a class="voltar" href="' + voltar + '">← Fornecedores · ' + U.nomeCompetencia(comp) + '</a>' +
-        '<div class="aviso ambar"><span class="icone-aviso">🔒</span><div><b>Este passo espera o checklist "Antes de conciliar".</b><br>' +
-        'Marque que os bancos foram conciliados e que as notas fiscais de entrada subiram. <a href="' + voltar + '">Ir para o checklist</a></div></div>';
-      return;
-    }
     const metas = await arm.arquivos(codigo);
+    if (conferir && !conferir()) return;
     const arqs = raiz.TelaFamilia.arquivosDoPasso1(metas, comp);
-    if (!arqs.F.length || !arqs.A.length) {
+    // Os arquivos sobem AQUI, cada um no seu lugar (Dony, 15/09/2026: "tem que ser em todas").
+    // Subir continua liberado com o checklist pendente; a conciliação, não (Parte 7.1).
+    const checklist = concs.find((c) => c.id === raiz.TelaFamilia.idChecklist(codigo, comp));
+    const checklistOk = raiz.TelaFamilia.checklistCompleto(checklist);
+    const falta = !arqs.F.length || !arqs.A.length;
+    if (!checklistOk || falta) {
       el.innerHTML = '<a class="voltar" href="' + voltar + '">← Fornecedores · ' + U.nomeCompetencia(comp) + '</a>' +
-        '<div class="aviso ambar"><span class="icone-aviso">📄</span><div><b>Falta arquivo para o Passo ①.</b><br>' +
-        (!arqs.F.length ? 'Falta o razão de fornecedores. ' : '') + (!arqs.A.length ? 'Falta o razão de adiantamento a fornecedores. ' : '') +
-        '<a href="' + voltar + '">Subir os razões</a></div></div>';
+        '<div class="cabecalho"><div class="titulos"><h1>Passo ① · Fornecedores × Adiantamento</h1>' +
+        '<p class="suave">' + T.esc(emp.codigo + ' · ' + emp.nome) + ' · ' + U.nomeCompetencia(comp) + '</p></div></div>' +
+        (checklistOk ? '' : '<div class="aviso ambar" style="margin-bottom:12px"><span class="icone-aviso">🔒</span><div><b>A conciliação espera o checklist "Antes de conciliar".</b><br>' +
+          'Marque que os bancos foram conciliados e que as notas fiscais de entrada subiram. <a href="' + voltar + '">Ir para o checklist</a>' +
+          (falta ? ' — os arquivos já podem subir aqui embaixo.' : '') + '</div></div>') +
+        (falta ? '<div class="aviso info" style="margin-bottom:12px"><span class="icone-aviso">📁</span><div><b>Suba cada razão no seu lugar.</b> ' +
+          'O programa sabe o que é pelo lugar onde você coloca. Falta: ' + [!arqs.F.length ? 'o razão de fornecedores' : '', !arqs.A.length ? 'o razão de adiantamento a fornecedores' : ''].filter(Boolean).join(' e ') + '.</div></div>' : '') +
+        painelDoPasso1(codigo, comp, arqs, falta);
+      ligarPainelDoPasso1(el.querySelector('.arquivos-passo'), codigo, comp, arqs);
       return;
     }
     const carregar = async (m) => ({ meta: m, conteudo: await arm.conteudoDoArquivo(m.id) });
@@ -99,8 +103,55 @@
       fila: Promise.resolve(),
     };
     if (!ABAS.some((a) => a.id === E.aba)) E.aba = 'bateuF';
+    E.arqs = arqs;
     calcular();
     desenharTudo();
+  }
+
+  // Os lugares de arquivo do Passo ①: um razão de fornecedores e um de adiantamento (cada um pode
+  // ter mais de uma conta) e, opcional, o contas a pagar em aberto (ajuda a reconhecer os nomes).
+  function lugaresDoPasso1(comp, arqs) {
+    const mes = U.nomeCompetencia(comp);
+    const ate = { de: null, ate: comp };
+    return [
+      { id: 'F', parte: 'Contabilidade', titulo: 'Razão de fornecedores', sub: mes, nome: 'razão de fornecedores de ' + mes, log: 'passo1/fornecedores',
+        tipo: 'razao', papel: 'principal', varias: true, competencia: comp, periodo: ate, nomePeriodo: 'até o fim de ' + mes, arquivos: arqs.F },
+      { id: 'A', parte: 'Contabilidade', titulo: 'Razão de adiantamento a fornecedores', sub: mes, nome: 'razão de adiantamento a fornecedores de ' + mes, log: 'passo1/adiantamento',
+        tipo: 'razao', papel: 'adiantamento', varias: true, competencia: comp, periodo: ate, nomePeriodo: 'até o fim de ' + mes, arquivos: arqs.A },
+      { id: 'pagar', parte: 'Financeiro · opcional', titulo: 'Contas a pagar em aberto', sub: mes + ' · ajuda a reconhecer os nomes', nome: 'contas a pagar em aberto de ' + mes, log: 'passo1/pagar',
+        tipo: 'financeiro_pagar', opcional: true, competencia: comp, arquivos: arqs.pagar ? [arqs.pagar] : [] },
+    ];
+  }
+
+  // Empresa de demonstração: os razões de exemplo sobem direto nos lugares.
+  function eDemonstracao(codigo) {
+    return !!(app().demonstracao && raiz.Demonstracao && String(raiz.Demonstracao.EMPRESA.codigo) === String(codigo));
+  }
+
+  function painelDoPasso1(codigo, comp, arqs, aberto) {
+    return raiz.TelaSubir.painel({
+      titulo: 'Arquivos do passo', resumo: U.nomeCompetencia(comp), aberto, lugares: lugaresDoPasso1(comp, arqs),
+      depois: eDemonstracao(codigo)
+        ? '<div class="linha-flex" style="margin-top:10px"><button type="button" class="botao" data-exemplo>🧪 Usar os razões de exemplo</button>' +
+          '<span class="suave pequeno">Os razões de fornecedores e de adiantamento da empresa de demonstração (janeiro a julho/2026), com fornecedores, CNPJs e valores inventados.</span></div>'
+        : '',
+    });
+  }
+
+  function ligarPainelDoPasso1(el, codigo, comp, arqs) {
+    if (!el) return;
+    const lugares = lugaresDoPasso1(comp, arqs);
+    raiz.TelaSubir.ligar(el, codigo, lugares);
+    el.addEventListener('click', async (ev) => {
+      const b = ev.target.closest('[data-exemplo]');
+      if (!b) return;
+      b.disabled = true;
+      const razoes = raiz.Demonstracao.gerarRazoes();
+      const arquivo = (x) => new File([x.bytes], x.nome, { type: 'application/vnd.ms-excel' });
+      const f = await raiz.TelaSubir.subir(codigo, lugares[0], arquivo(razoes[0]), { semRota: true });
+      const a = await raiz.TelaSubir.subir(codigo, lugares[1], arquivo(razoes[1]), { semRota: true });
+      if (f || a) app().mostrarRota(); else b.disabled = false;
+    });
   }
 
   function calcular() {
@@ -153,12 +204,14 @@
       '<p class="suave pequeno">Fornecedores: ' + contaTxt(E.arquivos.F) + ' · Adiantamento: ' + contaTxt(E.arquivos.A) +
       (E.arquivos.pagar ? ' · Contas a pagar: ' + E.arquivos.pagar.meta.titulos + ' títulos (ajuda a reconhecer nomes)' : '') + '</p></div>' +
       '<span class="guardado" id="guardado" title="Cada decisão é gravada na hora, sozinha">' + (E.guardadoEm ? 'guardado às ' + U.horaLocal(E.guardadoEm) : 'nenhuma decisão tomada ainda') + '</span></div>' +
+      painelDoPasso1(E.codigo, E.comp, E.arqs, false) +
       '<div id="avisos"></div>' +
       '<div class="grade-4" id="cartoes" style="margin-top:14px"></div>' +
       '<div class="abas" id="abas" role="tablist"></div>' +
       '<div class="filtros" id="filtros"></div>' +
       '<div id="aba"></div>' +
       '<div id="barra"></div>';
+    ligarPainelDoPasso1(E.el.querySelector('.arquivos-passo'), E.codigo, E.comp, E.arqs);
     desenharAvisos();
     desenharCartoes();
     desenharAbas();

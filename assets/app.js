@@ -82,7 +82,7 @@
       partes.push('<a href="#/empresa/' + encodeURIComponent(r.codigo) + '" class="' + (r.nome === 'empresa' ? 'ativo' : '') + '">' +
         T.esc(r.codigo) + (emp ? ' · ' + T.esc(emp.nome) : '') + '<span class="sub">famílias de conciliação</span></a>');
       partes.push('<a href="#/empresa/' + encodeURIComponent(r.codigo) + '/fornecedores' + (r.anoMes ? '/' + r.anoMes : '') + '" class="' +
-        (r.familia === 'fornecedores' ? 'ativo' : '') + '">📦 Fornecedores<span class="sub">checklist, passos e arquivos</span></a>');
+        (r.familia === 'fornecedores' ? 'ativo' : '') + '">📦 Fornecedores<span class="sub">checklist e passos</span></a>');
     }
     partes.push('<div class="grupo">Programa</div>');
     partes.push('<a href="#/suporte" class="' + (r.nome === 'suporte' ? 'ativo' : '') + '">🔎 Ver o desenho de um arquivo<span class="sub">para adaptar a um sistema novo</span></a>');
