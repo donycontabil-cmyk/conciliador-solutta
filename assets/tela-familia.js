@@ -136,7 +136,15 @@
       competencia: comp,
       aoTerminar: (fim) => {
         const comps = (fim && fim.competencias) || [];
-        if (comps.length && comps.indexOf(comp) < 0) {
+        const guardados = (fim && fim.guardados) || [];
+        // Aging do mês anterior subido daqui (ex.: aging de julho estando em agosto): ele é o saldo
+        // inicial do ③ deste mês, então a tela fica aqui (antes ia para julho e parecia que não pegou).
+        const compAnterior = U.somarMeses(comp, -1);
+        const soDoMesOuAgingAnterior = guardados.length && guardados.every((g) => g.competencia === comp || (g.competencia === compAnterior && g.tipo === 'financeiro_pagar'));
+        if (soDoMesOuAgingAnterior && guardados.some((g) => g.competencia === compAnterior)) {
+          T.avisoRapido('Aging de ' + U.nomeCompetencia(compAnterior) + ' guardado: é o aging do mês anterior do Passo ③ de ' + U.nomeCompetencia(comp) + '.', 'ok', 6000);
+          app().mostrarRota();
+        } else if (comps.length && comps.indexOf(comp) < 0) {
           const destino = comps.slice().sort().reverse()[0];
           T.avisoRapido('Os arquivos foram guardados em ' + U.nomeCompetencia(destino) + ': abrindo essa competência.', 'ok', 5000);
           app().ir(base + U.anoMes(destino));

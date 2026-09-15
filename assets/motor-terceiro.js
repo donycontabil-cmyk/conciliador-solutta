@@ -86,26 +86,69 @@
     'manual': 'marcado à mão',
   };
 
+  // Identidade de cada título de um aging (Parte 4): nasce do conteúdo (documento, parcela,
+  // CNPJ, valor, vencimento e nome) + quantas vezes o mesmo conteúdo já apareceu. O mesmo
+  // título do mesmo arquivo tem sempre o mesmo número, seja como Parte B de um mês (TB:) ou
+  // como aging anterior do mês seguinte (TA:).
+  function idsDeTitulos(lista, prefixo) {
+    const vezes = new Map();
+    return (lista || []).map((t) => {
+      const doc = normalizarDocumento(t.documento);
+      const base = [doc, t.parcela || '', Util.soDigitos(t.cnpj), t.valor, t.vencimento || '', Util.normalizarNome(t.nome)].join('|');
+      const n = vezes.get(base) || 0; vezes.set(base, n + 1);
+      return prefixo + ':' + Util.hash8(base + '|' + n);
+    });
+  }
+
+  // O título que ficou em aberto na B do mês passado (TB:<hash>) é o mesmo do aging do mês
+  // passado que entra na A agora (TA:<hash>): mesmo arquivo, mesmo conteúdo.
+  function titulosParaTirar(cont) {
+    return new Set(cont ? (cont.B || []).map((x) => String(x.id).replace(/^TB:/, 'TA:')) : []);
+  }
+
+  // SALDO INICIAL da contabilidade no mês (Dony, 15/09/2026): "considerar o saldo inicial
+  // contábil conforme o AGING ou conforme o RAZÃO do mês anterior".
+  //  - conforme o AGING do mês anterior (sem `entrada.continuacao`): o aging do mês passado
+  //    estava certo (a contabilidade foi ajustada e bateu); a Parte B do mês passado vira a
+  //    Parte A do mês. Saldo inicial = aging do mês passado.
+  //  - conforme o RAZÃO do mês anterior (com `entrada.continuacao` = pendências do mês passado,
+  //    ver pendenciasAB): vale o saldo da contabilidade no fim do mês passado = aging do mês
+  //    passado − títulos que ficaram em aberto na Parte B + o que ficou em aberto na Parte A.
+  //    A diferença do mês passado continua. Devolve os "títulos" do saldo inicial (os do aging
+  //    que ficam + as pendências da A) e as contas da troca.
+  function saldoInicialAB(entrada) {
+    const lista = (entrada.agingAnterior && entrada.agingAnterior.titulos) || [];
+    const cont = entrada.continuacao || null;
+    const soma = (xs) => xs.reduce((s, t) => s + (Number(t.valor) || 0), 0);
+    const aging = soma(lista);
+    if (!cont) return { modo: 'aging', titulos: lista, aging, valor: aging, tirados: 0, pendentesA: 0, qtdTirados: 0, qtdPendentes: 0, competencia: '' };
+    const tirar = titulosParaTirar(cont);
+    const ids = idsDeTitulos(lista, 'TA');
+    const ficam = [], tirados = [];
+    lista.forEach((t, i) => (tirar.has(ids[i]) ? tirados : ficam).push(t));
+    const pendentes = (cont.A || []).map((p) => ({ nome: p.nome || '', cnpj: p.cnpj || '', valor: Number(p.valor) || 0, documento: p.doc || '',
+      vencimento: p.data || '', chave: p.chave || SEM, pendente: true, origem: p.origem || cont.competencia || '', fonteOriginal: p.fonte === 'pendente' ? (p.fonteOriginal || '') : (p.fonte || '') }));
+    const titulos = ficam.concat(pendentes);
+    return { modo: 'razao', titulos, aging, valor: soma(titulos), tirados: soma(tirados), pendentesA: soma(pendentes),
+      qtdTirados: tirados.length, qtdPendentes: pendentes.length, competencia: cont.competencia || '' };
+  }
+
   // Itens das partes A e B, com identidade que nasce do CONTEÚDO (Parte 4): trocar a ordem
   // das linhas do arquivo não troca o ID de ninguém. `legado` traduz os ids da versão 5
   // (posição no aging e digital do razão) para os de agora.
   //
-  // CONTINUAR do mês anterior (Dony, 14/09/2026: "no mês seguinte, continuar da conciliação
-  // anterior ou fazer desconsiderando a anterior"). Com `entrada.continuacao` (as pendências
-  // do mês anterior, ver pendenciasAB):
+  // Saldo inicial conforme o RAZÃO do mês anterior (`entrada.continuacao`, ver saldoInicialAB):
   //   Parte A = aging do mês passado SEM os títulos que ficaram em aberto na Parte B do mês
   //             passado + o que ficou em aberto na Parte A do mês passado + razão do mês.
   // Assim a diferença (em aberto A − em aberto B) é a acumulada de verdade entre a
-  // contabilidade e o financeiro. Sem `continuacao` é o "começar do zero".
+  // contabilidade e o financeiro. Sem `continuacao` é o saldo inicial conforme o AGING.
   function itensAB(entrada, r) {
     const A = [], B = [];
     const porId = new Map();
     const legado = new Map();
     const lancs = (entrada.contaRazao && entrada.contaRazao.lancamentos) || [];
     const cont = entrada.continuacao || null;
-    // O título que ficou em aberto na B do mês passado (TB:<hash>) é o mesmo do aging do mês
-    // passado que entra na A agora (TA:<hash>): mesmo arquivo, mesmo conteúdo.
-    const tirar = new Set(cont ? (cont.B || []).map((x) => String(x.id).replace(/^TB:/, 'TA:')) : []);
+    const tirar = titulosParaTirar(cont);
     const excluidos = [];
     function guardar(x) {
       let id = x.id, n = 1;
@@ -116,12 +159,10 @@
       return x;
     }
     function titulos(lista, lado, fonte, prefixo, prefixoLegado) {
-      const vezes = new Map();
+      const ids = idsDeTitulos(lista, prefixo);
       (lista || []).forEach((t, i) => {
         const doc = normalizarDocumento(t.documento);
-        const base = [doc, t.parcela || '', Util.soDigitos(t.cnpj), t.valor, t.vencimento || '', Util.normalizarNome(t.nome)].join('|');
-        const n = vezes.get(base) || 0; vezes.set(base, n + 1);
-        const id = prefixo + ':' + Util.hash8(base + '|' + n);
+        const id = ids[i];
         const item = { id, lado, fonte, doc, parcela: t.parcela || '',
           chave: chaveDoTitulo(t), nome: t.nome, cnpj: t.cnpj || '', data: t.vencimento || '', ordem: 0, historico: '', valor: t.valor };
         if (lado === 'A' && tirar.has(id)) { excluidos.push(item); return; }
@@ -339,6 +380,8 @@
     const razao = entrada.contaRazao || { conta: {}, lancamentos: [] };
     const agAnt = entrada.agingAnterior || { titulos: [] };
     const agAtu = entrada.agingAtual || { titulos: [] };
+    // Saldo inicial conforme o aging ou conforme o razão do mês anterior (saldoInicialAB).
+    const inicio = saldoInicialAB(entrada);
 
     // Linhas do razão para a régua de nomes. Digital estável (nasce do conteúdo).
     const ocorr = new Map();
@@ -358,11 +401,12 @@
     const titulos = agAnt.titulos.concat(agAtu.titulos).map((t) => ({ nome: t.nome, cnpj: t.cnpj }));
     const nomes = MotorNomes.resolver(linhas, { donos, titulos });
 
-    // Agrupa aging anterior e atual pela mesma chave da régua.
+    // Agrupa aging anterior e atual pela mesma chave da régua (a pendência do mês passado já
+    // traz a chave que a régua deu a ela lá).
     function agrupaAging(tits) {
       const m = new Map();
       for (const t of tits) {
-        const k = chaveDoTitulo(t);
+        const k = t.chave || chaveDoTitulo(t);
         if (!m.has(k)) m.set(k, { chave: k, nome: t.nome, cnpj: t.cnpj || '', valor: 0, titulos: [] });
         const g = m.get(k);
         g.valor += t.valor;
@@ -371,7 +415,7 @@
       }
       return m;
     }
-    const anterior = agrupaAging(agAnt.titulos);
+    const anterior = agrupaAging(inicio.titulos);
     const atual = agrupaAging(agAtu.titulos);
 
     // Agrupa o razão pela chave que a régua deu a cada linha.
@@ -422,7 +466,7 @@
 
     // Ponte total.
     const soma = (f, campo) => f.reduce((s, x) => s + x[campo], 0);
-    const totalAnterior = agAnt.titulos.reduce((s, t) => s + t.valor, 0);
+    const totalAnterior = inicio.valor;
     const totalAtual = agAtu.titulos.reduce((s, t) => s + t.valor, 0);
     const totalNotas = linhas.reduce((s, l) => s + l.credito, 0);
     const totalBaixas = linhas.reduce((s, l) => s + l.debito, 0);
@@ -452,6 +496,10 @@
         anterior: totalAnterior, notas: totalNotas, baixas: totalBaixas, movimento: totalMovimento,
         esperado: totalEsperado, atual: totalAtual, diferenca: diferencaTotal,
         saldoRazao: (conta && typeof conta.saldoFinal === 'number') ? conta.saldoFinal : (totalNotas - totalBaixas),
+        // De onde veio o saldo inicial: 'aging' (aging do mês passado) ou 'razao' (aging do mês
+        // passado − títulos da B em aberto + pendências da A = saldo contábil do mês passado).
+        inicio: { modo: inicio.modo, aging: inicio.aging, tirados: inicio.tirados, pendentesA: inicio.pendentesA,
+          qtdTirados: inicio.qtdTirados, qtdPendentes: inicio.qtdPendentes, competencia: inicio.competencia },
       },
       resumo: {
         fornecedores: fornecedores.length,
@@ -469,6 +517,6 @@
   return {
     calcular, fornecedorDoHistorico, documentoDoHistorico, chaveDoTitulo,
     normalizarDocumento, documentoDaLinha, itensAB, conciliarAutomatico, emAbertoAB, tipoAB, proximoIdAB, REGRAS_AB,
-    compararPorDocumento, arrumarGruposAB, relatorioAB, pendenciasAB,
+    compararPorDocumento, arrumarGruposAB, relatorioAB, pendenciasAB, saldoInicialAB, idsDeTitulos,
   };
 });

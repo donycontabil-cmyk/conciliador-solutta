@@ -67,12 +67,21 @@
     }
     if (r.tipo === 'financeiro_pagar' || r.tipo === 'financeiro_receber') {
       const f = r.financeiro;
+      // Aberto de uma competência (ex.: agosto): atalho para dizer se o aging é o do mês ou o do
+      // mês anterior (Dony, 15/09/2026: "subir o aging do mês anterior, o do fechamento de julho").
+      const atalhos = competenciaDaTela
+        ? '<div class="atalhos-competencia"><span class="suave pequeno">Este aging é:</span>' +
+          '<button type="button" class="botao pequeno" data-atalho-comp="' + i + '" data-valor="' + competenciaDaTela + '">do mês · ' + U.nomeCompetencia(competenciaDaTela) + '</button>' +
+          '<button type="button" class="botao pequeno" data-atalho-comp="' + i + '" data-valor="' + U.somarMeses(competenciaDaTela, -1) + '">do mês anterior · ' + U.nomeCompetencia(U.somarMeses(competenciaDaTela, -1)) + '</button>' +
+          '<span class="suave pequeno">(o do mês anterior é a Parte B dele e entra como saldo inicial de ' + U.nomeCompetencia(competenciaDaTela) + ')</span></div>'
+        : '';
+      const sugeridas = competenciaDaTela ? [competenciaDaTela, U.somarMeses(competenciaDaTela, -1)] : [];
       return '<div class="cartao lido" data-i="' + i + '">' + cab + '<span class="pilula verde">' + T.esc(r.nomeDoTipo) + '</span></div>' +
         '<dl><dt>Tipo</dt><dd><select class="filtro" data-tipo="' + i + '"><option value="financeiro_pagar"' + (r.tipo === 'financeiro_pagar' ? ' selected' : '') + '>Contas a pagar em aberto</option>' +
         '<option value="financeiro_receber"' + (r.tipo === 'financeiro_receber' ? ' selected' : '') + '>Contas a receber em aberto</option></select></dd>' +
         '<dt>Posição</dt><dd>' + (f.posicao ? T.esc(f.posicao) : '<span class="suave">o relatório não diz a data da posição</span>') + '</dd>' +
-        '<dt>Competência</dt><dd><select class="filtro" data-competencia="' + i + '">' + opcoesDeCompetencia(r.competencia || competenciaDaTela, []) + '</select> ' +
-        '<span class="pilula ambar" title="O nome de um relatório pode trazer a faixa de VENCIMENTOS, não a data da posição.">confirme</span></dd>' +
+        '<dt>Competência</dt><dd><select class="filtro" data-competencia="' + i + '">' + opcoesDeCompetencia(r.competencia || competenciaDaTela, sugeridas) + '</select> ' +
+        '<span class="pilula ambar" title="O nome de um relatório pode trazer a faixa de VENCIMENTOS, não a data da posição.">confirme</span>' + atalhos + '</dd>' +
         '<dt>Títulos em aberto</dt><dd>' + f.titulos.length.toLocaleString('pt-BR') + ' · total ' + T.moeda(f.total) + ' <span class="suave pequeno">(recalculado pelos títulos)</span></dd></dl>' +
         r.avisos.map((a) => '<div class="aviso ambar"><span class="icone-aviso">ℹ️</span><div>' + T.esc(a) + '</div></div>').join('') +
         (f.descartados.length ? '<details style="margin-top:8px"><summary class="suave">' + f.descartados.length + ' linha(s) não entraram (clique para ver o motivo)</summary><ul class="pequeno">' +
@@ -120,11 +129,27 @@
       }
     }
     lidos.innerHTML = resultados.map((r, i) => cartaoDoResultado(r, i, empresa, opcoes && opcoes.competencia)).join('');
+    lidos.addEventListener('click', (ev) => {
+      const b = ev.target.closest('[data-atalho-comp]');
+      if (!b) return;
+      const sel = lidos.querySelector('[data-competencia="' + b.getAttribute('data-atalho-comp') + '"]');
+      if (sel) { sel.value = b.getAttribute('data-valor'); sel.dispatchEvent(new Event('change', { bubbles: true })); }
+    });
+    lidos.addEventListener('change', (ev) => {
+      const sel = ev.target.closest('[data-competencia]');
+      if (!sel) return;
+      const i = sel.getAttribute('data-competencia');
+      lidos.querySelectorAll('[data-atalho-comp="' + i + '"]').forEach((b) => b.classList.toggle('primario', b.getAttribute('data-valor') === sel.value));
+    });
+    lidos.querySelectorAll('[data-competencia]').forEach((sel) => {
+      lidos.querySelectorAll('[data-atalho-comp="' + sel.getAttribute('data-competencia') + '"]').forEach((b) => b.classList.toggle('primario', b.getAttribute('data-valor') === sel.value));
+    });
     const guardaveis = resultados.filter((r) => r.tipo === 'razao' || r.tipo === 'financeiro_pagar' || r.tipo === 'financeiro_receber').length;
     botaoGuardar.disabled = guardaveis === 0;
     botaoGuardar.textContent = guardaveis ? 'Guardar ' + (guardaveis > 1 ? 'os ' + guardaveis + ' arquivos reconhecidos' : 'o arquivo reconhecido') : 'Nada para guardar';
 
     const competenciasGuardadas = new Set();
+    const guardados = []; // { tipo, competencia } de cada arquivo guardado (para a tela saber para onde ir)
     async function guardar() {
       const arm = app().armazenamento;
       const saida = [];
@@ -157,6 +182,7 @@
               const g = await arm.guardarArquivo(codigo, meta, conteudo, r.bytes);
               guardadas++;
               competenciasGuardadas.add(comp);
+              guardados.push({ tipo: 'razao', competencia: comp });
               if (g.jaExistia) saida.push({ arquivo: r.nomeArquivo, tipo: 'cinza', texto: 'Conta ' + c.codigo + ': este arquivo já estava guardado (enviado por ' + g.meta.enviadoPor + ' em ' + U.dataHoraLocal(g.meta.enviadoEm) + '). Nada foi duplicado.' });
               else if (g.novaVersao) saida.push({ arquivo: r.nomeArquivo, tipo: 'ambar', texto: 'Conta ' + c.codigo + ' ' + c.nome + ': guardado como VERSÃO ' + g.meta.versao + ' em ' + U.nomeCompetencia(comp) + '. O arquivo anterior com o mesmo nome continua guardado.' });
               else saida.push({ arquivo: r.nomeArquivo, tipo: 'verde', texto: 'Conta ' + c.codigo + ' ' + c.nome + ': guardado em ' + U.nomeCompetencia(comp) + ' (' + c.lancamentos.length.toLocaleString('pt-BR') + ' lançamentos).' });
@@ -169,6 +195,7 @@
             const meta = { tipo, arquivo: r.nomeArquivo, competencia: comp, titulos: f.titulos.length, total: f.total, posicao: f.posicao, hashDoConteudo: r.hash };
             const g = await arm.guardarArquivo(codigo, meta, { tipo, titulos: f.titulos, total: f.total, descartados: f.descartados, posicao: f.posicao }, r.bytes);
             competenciasGuardadas.add(comp);
+            guardados.push({ tipo, competencia: comp });
             if (g.jaExistia) saida.push({ arquivo: r.nomeArquivo, tipo: 'cinza', texto: 'Este relatório já estava guardado. Nada foi duplicado.' });
             else saida.push({ arquivo: r.nomeArquivo, tipo: g.novaVersao ? 'ambar' : 'verde', texto: (g.novaVersao ? 'Guardado como VERSÃO ' + g.meta.versao : 'Guardado') + ' em ' + U.nomeCompetencia(comp) + ': ' + f.titulos.length + ' títulos, ' + T.moeda(f.total) + '.' });
           } else {
@@ -194,7 +221,7 @@
     }
 
     const r = await promessa;
-    if (opcoes && typeof opcoes.aoTerminar === 'function') opcoes.aoTerminar({ fechou: r, competencias: Array.from(competenciasGuardadas) });
+    if (opcoes && typeof opcoes.aoTerminar === 'function') opcoes.aoTerminar({ fechou: r, competencias: Array.from(competenciasGuardadas), guardados });
   }
 
   raiz.TelaSubir = { abrir };

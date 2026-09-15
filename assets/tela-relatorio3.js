@@ -83,14 +83,14 @@
     if (x.fonte === 'pendente') return 'pendente de ' + U.nomeCompetencia(x.origem) + (x.fonteOriginal ? ' · ' + (NOME_FONTE[x.fonteOriginal] || x.fonteOriginal) : '');
     return x.fonte === 'nota' ? 'razão · nota' : 'razão · baixa';
   }
-  // Como o mês começou: continuando do anterior (com quantas pendências) ou do zero.
+  // De onde veio o saldo inicial da contabilidade: conforme o aging ou conforme o razão do mês anterior.
   function textoInicio() {
-    const ini = R.dados.decisoes.inicio, c = R.dados.itens.continuacao, ant = R.dados.anterior;
-    if (!ini) return ant && ant.pendencias ? 'não escolhido (do zero)' : 'primeiro mês (sem conciliação anterior)';
-    const mesAnt = U.nomeCompetencia(ini.de);
-    return ini.modo === 'continuar'
-      ? 'continuando de ' + mesAnt + (c ? ' · ' + c.pendentes + ' pendência(s) entraram na A, ' + c.excluidos.length + ' título(s) da B saíram do aging' : '')
-      : 'do zero (desconsiderou ' + mesAnt + ')';
+    const p = R.dados.r.ponte, ini = p.inicio || { modo: 'aging' }, c = R.dados.itens.continuacao;
+    const mesAnt = R.dados.entrada.mesAnterior;
+    return ini.modo === 'razao'
+      ? 'conforme o RAZÃO de ' + mesAnt + ' · ' + dinheiro(p.anterior) + ' (aging ' + dinheiro(ini.aging) + ' − ' + ini.qtdTirados + ' título(s) da B ' + dinheiro(ini.tirados) +
+        ' + ' + ini.qtdPendentes + ' pendência(s) da A ' + dinheiro(ini.pendentesA) + ')' + (c && c.naoAchados.length ? ' · ' + c.naoAchados.length + ' título(s) da B não achados' : '')
+      : 'conforme o AGING de ' + mesAnt + ' · ' + dinheiro(p.anterior);
   }
   function dinheiro(c) { return U.formatarCentavos(c); }
   function tdDinheiro(c) { return '<td class="num' + (c < 0 ? ' negativo' : '') + '">' + dinheiro(c) + '</td>'; }
@@ -106,7 +106,7 @@
       ['Conta', (conta.codigo || '') + ' · ' + (conta.nome || '')],
       ['Parte A · contabilidade', 'aging ' + d.entrada.mesAnterior + (d.itens.continuacao ? ' + pendências de ' + U.nomeCompetencia(d.itens.continuacao.competencia) : '') + ' + razão de ' + d.entrada.mesAtual],
       ['Parte B · financeiro', 'aging ' + d.entrada.mesAtual],
-      ['Início do mês', textoInicio()],
+      ['Saldo inicial', textoInicio()],
       ['Última gravação', d.registro.atualizadoEm ? (d.registro.atualizadoPor || '—') + ' · ' + U.dataHoraLocal(d.registro.atualizadoEm) : 'nada gravado ainda'],
       ['Emitido', (app().usuario.nome || '—') + ' · ' + U.dataHoraLocal(R.emitido)],
       ['Programa', (cfg.programa || 'Conciliador Solutta') + (cfg.numero ? ' · versão ' + cfg.numero : '')],
@@ -129,7 +129,7 @@
     const regras = Object.keys(COMO).filter((k) => rel.porRegra[k]);
     return '<section class="rel-secao">' +
       '<h2><span class="rel-marcador primaria"></span>Resumo</h2>' +
-      '<div class="rel-ponte">' + item('Aging ' + R.dados.entrada.mesAnterior, p.anterior) + '<span class="op">+</span>' +
+      '<div class="rel-ponte">' + item(((p.inicio && p.inicio.modo === 'razao') ? 'Saldo inicial · razão ' : 'Saldo inicial · aging ') + R.dados.entrada.mesAnterior, p.anterior) + '<span class="op">+</span>' +
       item('Movimento do razão', p.movimento) + '<span class="op">=</span>' + item('Esperado (contabilidade)', p.esperado, true) + '<span class="op">→</span>' +
       item('Aging ' + R.dados.entrada.mesAtual, p.atual) + '<span class="op">·</span>' + item('Diferença da ponte', p.diferenca) + '</div>' +
       '<div class="rel-numeros">' +
@@ -265,13 +265,13 @@
       ['Empresa', d.emp.codigo + ' · ' + d.emp.nome],
       ['Competência', U.nomeCompetencia(R.comp)],
       ['Conta', (d.r.conta.codigo || '') + ' · ' + (d.r.conta.nome || '')],
-      ['Início do mês', textoInicio()],
+      ['Saldo inicial', textoInicio()],
       ['Emitido', (app().usuario.nome || '') + ' · ' + U.dataHoraLocal(R.emitido)],
       [],
     ];
     const resumo = cab.concat([
       ['Ponte'],
-      ['Aging ' + d.entrada.mesAnterior, reais(p.anterior)],
+      [((p.inicio && p.inicio.modo === 'razao') ? 'Saldo inicial · razão ' : 'Saldo inicial · aging ') + d.entrada.mesAnterior, reais(p.anterior)],
       ['Movimento do razão', reais(p.movimento)],
       ['Esperado (contabilidade)', reais(p.esperado)],
       ['Aging ' + d.entrada.mesAtual, reais(p.atual)],

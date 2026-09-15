@@ -29,6 +29,13 @@
 
   let E = null;
 
+  // Saldo inicial escolhido: 'razao' (conforme o razão do mês anterior) ou 'aging' (padrão).
+  // Aceita os nomes da versão 13: 'continuar' = razão; 'zero' = aging.
+  function modoDoInicio(inicio) {
+    const m = inicio && inicio.modo;
+    return m === 'razao' || m === 'continuar' ? 'razao' : 'aging';
+  }
+
   // Tudo o que o Passo ③ precisa de um mês: arquivos, registro, cálculo e itens A e B.
   // Usado pela tela e pelo relatório (tela-relatorio3.js). Devolve null se a rota mudou no meio.
   async function carregarDados(codigo, anoMes, conferir, opcoes) {
@@ -62,7 +69,7 @@
       contaRazao: { conta: raz.conteudo.conta, lancamentos: raz.conteudo.conta.lancamentos },
       agingAnterior: aAnt.conteudo, agingAtual: aAtu.conteudo, decisoes,
     };
-    if (decisoes.inicio && decisoes.inicio.modo === 'continuar' && anterior && anterior.pendencias) entrada.continuacao = anterior.pendencias;
+    if (modoDoInicio(decisoes.inicio) === 'razao' && anterior && anterior.pendencias) entrada.continuacao = anterior.pendencias;
     const r = M.calcular(entrada);
     const itens = M.itensAB(entrada, r);
     const arrumado = M.arrumarGruposAB(decisoes.conciliacoesAB, itens.legado);
@@ -197,9 +204,14 @@
     const p = E.r.ponte;
     const bate = Math.abs(p.diferenca) < 1;
     const seta = ' <span class="fraco">→</span> ';
+    const ini = p.inicio || { modo: 'aging' };
+    const rotuloInicial = ini.modo === 'razao' ? 'Saldo inicial · razão ' + E.entrada.mesAnterior : 'Saldo inicial · aging ' + E.entrada.mesAnterior;
+    const dicaInicial = ini.modo === 'razao'
+      ? 'Conforme o RAZÃO de ' + E.entrada.mesAnterior + ' (saldo da contabilidade): aging ' + T.moeda(ini.aging) + ' − ' + ini.qtdTirados + ' título(s) que ficaram em aberto na Parte B (' + T.moeda(ini.tirados) + ') + ' + ini.qtdPendentes + ' pendência(s) da Parte A (' + T.moeda(ini.pendentesA) + ')'
+      : 'Conforme o AGING de ' + E.entrada.mesAnterior + ': o que estava em aberto no financeiro no fim do mês passado';
     return '<div class="cartao corpo" style="margin-bottom:14px;border-left:4px solid var(--' + (bate ? 'verde' : 'vermelho') + ')">' +
       '<div class="ponte">' +
-      pedaco('Aging ' + E.entrada.mesAnterior, p.anterior, 'o que estava em aberto no fim do mês passado') +
+      pedaco(rotuloInicial, p.anterior, dicaInicial) +
       ' <b>+</b> ' + pedaco('Movimento do razão', p.movimento, 'notas (' + T.moeda(p.notas) + ') menos baixas (' + T.moeda(p.baixas) + ') do mês') +
       ' <b>=</b> ' + pedaco('Esperado (contabilidade)', p.esperado, 'é o que o balancete tem que mostrar', 'forte') +
       seta + pedaco('Aging ' + E.entrada.mesAtual, p.atual, 'o que está em aberto agora') +
@@ -334,32 +346,55 @@
   }
 
   // ------------------------------------------------------------------
-  // Início do mês (Dony, 14/09/2026: "no mês seguinte, continuar da conciliação anterior ou
-  // fazer desconsiderando a anterior"). Aparece quando o mês anterior foi conciliado.
+  // SALDO INICIAL do mês (Dony, 15/09/2026): "considerar o saldo inicial contábil conforme o
+  // AGING ou conforme o RAZÃO do mês anterior". Ex.: em julho o razão estava diferente, o aging
+  // estava certo e a contabilidade foi ajustada: agosto segue o aging de julho como se fosse o
+  // razão (a Parte B de julho vira a Parte A de agosto). Ou, se vale a contabilidade, agosto
+  // parte do saldo do razão de julho e a diferença de julho continua.
+  // Modos gravados: 'aging' e 'razao' (os antigos 'zero' e 'continuar' valem o mesmo).
   // ------------------------------------------------------------------
+  function valoresDoInicio() {
+    const ant = E.anterior;
+    const pelaAging = M.saldoInicialAB({ agingAnterior: E.entrada.agingAnterior });
+    const peloRazao = ant && ant.pendencias ? M.saldoInicialAB({ agingAnterior: E.entrada.agingAnterior, continuacao: ant.pendencias }) : null;
+    return { pelaAging, peloRazao };
+  }
+
   function cartaoInicio() {
     const ant = E.anterior;
-    if (!ant || !ant.pendencias) return '';
-    const p = ant.pendencias;
+    if (!ant) return '';
     const mesAnt = T.esc(U.nomeCompetencia(ant.competencia)), mes = T.esc(U.nomeCompetencia(E.comp));
-    const ficou = '<b>' + p.A.length + '</b> item(ns) em aberto na Parte A (' + U.formatarCentavos(p.valorA) + ') e <b>' + p.B.length + '</b> na Parte B (' + U.formatarCentavos(p.valorB) + ')';
-    const ini = E.decisoes.inicio;
-    if (ini) {
+    const v = valoresDoInicio();
+    const dinheiro = (c) => U.formatarCentavos(c);
+    // Mês anterior sem conciliação no Passo ③: só dá para partir do aging.
+    if (!ant.pendencias) {
+      return '<div class="linha-inicio">📄 Saldo inicial de ' + mes + ' <b>conforme o aging de ' + mesAnt + '</b> (' + dinheiro(v.pelaAging.valor) + '). ' +
+        '<span class="suave">Para usar o saldo conforme o razão de ' + mesAnt + ', concilie ' + mesAnt + ' no Passo ③.</span></div>';
+    }
+    const p = ant.pendencias;
+    // Mês anterior fechou sem nada em aberto: aging e razão dão o mesmo saldo, não há o que escolher.
+    if (!p.A.length && !p.B.length) {
+      return '<div class="linha-inicio">✓ ' + mesAnt + ' fechou sem nada em aberto: o saldo inicial de ' + mes + ' é o mesmo conforme o aging e conforme o razão (' + dinheiro(v.pelaAging.valor) + ').</div>';
+    }
+    const ficou = '<b>' + p.A.length + '</b> item(ns) em aberto na Parte A (' + dinheiro(p.valorA) + ') e <b>' + p.B.length + '</b> na Parte B (' + dinheiro(p.valorB) + ')';
+    const escolhido = E.decisoes.inicio ? modoDoInicio(E.decisoes.inicio) : null;
+    if (escolhido) {
       const c = E.itens.continuacao;
-      const texto = ini.modo === 'continuar'
-        ? '↪ <b>Continuando de ' + mesAnt + '</b>: entraram na Parte A <b>' + (c ? c.pendentes : 0) + '</b> pendência(s) e saíram do aging <b>' + (c ? c.excluidos.length : 0) + '</b> título(s) que tinham ficado em aberto na Parte B.' +
+      const texto = escolhido === 'razao'
+        ? '📒 Saldo inicial <b>conforme o RAZÃO de ' + mesAnt + '</b> (' + dinheiro(v.peloRazao.valor) + '): entraram na Parte A <b>' + (c ? c.pendentes : 0) + '</b> pendência(s) de ' + mesAnt +
+          ' e saíram do aging <b>' + (c ? c.excluidos.length : 0) + '</b> título(s) que tinham ficado em aberto na Parte B.' +
           (c && c.naoAchados.length ? ' <span class="falta">' + c.naoAchados.length + ' título(s) da Parte B de ' + mesAnt + ' não foram achados no aging (arquivo trocado?).</span>' : '')
-        : '○ <b>Começou do zero</b>: ' + mesAnt + ' desconsiderado (lá ficaram ' + ficou + ').';
+        : '📄 Saldo inicial <b>conforme o AGING de ' + mesAnt + '</b> (' + dinheiro(v.pelaAging.valor) + '): a Parte B de ' + mesAnt + ' virou a Parte A de ' + mes + ' (lá tinham ficado ' + ficou + ').';
       return '<div class="linha-inicio">' + texto + ' <button type="button" class="botao pequeno leve" data-acao="trocar-inicio">trocar</button></div>';
     }
     return '<div class="cartao corpo cartao-inicio">' +
-      '<h3>Como começar ' + mes + '?</h3>' +
-      '<p class="suave" style="margin:4px 0 10px">' + mesAnt + ' foi conciliado: ficaram ' + ficou + '.</p>' +
+      '<h3>Saldo inicial de ' + mes + ' (contabilidade · Parte A)</h3>' +
+      '<p class="suave" style="margin:4px 0 10px">Em ' + mesAnt + ' ficaram ' + ficou + ' — diferença de ' + dinheiro(p.valorA - p.valorB) + '. Qual saldo vale para começar ' + mes + '?</p>' +
       '<div class="opcoes-inicio">' +
-      '<button type="button" class="opcao-inicio" data-inicio="continuar"><b>↪ Continuar de ' + mesAnt + '</b>' +
-      '<span>A Parte A traz o que ficou em aberto na A de ' + mesAnt + ' e tira do aging os títulos que ficaram em aberto na B. A diferença continua acumulando de um mês para o outro.</span></button>' +
-      '<button type="button" class="opcao-inicio" data-inicio="zero"><b>○ Começar do zero</b>' +
-      '<span>Desconsidera ' + mesAnt + ': Parte A = aging de ' + mesAnt + ' + razão de ' + mes + ', como no primeiro mês.</span></button>' +
+      '<button type="button" class="opcao-inicio" data-inicio="aging"><b>📄 Conforme o AGING de ' + mesAnt + '</b><em class="valor-inicio">' + dinheiro(v.pelaAging.valor) + '</em>' +
+      '<span>O aging de ' + mesAnt + ' estava certo (a contabilidade foi ajustada e bateu). A Parte B de ' + mesAnt + ' vira a Parte A de ' + mes + ': Parte A = aging de ' + mesAnt + ' + razão de ' + mes + '.</span></button>' +
+      '<button type="button" class="opcao-inicio" data-inicio="razao"><b>📒 Conforme o RAZÃO de ' + mesAnt + '</b><em class="valor-inicio">' + dinheiro(v.peloRazao.valor) + '</em>' +
+      '<span>Vale o saldo da contabilidade no fim de ' + mesAnt + ': a Parte A traz as pendências da A de ' + mesAnt + ' e tira do aging os títulos que ficaram em aberto na B. A diferença de ' + mesAnt + ' continua em ' + mes + '.</span></button>' +
       '</div></div>';
   }
 
@@ -367,36 +402,38 @@
     const ant = E.anterior;
     if (!ant || !ant.pendencias) return;
     const mesAnt = U.nomeCompetencia(ant.competencia), mes = U.nomeCompetencia(E.comp);
-    const efetivo = (E.decisoes.inicio && E.decisoes.inicio.modo) || 'zero';
+    const nomeModo = modo === 'razao' ? 'conforme o razão de ' + mesAnt : 'conforme o aging de ' + mesAnt;
+    const efetivo = modoDoInicio(E.decisoes.inicio);
     const qtd = E.decisoes.conciliacoesAB.length;
     const mudaItens = modo !== efetivo;
     if (mudaItens && qtd) {
       // Os itens da Parte A mudam: as conciliações feitas com os itens de antes são desfeitas.
       const ok = await T.confirmar({
-        titulo: modo === 'continuar' ? 'Continuar de ' + mesAnt + '?' : 'Começar ' + mes + ' do zero?',
-        texto: (modo === 'continuar' ? 'A Parte A de ' + mes + ' passa a trazer o que ficou em aberto em ' + mesAnt + '.' : 'A Parte A de ' + mes + ' deixa de trazer as pendências de ' + mesAnt + '.') +
+        titulo: 'Saldo inicial ' + nomeModo + '?',
+        texto: 'A Parte A de ' + mes + ' passa a começar ' + nomeModo + '.' +
           '<br><br>Os itens da Parte A mudam, então as <b>' + qtd + '</b> conciliações deste mês serão <b>desfeitas</b> (voltam para em aberto) para conciliar de novo.',
-        botao: modo === 'continuar' ? 'Continuar de ' + mesAnt : 'Começar do zero', perigo: true,
+        botao: modo === 'razao' ? 'Usar o razão de ' + mesAnt : 'Usar o aging de ' + mesAnt, perigo: true,
       });
       if (!ok) return;
       E.decisoes.conciliacoesAB = [];
     }
     E.decisoes.inicio = { modo, de: ant.competencia, quem: app().usuario.nome, quando: U.agoraISO() };
-    historico((modo === 'continuar' ? 'Início: continuar de ' : 'Início: começar do zero, sem ') + mesAnt + (mudaItens && qtd ? ' (desfez ' + qtd + ' conciliações)' : ''));
-    await gravar('terceiro-inicio', (modo === 'continuar' ? 'continuar de ' : 'do zero, sem ') + mesAnt);
-    app().mostrarRota(); // recarrega com os itens do novo início
+    historico('Saldo inicial ' + nomeModo + (mudaItens && qtd ? ' (desfez ' + qtd + ' conciliações)' : ''));
+    await gravar('terceiro-saldo-inicial', nomeModo);
+    app().mostrarRota(); // recarrega com os itens do novo saldo inicial
   }
 
   async function trocarInicio() {
     const ant = E.anterior;
     if (!ant || !ant.pendencias) return;
     const mesAnt = U.nomeCompetencia(ant.competencia), mes = U.nomeCompetencia(E.comp);
+    const v = valoresDoInicio();
     const escolha = await T.janela({
-      titulo: 'Como começar ' + mes + '?',
-      corpo: '<p style="line-height:1.55"><b>↪ Continuar de ' + T.esc(mesAnt) + '</b>: a Parte A traz o que ficou em aberto na A de ' + T.esc(mesAnt) + ' e tira do aging os títulos que ficaram em aberto na B.</p>' +
-        '<p style="line-height:1.55;margin-top:8px"><b>○ Começar do zero</b>: desconsidera ' + T.esc(mesAnt) + ' (Parte A = aging + razão, como no primeiro mês).</p>' +
+      titulo: 'Saldo inicial de ' + mes,
+      corpo: '<p style="line-height:1.55"><b>📄 Conforme o AGING de ' + T.esc(mesAnt) + '</b> (' + U.formatarCentavos(v.pelaAging.valor) + '): o aging estava certo; a Parte B de ' + T.esc(mesAnt) + ' vira a Parte A de ' + T.esc(mes) + '.</p>' +
+        '<p style="line-height:1.55;margin-top:8px"><b>📒 Conforme o RAZÃO de ' + T.esc(mesAnt) + '</b> (' + U.formatarCentavos(v.peloRazao.valor) + '): vale o saldo da contabilidade; a diferença de ' + T.esc(mesAnt) + ' continua.</p>' +
         (E.decisoes.conciliacoesAB.length ? '<p class="falta pequeno" style="margin-top:10px">Se mudar, as conciliações deste mês são desfeitas para conciliar de novo.</p>' : ''),
-      botoes: [{ texto: 'Cancelar', valor: null }, { texto: 'Começar do zero', valor: 'zero' }, { texto: 'Continuar de ' + mesAnt, tipo: 'primario', valor: 'continuar' }],
+      botoes: [{ texto: 'Cancelar', valor: null }, { texto: 'Conforme o aging', valor: 'aging' }, { texto: 'Conforme o razão', tipo: 'primario', valor: 'razao' }],
     });
     if (escolha) await escolherInicio(escolha);
   }
@@ -1053,5 +1090,5 @@
     });
   }
 
-  raiz.TelaPasso3 = { mostrar, arquivosDoTerceiro, carregarDados, estado: () => E, TIPO_AB, COMO_AB };
+  raiz.TelaPasso3 = { mostrar, arquivosDoTerceiro, carregarDados, modoDoInicio, estado: () => E, TIPO_AB, COMO_AB };
 })(self);
