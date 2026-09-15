@@ -63,7 +63,7 @@
         r.competencia = ate ? Util.competenciaDe(ate) : null;
         r.variosMeses = de && ate && (de.ano !== ate.ano || de.mes !== ate.mes);
       }
-      r.contas = razao.contas.map((c) => Object.assign({ papel: Familias.papelDaConta(c) }, c));
+      r.contas = razao.contas.map((c) => Object.assign({ papel: Familias.papelDaConta(c, { nomeArquivo }) }, c));
       return fechar(r);
     }
     if (recRazao.tipo === 'balancete') {

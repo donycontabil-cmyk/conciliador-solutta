@@ -39,19 +39,22 @@
   // "complhis" (complemento do histórico) vem ANTES de "historico": no razão da Univale o
   // texto de verdade está no COMPLHIS (14/09/2026, Dony); nos desenhos A/B não existe COMPLHIS,
   // então "historico" continua ganhando.
+  // Razão de adiantamento de um cliente real (15/09/2026, desenho D): "Cont. Contábil | [nome da conta,
+  // sem título] | Cta Red.: | Dt. Movto | Lote | Lanç | C.P. Histórico | Documento | Débito |
+  // Crédito | Saldo Acum. | D/C" — por isso "dtmovto", "cphistorico", "ctared", "contcontabil" e "saldoacum".
   const SINONIMOS = {
-    data: ['data', 'dt', 'datalanc', 'datadolancamento', 'datalancamento', 'datamovimento', 'datamov'],
+    data: ['data', 'dt', 'datalanc', 'datadolancamento', 'datalancamento', 'datamovimento', 'datamov', 'dtmovto', 'dtmovimento', 'dtmov'],
     numero: ['numero', 'num', 'lancamento', 'lanc', 'lcto', 'nlanc', 'nlancamento', 'numlancamento', 'lote', 'numlote'],
-    historico: ['complhis', 'complementohistorico', 'historicocomplemento', 'complemento', 'historico', 'historicos'],
+    historico: ['complhis', 'complementohistorico', 'historicocomplemento', 'complemento', 'historico', 'historicos', 'cphistorico', 'cphist'],
     contrapartida: ['ctacpart', 'contrapartida', 'cpart', 'cpartida', 'ctacpartida', 'contracpartida', 'ccontrapartida', 'contacontrapartida', 'contacontabilcontrapartida'],
     filial: ['filial'],
     debito: ['debito', 'debitos', 'valordebito', 'vlrdebito'],
     credito: ['credito', 'creditos', 'valorcredito', 'vlrcredito'],
-    saldo: ['saldo', 'saldoatual'],
+    saldo: ['saldo', 'saldoatual', 'saldoacum', 'saldoacumulado'],
     saldoExercicio: ['saldoexercicio'],
-    // Razão em LISTA (uma linha por lançamento, a conta numa coluna) — desenho C, ex.: Univale.
-    conta: ['contareduzida', 'contacontabil', 'contaredz', 'reduzida'],
-    contaClassificacao: ['contacontabil', 'classificacao', 'classificacaocontabil'],
+    // Razão em LISTA (uma linha por lançamento, a conta numa coluna) — desenhos C e D (clientes reais).
+    conta: ['contareduzida', 'contacontabil', 'contaredz', 'reduzida', 'ctared', 'ctareduzida', 'ctaredz', 'contared'],
+    contaClassificacao: ['contacontabil', 'classificacao', 'classificacaocontabil', 'contcontabil', 'ctacontabil'],
     descricaoConta: ['descricao', 'descricaoconta', 'nomeconta', 'descricaodaconta'],
     documento: ['numdocumento', 'numerodocumento', 'ndocumento', 'nrodocumento', 'nrodoc', 'documento'],
   };
@@ -217,22 +220,59 @@
   }
 
   // ------------------------------------------------------------------
-  // Razão em LISTA (desenho C): uma linha por lançamento, a conta numa coluna.
-  // Ex.: Univale (14/09/2026) — colunas Data Movimento, COMPLHIS (histórico), Conta reduzida,
-  // Conta contábil, Conta Contrapartida, Valor Débito, Valor Crédito. Agrupa por conta.
+  // Razão em LISTA: uma linha por lançamento, a conta numa coluna. Agrupa por conta.
+  //  - Desenho C — contas a pagar de um cliente real (14/09/2026): Data Movimento, COMPLHIS (histórico),
+  //    Conta reduzida, Conta contábil, Conta Contrapartida, Valor Débito, Valor Crédito. Sem saldo.
+  //  - Desenho D — adiantamento a fornecedores do mesmo cliente (15/09/2026, "é extraído de forma
+  //    diferente"): Cont. Contábil, o NOME da conta numa coluna SEM título (e cortado:
+  //    "ADIANTAMENTO A"), Cta Red.:, Dt. Movto, Lote, Lanç, C.P. Histórico (o código do histórico
+  //    padrão na frente: "783    BAIXA POR COMPENSAÇÃO…"), Documento, Débito, Crédito, Saldo Acum.
+  //    e D/C na coluna ao lado. Saldo anterior numa linha só com o saldo antes do 1º lançamento;
+  //    linha solta de saldo no meio (transporte de página) é ignorada; no fim, linhas de totais
+  //    (débito, crédito e o saldo final). Pode trazer VÁRIOS MESES (ex.: abril a agosto).
   // ------------------------------------------------------------------
   function lerFlat(abas, opcoes) {
     const nomeArquivo = (opcoes && opcoes.nomeArquivo) || '';
     const avisos = [];
     const contasMap = new Map();
     let linhasIgnoradas = 0;
+    let comSaldo = false;
     let info = { empresa: '', cnpj: '', periodo: null, titulo: '' };
+
+    const texto = (v) => (v === null || v === undefined ? '' : String(v));
+    const ehDC = (v) => /^[DC]$/i.test(texto(v).trim());
+    // Saldo com o D/C da coluna ao lado: devedor positivo, credor negativo (débito − crédito).
+    const saldoCom = (linha, col) => {
+      if (col === undefined) return null;
+      const n = numeroDe(linha[col]);
+      if (n === null) return null;
+      const dc = texto(linha[col + 1]).trim().toUpperCase();
+      return dc === 'C' ? -Math.abs(n) : (dc === 'D' ? Math.abs(n) : n);
+    };
 
     for (const aba of abas) {
       const linhas = aba.linhas;
       const rCab = linhas.findIndex((l) => l && ehCabecalhoFlat(l));
       if (rCab < 0) continue;
       const mapa = mapearCabecalho(linhas[rCab]);
+      const cabecalho = linhas[rCab].map(chaveTitulo);
+      // "C.P. Histórico": o histórico começa com o código do histórico padrão.
+      const historicoComCodigo = /^cphist/.test(cabecalho[mapa.historico] || '');
+      if (mapa.saldo !== undefined) comSaldo = true;
+      const usadas = new Set(Object.values(mapa));
+      // Nome da conta numa coluna sem título: a primeira coluna de texto (não data, não número,
+      // não D/C) que não é de nenhum campo, olhando a primeira linha de lançamento.
+      let colNome = mapa.descricaoConta;
+      if (colNome === undefined) {
+        const primeira = linhas.slice(rCab + 1).find((l) => l && mapa.data !== undefined && Util.lerData(l[mapa.data]) && mapa.conta !== undefined && texto(l[mapa.conta]).trim());
+        if (primeira) {
+          for (let i = 0; i < primeira.length; i++) {
+            if (usadas.has(i) || cabecalho[i]) continue;
+            const v = texto(primeira[i]).trim();
+            if (v.length >= 3 && !ehDC(v) && numeroDe(v) === null && !Util.lerData(v) && /[A-Za-z]/.test(v)) { colNome = i; break; }
+          }
+        }
+      }
       const infoAba = lerCabecalhoDoRelatorio(linhas, rCab);
       info = {
         empresa: info.empresa || infoAba.empresa,
@@ -240,6 +280,8 @@
         periodo: info.periodo || infoAba.periodo,
         titulo: info.titulo || infoAba.titulo,
       };
+      let saldoSolto = null;   // linha só com o saldo, antes do primeiro lançamento da conta
+      let ultima = null;       // última conta lida (as linhas de totais são dela)
       for (let r = rCab + 1; r < linhas.length; r++) {
         const linha = linhas[r];
         if (!linha || !celulasCheias(linha).length) continue;
@@ -248,27 +290,57 @@
         const deb = mapa.debito !== undefined ? numeroDe(linha[mapa.debito]) : null;
         const cred = mapa.credito !== undefined ? numeroDe(linha[mapa.credito]) : null;
         const codigo = mapa.conta !== undefined && linha[mapa.conta] !== null && linha[mapa.conta] !== undefined ? String(linha[mapa.conta]).trim() : '';
-        if (!data || (deb === null && cred === null) || !codigo) { linhasIgnoradas++; continue; }
+        if (!data || (deb === null && cred === null) || !codigo) {
+          if (!data && mapa.saldo !== undefined) {
+            const saldo = saldoCom(linha, mapa.saldo);
+            if (deb !== null && cred !== null && ultima) {
+              // Linha de totais da conta: débito, crédito e, na última, o saldo final.
+              ultima.totalDebitoDeclarado = deb;
+              ultima.totalCreditoDeclarado = cred;
+              if (saldo !== null) ultima.saldoFinalDeclarado = saldo;
+              linhasIgnoradas++;
+              continue;
+            }
+            if (saldo !== null && deb === null && cred === null) {
+              // Saldo solto: antes do 1º lançamento é o saldo anterior; no meio, transporte de página.
+              if (!ultima || !ultima.lancamentos.length) saldoSolto = saldo;
+              linhasIgnoradas++;
+              continue;
+            }
+          }
+          linhasIgnoradas++;
+          continue;
+        }
         let conta = contasMap.get(codigo);
         if (!conta) {
           conta = {
             codigo,
             classificacao: mapa.contaClassificacao !== undefined && linha[mapa.contaClassificacao] !== null ? String(linha[mapa.contaClassificacao]).trim() : '',
-            nome: mapa.descricaoConta !== undefined && linha[mapa.descricaoConta] !== null ? String(linha[mapa.descricaoConta]).trim() : '',
-            saldoAnterior: 0, lancamentos: [], totalDebitoDeclarado: null, totalCreditoDeclarado: null,
+            nome: colNome !== undefined && linha[colNome] !== null ? String(linha[colNome]).replace(/\s+/g, ' ').trim() : '',
+            saldoAnterior: mapa.saldo !== undefined ? (saldoSolto !== null ? saldoSolto : null) : 0,
+            lancamentos: [], totalDebitoDeclarado: null, totalCreditoDeclarado: null,
             saldoFinalDeclarado: null, avisos: [],
           };
           contasMap.set(codigo, conta);
+          saldoSolto = null;
         }
-        const historico = String(linha[mapa.historico] === null || linha[mapa.historico] === undefined ? '' : linha[mapa.historico]).replace(/\s+/g, ' ').trim();
-        conta.lancamentos.push({
+        ultima = conta;
+        let historico = texto(linha[mapa.historico]).replace(/\s+/g, ' ').trim();
+        let codigoHistorico = '';
+        if (historicoComCodigo) {
+          const m = historico.match(/^(\d{1,6})\s+(.*)$/);
+          if (m) { codigoHistorico = m[1]; historico = m[2]; }
+        }
+        const lanc = {
           data: data.texto, dia: data.dia, mes: data.mes, ano: data.ano,
           numero: mapa.numero !== undefined && linha[mapa.numero] !== null ? String(linha[mapa.numero]) : '',
           historico,
           contrapartida: mapa.contrapartida !== undefined && linha[mapa.contrapartida] !== null ? String(linha[mapa.contrapartida]) : '',
           documento: mapa.documento !== undefined && linha[mapa.documento] !== null ? String(linha[mapa.documento]) : '',
-          debito: deb || 0, credito: cred || 0, saldo: null,
-        });
+          debito: deb || 0, credito: cred || 0, saldo: mapa.saldo !== undefined ? saldoCom(linha, mapa.saldo) : null,
+        };
+        if (codigoHistorico) lanc.codigoHistorico = codigoHistorico;
+        conta.lancamentos.push(lanc);
       }
     }
 
@@ -288,15 +360,20 @@
     if (periodoOrigem === 'datas-dos-lancamentos') avisos.push('O arquivo não diz o período: usei a primeira e a última data dos lançamentos. Confirme a competência.');
 
     for (const c of contas) {
+      if (comSaldo) {
+        // Desenho D: tem saldo acumulado e totais — confere linha a linha como os razões em bloco.
+        conferirConta(c);
+        continue;
+      }
       conferirConta(c);
-      // Razão em lista não traz saldo anterior: o saldo se confere pelo aging e pelo balancete (③).
+      // Razão em lista sem saldo (desenho C): o saldo se confere pelo aging e pelo balancete (③).
       c.confere = true;
       c.avisos.push('Razão em lista (uma linha por lançamento), sem saldo anterior no arquivo: o saldo é conferido pelo aging e pelo balancete.');
     }
     if (!contas.length) avisos.push('Não achei lançamentos neste razão em lista (confira se os títulos das colunas batem).');
 
     return {
-      tipo: 'razao', desenho: 'C', empresa: info.empresa, cnpj: info.cnpj, titulo: info.titulo,
+      tipo: 'razao', desenho: comSaldo ? 'D' : 'C', empresa: info.empresa, cnpj: info.cnpj, titulo: info.titulo,
       periodo, periodoOrigem, contas, avisos, linhasIgnoradas,
     };
   }

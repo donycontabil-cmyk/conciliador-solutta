@@ -342,10 +342,14 @@
     const maiuscula = (s) => String(s).charAt(0).toUpperCase() + String(s).slice(1);
     const temAnt = !!arqsAB.agingAnterior, temAtu = !!arqsAB.agingAtual, temRaz = !!arqsAB.razao;
     const pode = temAnt && temAtu && temRaz;
+    // Conciliação de período (razão guardado neste mês começando antes): o aging anterior é o do mês
+    // antes do começo do razão (ex.: razão de abril a agosto → aging de março).
+    const compAnterior = arqsAB.compAnterior || U.somarMeses(comp, -1);
     const itens = [
-      linhaPrecisa(temAnt, maiuscula(cfg.nomeAging) + ' de ' + U.nomeCompetencia(U.somarMeses(comp, -1))),
+      linhaPrecisa(temAnt, maiuscula(cfg.nomeAging) + ' de ' + U.nomeCompetencia(compAnterior)),
       linhaPrecisa(temAtu, maiuscula(cfg.nomeAging) + ' de ' + U.nomeCompetencia(comp)),
-      linhaPrecisa(temRaz, maiuscula(cfg.nomeRazao) + ' de ' + U.nomeCompetencia(comp)),
+      linhaPrecisa(temRaz, maiuscula(cfg.nomeRazao) + ' de ' + (arqsAB.periodo
+        ? (arqsAB.periodo.de.slice(0, 4) === comp.slice(0, 4) ? U.nomeCompetencia(arqsAB.periodo.de).replace(/\/\d{4}$/, '') : U.nomeCompetencia(arqsAB.periodo.de)) + ' a ' : '') + U.nomeCompetencia(comp)),
     ];
     let estado, porque = '';
     if (pode && passo3) estado = '<span class="pilula azul">em andamento</span>';

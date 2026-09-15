@@ -106,7 +106,7 @@
       ['CNPJ', emp.cnpj ? U.formatarCnpj(emp.cnpj) : '—'],
       ['Competência', nomeDoMes()],
       ['Conta', (conta.codigo || '') + ' · ' + (conta.nome || '')],
-      ['Parte A · contabilidade', 'aging ' + d.entrada.mesAnterior + (d.itens.continuacao ? ' + pendências de ' + U.nomeCompetencia(d.itens.continuacao.competencia) : '') + ' + razão de ' + d.entrada.mesAtual],
+      ['Parte A · contabilidade', 'aging ' + d.entrada.mesAnterior + (d.itens.continuacao ? ' + pendências de ' + U.nomeCompetencia(d.itens.continuacao.competencia) : '') + ' + razão de ' + (d.entrada.nomeRazao || d.entrada.mesAtual)],
       ['Parte B · financeiro', 'aging ' + d.entrada.mesAtual],
       ['Saldo inicial', textoInicio()],
       ['Última gravação', d.registro.atualizadoEm ? (d.registro.atualizadoPor || '—') + ' · ' + U.dataHoraLocal(d.registro.atualizadoEm) : 'nada gravado ainda'],

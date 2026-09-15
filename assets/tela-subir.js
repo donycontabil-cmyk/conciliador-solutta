@@ -39,11 +39,17 @@
       const semPapel = r.contas.filter((c) => !c.papel.familia);
       const linhasContas = r.contas.map((c, k) => {
         const usa = !!c.papel.familia;
-        const papel = usa ? (c.papel.familia === 'fornecedores' ? (c.papel.papel === 'principal' ? 'Fornecedores' : 'Adiantamento a fornecedores') :
-          c.papel.familia === 'clientes' ? (c.papel.papel === 'principal' ? 'Clientes' : 'Adiantamento de clientes') : 'Banco') : 'fica de fora';
+        // Papel da conta: o que o programa reconheceu (ou o escolhido antes para esta empresa), e dá
+        // para trocar — conta com nome cortado no razão ("ADIANTAMENTO A") não fica de fora.
+        const celulaPapel = c.papel.familia === 'financeiro'
+          ? '<span class="pilula azul" title="' + T.esc(c.papel.regra) + '">Banco</span>'
+          : '<select class="filtro papel-conta" data-papel="' + i + ':' + k + '" title="' + T.esc((c.papel.escolhido ? 'Escolhido antes para esta empresa. ' : '') + (c.papel.regra || '')) + '">' +
+            [['', 'fica de fora']].concat(raiz.Familias.PAPEIS_ESCOLHIVEIS.map((p) => [p.familia + '/' + p.papel, p.texto])).map((o) =>
+              '<option value="' + o[0] + '"' + ((usa ? c.papel.familia + '/' + c.papel.papel : '') === o[0] ? ' selected' : '') + '>' + T.esc(o[1]) + '</option>').join('') + '</select>' +
+            (c.papel.escolhido ? ' <span class="selo mao" title="Escolhido à mão para esta empresa">escolhido</span>' : '');
         return '<tr><td class="caixa"><input type="checkbox" data-conta="' + i + ':' + k + '"' + (usa ? ' checked' : ' disabled') + '></td>' +
           '<td>' + T.esc(c.codigo) + '</td><td>' + T.esc(c.classificacao || '—') + '</td><td class="nome">' + T.esc(c.nome) + '</td>' +
-          '<td>' + (usa ? '<span class="pilula azul">' + T.esc(papel) + '</span>' : '<span class="pilula cinza" title="' + T.esc(c.papel.regra) + '">fica de fora</span>') + '</td>' +
+          '<td>' + celulaPapel + '</td>' +
           '<td class="num">' + c.lancamentos.length.toLocaleString('pt-BR') + '</td>' + T.tdValor(c.saldoAnterior) + T.tdValor(c.totalDebito) + T.tdValor(c.totalCredito) + T.tdValor(c.saldoFinal) +
           '<td>' + (c.confere ? '<span class="pilula verde" title="Saldo anterior + débitos − créditos = saldo final do razão, linha a linha">confere</span>' :
             '<span class="pilula vermelho" title="' + T.esc(c.avisos.join(' ')) + '">não confere</span>') + '</td></tr>';
@@ -129,7 +135,20 @@
         resultados.push({ nomeArquivo: arq.name, tipo: 'desconhecido', nomeDoTipo: 'Erro ao ler', motivo: T.mensagemDeErro(e), avisos: [], previa: [] });
       }
     }
+    // Papel escolhido antes para esta empresa (conta que o programa não reconheceu sozinho).
+    const escolhidos = (empresa && empresa.papeisDeConta) || {};
+    resultados.forEach((r) => (r.contas || []).forEach((c) => {
+      c.papelAutomatico = c.papel;
+      const e = escolhidos[c.codigo];
+      if (e && e.familia) c.papel = { familia: e.familia, papel: e.papel, regra: 'escolhido para esta empresa', banco: null, escolhido: true };
+    }));
     lidos.innerHTML = resultados.map((r, i) => cartaoDoResultado(r, i, empresa, opcoes && opcoes.competencia)).join('');
+    lidos.addEventListener('change', (ev) => {
+      const sel = ev.target.closest('[data-papel]');
+      if (!sel) return;
+      const cx = lidos.querySelector('[data-conta="' + sel.getAttribute('data-papel') + '"]');
+      if (cx) { cx.disabled = !sel.value; cx.checked = !!sel.value; }
+    });
     lidos.addEventListener('click', (ev) => {
       const b = ev.target.closest('[data-atalho-comp]');
       if (!b) return;
@@ -154,6 +173,7 @@
     async function guardar() {
       const arm = app().armazenamento;
       const saida = [];
+      const lembrar = {}; // código da conta -> papel escolhido à mão (fica guardado na empresa)
       botaoGuardar.disabled = true;
       botaoGuardar.textContent = 'Guardando…';
       for (let i = 0; i < resultados.length; i++) {
@@ -167,8 +187,17 @@
             if (outra && !outra.checked) { saida.push({ arquivo: r.nomeArquivo, tipo: 'ambar', texto: 'Não guardado: o CNPJ do razão é de outra empresa (marque "Guardar mesmo assim" se estiver certo).' }); continue; }
             let guardadas = 0;
             for (let k = 0; k < r.contas.length; k++) {
-              const c = r.contas[k];
+              const c0 = r.contas[k];
               const cx = janelaEl.querySelector('[data-conta="' + i + ':' + k + '"]');
+              const selPapel = janelaEl.querySelector('[data-papel="' + i + ':' + k + '"]');
+              let c = c0;
+              if (selPapel) {
+                const [familia, papel] = selPapel.value ? selPapel.value.split('/') : [null, null];
+                c = Object.assign({}, c0, { papel: familia ? { familia, papel, regra: 'escolhido na tela', banco: null } : { familia: null, papel: null, regra: 'fica de fora' } });
+                const auto = c0.papelAutomatico || {};
+                if (familia && (auto.familia !== familia || auto.papel !== papel)) lembrar[c0.codigo] = { familia, papel };
+                else if (familia && escolhidos[c0.codigo]) lembrar[c0.codigo] = null; // voltou ao automático: esquece a escolha
+              }
               if (!c.papel.familia) { saida.push({ arquivo: r.nomeArquivo, tipo: 'cinza', texto: 'Conta ' + c.codigo + ' ' + c.nome + ': ficou de fora (nenhuma conciliação usa).' }); continue; }
               if (!cx || !cx.checked) { saida.push({ arquivo: r.nomeArquivo, tipo: 'cinza', texto: 'Conta ' + c.codigo + ' ' + c.nome + ': desmarcada, não foi guardada.' }); continue; }
               const conta = Object.assign({}, c);
@@ -204,6 +233,22 @@
           }
         } catch (e) {
           saida.push({ arquivo: r.nomeArquivo, tipo: 'vermelho', texto: 'Erro ao guardar: ' + T.mensagemDeErro(e) });
+        }
+      }
+      // Papel escolhido à mão: fica guardado na empresa (pelo código da conta) para os próximos meses.
+      if (Object.keys(lembrar).length) {
+        try {
+          const emp = (await arm.empresas()).find((e) => String(e.codigo) === String(codigo));
+          const papeis = Object.assign({}, emp.papeisDeConta || {});
+          Object.keys(lembrar).forEach((k) => { if (lembrar[k]) papeis[k] = lembrar[k]; else delete papeis[k]; });
+          const salvo = await arm.salvarEmpresa(Object.assign({}, emp, { papeisDeConta: papeis }));
+          const ix = app().empresas.findIndex((e) => String(e.codigo) === String(codigo));
+          if (ix >= 0) app().empresas[ix] = salvo;
+          const nomes = Object.keys(lembrar).filter((k) => lembrar[k]).map((k) => 'conta ' + k + ' = ' + ((raiz.Familias.PAPEIS_ESCOLHIVEIS.find((p) => p.familia === lembrar[k].familia && p.papel === lembrar[k].papel) || {}).texto || ''));
+          if (nomes.length) saida.push({ arquivo: 'Papel das contas', tipo: 'verde', texto: 'Guardado para esta empresa: ' + nomes.join('; ') + '. Nos próximos razões o programa já reconhece.' });
+          await arm.registrarNoLog({ codigo, acao: 'papel-da-conta', alvo: Object.keys(lembrar).join(', '), detalhe: JSON.stringify(lembrar) });
+        } catch (e) {
+          saida.push({ arquivo: 'Papel das contas', tipo: 'ambar', texto: 'O arquivo foi guardado, mas não consegui lembrar o papel da conta para os próximos: ' + T.mensagemDeErro(e) });
         }
       }
       // Cada arquivo diz o que virou.

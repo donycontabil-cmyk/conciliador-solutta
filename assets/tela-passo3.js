@@ -73,10 +73,10 @@
     const arqs = arquivosDoPasso(metas, comp, cfg.id);
     if (conferir && !conferir()) return null;
     const falta = [];
-    if (!arqs.agingAnterior) falta.push('o ' + cfg.nomeAging + ' de ' + U.nomeCompetencia(U.somarMeses(comp, -1)));
+    if (!arqs.agingAnterior) falta.push('o ' + cfg.nomeAging + ' de ' + U.nomeCompetencia(arqs.compAnterior) + (arqs.periodo ? ' (o razão começa em ' + U.nomeCompetencia(arqs.periodo.de) + ')' : ''));
     if (!arqs.agingAtual) falta.push('o ' + cfg.nomeAging + ' de ' + U.nomeCompetencia(comp));
     if (!arqs.razao) falta.push('o ' + cfg.nomeRazao + ' de ' + U.nomeCompetencia(comp));
-    if (falta.length) return { emp, comp, falta, cfg };
+    if (falta.length) return { emp, comp, falta, cfg, arqs };
     const carregar = async (m) => ({ meta: m, conteudo: await arm.conteudoDoArquivo(m.id) });
     const [aAnt, aAtu, raz] = await Promise.all([carregar(arqs.agingAnterior), carregar(arqs.agingAtual), carregar(arqs.razao)]);
     if (conferir && !conferir()) return null;
@@ -86,13 +86,25 @@
     const registro = concs.find((c) => c.id === idReg) || { id: idReg, codigo, tipo: cfg.tipo, competencia: comp, situacao: 'andamento', arquivos: [], decisoes: {}, resumo: {} };
     const d = registro.decisoes || {};
     const decisoes = { donos: d.donos || {}, conciliadas: d.conciliadas || [], observacoes: d.observacoes || {}, conciliacoesAB: d.conciliacoesAB || [], historico: d.historico || [], inicio: d.inicio || null };
-    // Mês anterior: o que ficou em aberto nele, para "continuar da conciliação anterior".
-    const anterior = (opcoes && opcoes.semAnterior) ? null : await pendenciasDoMesAnterior(codigo, comp, cfg);
+    // Lançamentos da Parte A. Conciliação de PERÍODO (o razão guardado nesta competência começa
+    // antes do mês — Dony, 15/09/2026: "aging de março e aging de agosto, mais o razão de abril a
+    // agosto"): todos os lançamentos do começo do razão até o fim do mês. Razão de vários meses
+    // usado para um mês do meio: só os lançamentos do mês.
+    const todosLancamentos = raz.conteudo.conta.lancamentos || [];
+    const deNum = U.inicioDaCompetencia(arqs.periodo ? arqs.periodo.de : comp).numero, ateNum = U.fimDaCompetencia(comp).numero;
+    const lancamentosDoMes = todosLancamentos.filter((l) => { const n = U.montarData(l.dia, l.mes, l.ano); return !!n && n.numero >= deNum && n.numero <= ateNum; });
+    const razaoDoMes = { total: todosLancamentos.length, doMes: lancamentosDoMes.length, periodo: raz.conteudo.periodo || raz.meta.periodo || null, dePeriodo: !!arqs.periodo };
+    // Mês anterior (o do aging anterior): o que ficou em aberto nele, para o saldo inicial conforme o razão.
+    const anterior = (opcoes && opcoes.semAnterior) ? null : await pendenciasDoMesAnterior(codigo, arqs.compAnterior, cfg);
     if (conferir && !conferir()) return null;
+    const inicioRazao = arqs.periodo ? arqs.periodo.de : comp;
+    const nomeRazao = arqs.periodo
+      ? (U.partesCompetencia(inicioRazao).ano === U.partesCompetencia(comp).ano ? U.nomeCompetencia(inicioRazao).replace(/\/\d{4}$/, '') : U.nomeCompetencia(inicioRazao)) + ' a ' + U.nomeCompetencia(comp)
+      : U.nomeCompetencia(comp);
     const entrada = {
       competencia: comp, natureza: cfg.natureza,
-      mesAnterior: U.nomeCompetencia(U.somarMeses(comp, -1)), mesAtual: U.nomeCompetencia(comp),
-      contaRazao: { conta: raz.conteudo.conta, lancamentos: raz.conteudo.conta.lancamentos },
+      mesAnterior: U.nomeCompetencia(arqs.compAnterior), mesAtual: U.nomeCompetencia(comp), nomeRazao,
+      contaRazao: { conta: raz.conteudo.conta, lancamentos: lancamentosDoMes },
       agingAnterior: aAnt.conteudo, agingAtual: aAtu.conteudo, decisoes,
     };
     if (modoDoInicio(decisoes.inicio) === 'razao' && anterior && anterior.pendencias) entrada.continuacao = anterior.pendencias;
@@ -100,7 +112,7 @@
     const itens = M.itensAB(entrada, r);
     const arrumado = M.arrumarGruposAB(decisoes.conciliacoesAB, itens.legado);
     decisoes.conciliacoesAB = arrumado.grupos;
-    return { emp, comp, arquivos: { aAnt, aAtu, raz }, registro, entrada, decisoes, r, itens, arrumou: arrumado.mudou, anterior, cfg };
+    return { emp, comp, arquivos: { aAnt, aAtu, raz }, registro, entrada, decisoes, r, itens, arrumou: arrumado.mudou, anterior, cfg, razaoDoMes };
   }
 
   function idDoRegistro(codigo, anoMes, cfg) { return 'F-' + codigo + '-' + cfg.tipo + '-' + anoMes; }
@@ -108,9 +120,9 @@
   // Pendências do mês anterior (o que ficou em aberto na A e na B dele), do MESMO passo. Vêm do
   // registro do mês anterior; registro de antes desta versão (sem pendências) é calculado com os
   // arquivos dele, do zero. Sem conciliação no mês anterior não há do que continuar.
-  async function pendenciasDoMesAnterior(codigo, comp, cfg) {
+  // compAnt = a competência do aging anterior (o mês passado, ou o mês antes do começo do razão).
+  async function pendenciasDoMesAnterior(codigo, compAnt, cfg) {
     const arm = app().armazenamento;
-    const compAnt = U.somarMeses(comp, -1);
     const idAnt = idDoRegistro(codigo, U.anoMes(compAnt), cfg);
     const reg = (await arm.conciliacoes(codigo, compAnt)).find((c) => c.id === idAnt) || null;
     if (!reg) return { competencia: compAnt, pendencias: null };
@@ -144,7 +156,7 @@
       incluirAnterior: app().lerLocal('conciliador-solutta.ab-anterior') !== '0',
       selA: new Set(), selB: new Set(), abertosAB: new Set(), idDoItem: new Map(),
       r: dados.r, itens: dados.itens, porChave: new Map(dados.r.fornecedores.map((f) => [f.chave, f])),
-      anterior: dados.anterior,
+      anterior: dados.anterior, razaoDoMes: dados.razaoDoMes,
     };
     if (E.aba !== 'ab' && abasOcultas().has(E.aba)) E.aba = 'ab';
     desenharTudo();
@@ -161,8 +173,26 @@
     const compAnt = U.somarMeses(comp, -1);
     const maisNovo = (lista) => lista.slice().sort((a, b) => U.paraMs(b.enviadoEm) - U.paraMs(a.enviadoEm))[0] || null;
     const agings = (c) => metas.filter((m) => m.tipo === cfg.tipoFinanceiro && m.competencia === c);
-    const razoes = (c) => metas.filter((m) => m.tipo === 'razao' && m.conta && m.conta.familia === 'fornecedores' && m.conta.papel === cfg.papelRazao && m.competencia === c);
-    return { agingAnterior: maisNovo(agings(compAnt)), agingAtual: maisNovo(agings(comp)), razao: maisNovo(razoes(comp)) };
+    const daConta = (m) => m.tipo === 'razao' && m.conta && m.conta.familia === 'fornecedores' && m.conta.papel === cfg.papelRazao;
+    const razoes = (c) => metas.filter((m) => daConta(m) && m.competencia === c);
+    // Razão de VÁRIOS meses (Dony, 15/09/2026: o razão de adiantamento vem de abril a agosto)
+    // fica guardado na competência do fim, mas serve para qualquer mês que ele cobre inteiro.
+    const inicio = U.inicioDaCompetencia(comp), fim = U.fimDaCompetencia(comp);
+    const cobre = (m) => {
+      const de = m.periodo && U.lerData(m.periodo.de), ate = m.periodo && U.lerData(m.periodo.ate);
+      return !!(de && ate && de.numero <= inicio.numero && ate.numero >= fim.numero);
+    };
+    const exato = maisNovo(razoes(comp));
+    const razao = exato || maisNovo(metas.filter((m) => daConta(m) && cobre(m)));
+    // Conciliação de PERÍODO: o razão guardado NESTA competência começa antes do mês (ex.: abril a
+    // agosto, guardado em agosto). O aging anterior é o do mês antes do começo do razão (março).
+    let compAnterior = compAnt, periodo = null;
+    const deRazao = exato && exato.periodo && U.lerData(exato.periodo.de);
+    if (deRazao && deRazao.numero < inicio.numero) {
+      periodo = { de: U.competenciaDe(deRazao), ate: comp };
+      compAnterior = U.somarMeses(periodo.de, -1);
+    }
+    return { agingAnterior: maisNovo(agings(compAnterior)), agingAtual: maisNovo(agings(comp)), razao, compAnterior, periodo };
   }
   function arquivosDoTerceiro(metas, comp) { return arquivosDoPasso(metas, comp, 'passo3'); }
 
@@ -212,7 +242,14 @@
       '<a class="voltar" href="' + E.voltar + '">← Fornecedores · ' + U.nomeCompetencia(E.comp) + '</a>' +
       '<div class="cabecalho"><div class="titulos"><h1>Passo ' + E.cfg.numero + ' · ' + T.esc(E.cfg.titulo) + '</h1>' +
       '<p class="suave">' + T.esc(E.emp.codigo + ' · ' + E.emp.nome) + ' · ' + U.nomeCompetencia(E.comp) + '</p>' +
-      '<p class="suave pequeno">Conta ' + T.esc(r.conta.codigo + ' · ' + r.conta.nome) + ' · aging de ' + T.esc(E.entrada.mesAnterior) + ' e de ' + T.esc(E.entrada.mesAtual) + '</p></div>' +
+      '<p class="suave pequeno">Conta ' + T.esc(r.conta.codigo + ' · ' + r.conta.nome) + ' · aging de ' + T.esc(E.entrada.mesAnterior) + ' e de ' + T.esc(E.entrada.mesAtual) + '</p>' +
+      (E.razaoDoMes && E.razaoDoMes.dePeriodo
+        ? '<p class="pequeno" style="color:var(--azul)">📅 Conciliação do período <b>' + T.esc(E.entrada.nomeRazao) + '</b>: Parte A = aging de ' + T.esc(E.entrada.mesAnterior) +
+          ' + os <b>' + E.razaoDoMes.doMes + '</b> lançamentos do razão' + (E.razaoDoMes.periodo ? ' (' + T.esc(E.razaoDoMes.periodo.de) + ' a ' + T.esc(E.razaoDoMes.periodo.ate) + ')' : '') + '; Parte B = aging de ' + T.esc(E.entrada.mesAtual) + '.</p>'
+        : E.razaoDoMes && E.razaoDoMes.doMes !== E.razaoDoMes.total
+          ? '<p class="pequeno" style="color:var(--azul)">📅 Razão ' + (E.razaoDoMes.periodo ? 'de ' + T.esc(E.razaoDoMes.periodo.de) + ' a ' + T.esc(E.razaoDoMes.periodo.ate) : 'de vários meses') +
+            ': a Parte A usa só os <b>' + E.razaoDoMes.doMes + '</b> lançamentos de ' + T.esc(E.entrada.mesAtual) + ' (de ' + E.razaoDoMes.total + ' no arquivo).</p>' : '') +
+      '</div>' +
       '<div class="linha-flex" style="gap:12px"><span class="guardado" id="guardado" title="Cada decisão é gravada na hora">' + (E.guardadoEm ? 'guardado às ' + U.horaLocal(E.guardadoEm) : 'nenhuma decisão tomada ainda') + '</span>' +
       '<a class="botao pequeno" href="#/empresa/' + encodeURIComponent(E.codigo) + '/fornecedores/' + U.anoMes(E.comp) + '/' + E.cfg.id + '-relatorio" title="Relatório da conciliação para imprimir, salvar em PDF ou baixar em Excel">📄 Relatório</a>' +
       '<button type="button" class="botao pequeno perigo" data-acao="limpar-conciliacao" title="Apagar tudo o que foi feito neste passo num mês e começar do zero">🧹 Limpar conciliação</button></div></div>' +
@@ -424,7 +461,7 @@
       '<p class="suave" style="margin:4px 0 10px">Em ' + mesAnt + ' ficaram ' + ficou + ' — diferença de ' + dinheiro(p.valorA - p.valorB) + '. Qual saldo vale para começar ' + mes + '?</p>' +
       '<div class="opcoes-inicio">' +
       '<button type="button" class="opcao-inicio" data-inicio="aging"><b>📄 Conforme o AGING de ' + mesAnt + '</b><em class="valor-inicio">' + dinheiro(v.pelaAging.valor) + '</em>' +
-      '<span>O aging de ' + mesAnt + ' estava certo (a contabilidade foi ajustada e bateu). A Parte B de ' + mesAnt + ' vira a Parte A de ' + mes + ': Parte A = aging de ' + mesAnt + ' + razão de ' + mes + '.</span></button>' +
+      '<span>O aging de ' + mesAnt + ' estava certo (a contabilidade foi ajustada e bateu). A Parte B de ' + mesAnt + ' vira a Parte A de ' + mes + ': Parte A = aging de ' + mesAnt + ' + razão de ' + T.esc(E.entrada.nomeRazao || mes) + '.</span></button>' +
       '<button type="button" class="opcao-inicio" data-inicio="razao"><b>📒 Conforme o RAZÃO de ' + mesAnt + '</b><em class="valor-inicio">' + dinheiro(v.peloRazao.valor) + '</em>' +
       '<span>Vale o saldo da contabilidade no fim de ' + mesAnt + ': a Parte A traz as pendências da A de ' + mesAnt + ' e tira do aging os títulos que ficaram em aberto na B. A diferença de ' + mesAnt + ' continua em ' + mes + '.</span></button>' +
       '</div></div>';
@@ -599,7 +636,7 @@
     const rot = mostrar === 'todos' ? 'item(ns)' : (mostrar === 'conciliados' ? 'conciliado(s)' : 'em aberto');
     alvo.innerHTML = cartaoInicio() + resumoAB(ab, grupos) +
       '<div class="grade-ab">' +
-      colunaAB('A', 'Parte A · contabilidade', E.incluirAnterior ? 'aging ' + E.entrada.mesAnterior + ' + razão de ' + E.entrada.mesAtual : 'só o razão de ' + E.entrada.mesAtual, filtradosA, fixosA, rot) +
+      colunaAB('A', 'Parte A · contabilidade', E.incluirAnterior ? 'aging ' + E.entrada.mesAnterior + ' + razão de ' + (E.entrada.nomeRazao || E.entrada.mesAtual) : 'só o razão de ' + (E.entrada.nomeRazao || E.entrada.mesAtual), filtradosA, fixosA, rot) +
       colunaAB('B', 'Parte B · financeiro', 'aging ' + E.entrada.mesAtual, filtradosB, fixosB, rot) +
       '</div>' +
       '<div id="barra-ab"></div>' +

@@ -44,18 +44,21 @@
   // Papel de cada conta do razão, pelo NOME e pela CLASSIFICAÇÃO (Parte 7.0).
   // Cada regra: { familia, papel, teste(nomeNormalizado, classificacao) }.
   // A primeira que servir decide. Acrescentar um caso = acrescentar uma linha.
+  // "ADTO"/"ADTOS" é a abreviação de adiantamento nos razões (ex.: "ADTO A FORNECEDORES").
+  function temAdiant(n) { return /ADIANT/.test(n) || /(^| )ADTOS?( |$)/.test(n); }
+
   const REGRAS_DE_PAPEL = [
-    { familia: 'fornecedores', papel: 'adiantamento', descricao: 'ADIANT + FORNEC; ou no ativo: ADIANT + PARCEIRO (como o "contas a pagar - parceiros")',
-      teste: (n, c) => /ADIANT/.test(n) && (/FORNEC/.test(n) || (/PARCEIRO/.test(n) && ativo(c))) },
-    { familia: 'clientes', papel: 'adiantamento', descricao: 'ADIANT + CLIENTE, RECEBIMENTOS ANTECIPADOS, ADIANTAMENTOS RECEBIDOS',
-      teste: (n) => (/ADIANT/.test(n) && /CLIENTE/.test(n)) || /RECEBIMENTOS? ANTECIPADOS?/.test(n) || /ADIANTAMENTOS? RECEBIDOS?/.test(n) },
+    { familia: 'fornecedores', papel: 'adiantamento', descricao: 'ADIANT (ou ADTO) + FORNEC; ou no ativo: ADIANT + PARCEIRO (como o "contas a pagar - parceiros")',
+      teste: (n, c) => temAdiant(n) && (/FORNEC/.test(n) || (/PARCEIRO/.test(n) && ativo(c))) },
+    { familia: 'clientes', papel: 'adiantamento', descricao: 'ADIANT (ou ADTO) + CLIENTE, RECEBIMENTOS ANTECIPADOS, ADIANTAMENTOS RECEBIDOS',
+      teste: (n) => (temAdiant(n) && /CLIENTE/.test(n)) || /RECEBIMENTOS? ANTECIPADOS?/.test(n) || /ADIANTAMENTOS? RECEBIDOS?/.test(n) },
     { familia: 'fornecedores', papel: 'principal', descricao: 'FORNECEDOR(ES); ou no passivo: PARCEIROS / (CONTAS|DUPLICATAS|TITULOS) A PAGAR, sem ADIANT',
-      teste: (n, c) => !/ADIANT/.test(n) && (
+      teste: (n, c) => !temAdiant(n) && (
         /FORNEC/.test(n) ||
         ((/PARCEIRO/.test(n) || /(DUPLICATAS?|TITULOS?|CONTAS?) A PAGAR/.test(n)) && /^2/.test(String(c || '').trim()))
       ) },
     { familia: 'clientes', papel: 'principal', descricao: 'no ativo, sem ADIANT: CLIENTE, MENSALIDADE, DUPLICATAS/CONTAS/TITULOS A RECEBER',
-      teste: (n, c) => ativo(c) && !/ADIANT/.test(n) &&
+      teste: (n, c) => ativo(c) && !temAdiant(n) &&
         (/CLIENTE/.test(n) || /MENSALIDADE/.test(n) || /(DUPLICATAS|CONTAS|TITULOS) A RECEBER/.test(n)) },
     { familia: 'financeiro', papel: 'banco', descricao: 'no ativo, nome de banco ou CONTA MOVIMENTO / CONTA CORRENTE / C/C, sem aplicação',
       teste: (n, c) => ativo(c) && !/(APLICACAO|INVESTIMENTO|POUPANCA|GARANTIDA)/.test(n) &&
@@ -64,7 +67,9 @@
 
   function ativo(classificacao) { return /^1/.test(String(classificacao || '').trim()); }
 
-  function papelDaConta(conta) {
+  // dica: { nomeArquivo } — quando o nome da conta vem cortado no razão (cliente real, 15/09/2026:
+  // "ADIANTAMENTO A"), o nome do arquivo ("razao_adto_fornecedores") completa.
+  function papelDaConta(conta, dica) {
     const nome = Util.normalizarNome(conta && conta.nome);
     const classif = conta && conta.classificacao;
     for (const r of REGRAS_DE_PAPEL) {
@@ -73,6 +78,11 @@
         if (r.papel === 'banco') papel.banco = bancoDoNome(nome);
         return papel;
       }
+    }
+    const arquivo = Util.normalizarNome(String((dica && dica.nomeArquivo) || '').replace(/[_.-]+/g, ' '));
+    if (temAdiant(nome) && ativo(classif) && !/CLIENTE|FUNCIONAR|EMPREGAD|SALARIO|FERIAS|VIAGE|SOCIO/.test(nome) &&
+      temAdiant(arquivo) && /FORNEC|PARCEIR/.test(arquivo)) {
+      return { familia: 'fornecedores', papel: 'adiantamento', regra: 'nome da conta cortado ("' + (conta.nome || '') + '") no ativo; o nome do arquivo diz adiantamento a fornecedores', banco: null };
     }
     // Conta de banco no PASSIVO é cheque especial e fica fora.
     if (bancoDoNome(nome) && /^2/.test(String(classif || ''))) {
@@ -126,5 +136,14 @@
 
   function familia(id) { return FAMILIAS.find((f) => f.id === id) || null; }
 
-  return { BANCOS, REGRAS_DE_PAPEL, FAMILIAS, familia, papelDaConta, bancoDoNome };
+  // Papéis que podem ser escolhidos à mão para uma conta que o programa não reconheceu (a
+  // escolha fica guardada na empresa, pelo código da conta).
+  const PAPEIS_ESCOLHIVEIS = [
+    { familia: 'fornecedores', papel: 'principal', texto: 'Fornecedores (a pagar)' },
+    { familia: 'fornecedores', papel: 'adiantamento', texto: 'Adiantamento a fornecedores' },
+    { familia: 'clientes', papel: 'principal', texto: 'Clientes (a receber)' },
+    { familia: 'clientes', papel: 'adiantamento', texto: 'Adiantamento de clientes' },
+  ];
+
+  return { BANCOS, REGRAS_DE_PAPEL, FAMILIAS, PAPEIS_ESCOLHIVEIS, familia, papelDaConta, bancoDoNome, temAdiant };
 });

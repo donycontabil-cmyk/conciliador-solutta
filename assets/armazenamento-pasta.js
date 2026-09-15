@@ -375,6 +375,18 @@
       return limpo;
     }
 
+    function limparPapeisDeConta(valor) {
+      const limpo = {};
+      if (!valor || typeof valor !== 'object') return limpo;
+      const validos = { fornecedores: ['principal', 'adiantamento'], clientes: ['principal', 'adiantamento'] };
+      for (const codigo of Object.keys(valor)) {
+        const p = valor[codigo];
+        if (!/^[0-9A-Za-z._-]{1,30}$/.test(codigo) || !p || !validos[p.familia] || validos[p.familia].indexOf(p.papel) < 0) continue;
+        limpo[codigo] = { familia: p.familia, papel: p.papel };
+      }
+      return limpo;
+    }
+
     async function salvarEmpresa(empresa) {
       exigirConexao();
       const codigo = validarCodigo(empresa && empresa.codigo);
@@ -405,6 +417,10 @@
       // interessa o "Conciliar A × B"): { passo3: ['diferencas', 'razao'] }. Mesma regra.
       const abas = limparMapaDeListas(empresa.abasOcultas !== undefined ? empresa.abasOcultas : (anterior && anterior.abasOcultas));
       if (Object.keys(abas).length) registro.abasOcultas = abas;
+      // Papel escolhido à mão para uma conta que o programa não reconheceu (Dony, 15/09/2026: razão
+      // de adiantamento com o nome da conta cortado): { '634': { familia: 'fornecedores', papel: 'adiantamento' } }.
+      const papeis = limparPapeisDeConta(empresa.papeisDeConta !== undefined ? empresa.papeisDeConta : (anterior && anterior.papeisDeConta));
+      if (Object.keys(papeis).length) registro.papeisDeConta = papeis;
       if (i >= 0) lista[i] = registro; else lista.push(registro);
       await gravar(raiz, 'empresas.json', JSON.stringify(lista, null, 2));
       await pastaDaEmpresa(codigo, true);
