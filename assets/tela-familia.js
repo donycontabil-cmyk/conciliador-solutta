@@ -15,7 +15,7 @@
   function idPasso1(codigo, comp) { return 'F-' + codigo + '-fornecedor_adiantamento-' + U.anoMes(comp); }
 
   function daFamilia(meta) {
-    return (meta.tipo === 'razao' && meta.conta && meta.conta.familia === 'fornecedores') || meta.tipo === 'financeiro_pagar';
+    return (meta.tipo === 'razao' && meta.conta && meta.conta.familia === 'fornecedores') || meta.tipo === 'financeiro_pagar' || meta.tipo === 'financeiro_adiantamento';
   }
 
   // O arquivo que vale para cada papel na competência: a versão mais nova.
@@ -100,7 +100,7 @@
       '<h2 style="margin:22px 0 12px">Passos</h2>' +
       '<div class="grade-3" id="passos"></div>' +
       '<h2 style="margin:26px 0 12px">Arquivos de ' + U.nomeCompetencia(comp) + '</h2>' +
-      '<div class="soltar" id="soltar" tabindex="0" role="button"><b>Arraste os arquivos aqui</b> ou clique para escolher<br><span class="pequeno">Razões (.xls, .xlsx, .csv) e relatório de contas a pagar em aberto. Pode subir vários de uma vez.</span></div>' +
+      '<div class="soltar" id="soltar" tabindex="0" role="button"><b>Arraste os arquivos aqui</b> ou clique para escolher<br><span class="pequeno">Razões (.xls, .xlsx, .csv), aging de contas a pagar e aging de adiantamentos. Pode subir vários de uma vez.</span></div>' +
       '<input type="file" id="escolher-arquivos" multiple class="escondido" accept=".xls,.xlsx,.xlsm,.csv,.txt">' +
       (app().demonstracao && raiz.Demonstracao
         ? '<div class="linha-flex" style="margin-top:10px"><button type="button" class="botao" id="bt-exemplo">🧪 Usar os razões de exemplo</button>' +
@@ -112,11 +112,18 @@
     el.querySelector('#mes-antes').addEventListener('click', () => app().ir(base + U.anoMes(U.somarMeses(comp, -1))));
     el.querySelector('#mes-depois').addEventListener('click', () => app().ir(base + U.anoMes(U.somarMeses(comp, 1))));
 
-    const passo3 = concs.find((c) => c.id === 'F-' + codigo + '-fornecedor_pagar-' + U.anoMes(comp)) || null;
-    const arqs3 = raiz.TelaPasso3 ? raiz.TelaPasso3.arquivosDoTerceiro(metas, comp) : { agingAnterior: null, agingAtual: null, razao: null };
+    // Passos no modelo "Conciliar A × B" (③ contas a pagar e ② adiantamentos): arquivos e registro de cada um.
+    const ab = {};
+    if (raiz.TelaPasso3) {
+      for (const id of Object.keys(raiz.TelaPasso3.PASSOS_AB)) {
+        const cfg = raiz.TelaPasso3.configDoPasso(id);
+        ab[id] = { cfg, arqs: raiz.TelaPasso3.arquivosDoPasso(metas, comp, id),
+          registro: concs.find((c) => c.id === 'F-' + codigo + '-' + cfg.tipo + '-' + U.anoMes(comp)) || null };
+      }
+    }
     const inativos = passosInativos(emp, fam);
     desenharChecklist(el.querySelector('#checklist'), codigo, comp, checklist, fam, inativos);
-    desenharPassos(el.querySelector('#passos'), codigo, comp, fam, arqs, completo, passo1, arqs3, passo3, inativos);
+    desenharPassos(el.querySelector('#passos'), codigo, comp, fam, arqs, completo, passo1, ab, inativos);
     desenharArquivos(el.querySelector('#arquivos'), doMes);
     desenharInativos(el.querySelector('#inativos'), fam, inativos);
     const alternar = (ev) => {
@@ -140,7 +147,7 @@
         // Aging do mês anterior subido daqui (ex.: aging de julho estando em agosto): ele é o saldo
         // inicial do ③ deste mês, então a tela fica aqui (antes ia para julho e parecia que não pegou).
         const compAnterior = U.somarMeses(comp, -1);
-        const soDoMesOuAgingAnterior = guardados.length && guardados.every((g) => g.competencia === comp || (g.competencia === compAnterior && g.tipo === 'financeiro_pagar'));
+        const soDoMesOuAgingAnterior = guardados.length && guardados.every((g) => g.competencia === comp || (g.competencia === compAnterior && (g.tipo === 'financeiro_pagar' || g.tipo === 'financeiro_adiantamento')));
         if (soDoMesOuAgingAnterior && guardados.some((g) => g.competencia === compAnterior)) {
           T.avisoRapido('Aging de ' + U.nomeCompetencia(compAnterior) + ' guardado: é o aging do mês anterior do Passo ③ de ' + U.nomeCompetencia(comp) + '.', 'ok', 6000);
           app().mostrarRota();
@@ -289,7 +296,7 @@
     return '<button type="button" class="botao pequeno leve inativar" data-inativar="' + p.id + '" title="Esta empresa não usa este passo: ele sai daqui e fica em Passos inativos, lá embaixo">Inativar</button>';
   }
 
-  function desenharPassos(el, codigo, comp, fam, arqs, completo, passo1, arqs3, passo3, inativos) {
+  function desenharPassos(el, codigo, comp, fam, arqs, completo, passo1, ab, inativos) {
     const base = '#/empresa/' + encodeURIComponent(codigo) + '/fornecedores/' + U.anoMes(comp) + '/';
     const ativos = fam.passos.filter((p) => !inativos.has(p.id));
     if (!ativos.length) {
@@ -302,7 +309,7 @@
           '<p class="suave" style="line-height:1.5">' + T.esc(p.texto) + '</p>' +
           '<div class="acoes"><span class="pilula cinza">em construção · Etapa ' + p.etapa + '</span>' + botaoInativar(p) + '</div></div>';
       }
-      if (p.id === 'passo3') return cartaoTerceiro(p, codigo, comp, base, arqs3, passo3);
+      if (ab[p.id]) return cartaoAB(p, codigo, comp, base, ab[p.id]);
       const temF = arqs.F.length > 0;
       const temA = arqs.A.length > 0;
       const itens = [
@@ -328,19 +335,22 @@
     }).join('');
   }
 
-  // Cartão do Passo ③ (aging): precisa do aging do mês passado, do aging do mês e do razão.
-  function cartaoTerceiro(p, codigo, comp, base, arqs3, passo3) {
-    const temAnt = !!arqs3.agingAnterior, temAtu = !!arqs3.agingAtual, temRaz = !!arqs3.razao;
+  // Cartão de um passo A × B (③ contas a pagar ou ② adiantamentos): precisa do aging do mês
+  // passado, do aging do mês e do razão da conta.
+  function cartaoAB(p, codigo, comp, base, dados) {
+    const cfg = dados.cfg, arqsAB = dados.arqs, passo3 = dados.registro;
+    const maiuscula = (s) => String(s).charAt(0).toUpperCase() + String(s).slice(1);
+    const temAnt = !!arqsAB.agingAnterior, temAtu = !!arqsAB.agingAtual, temRaz = !!arqsAB.razao;
     const pode = temAnt && temAtu && temRaz;
     const itens = [
-      linhaPrecisa(temAnt, 'Aging (contas a pagar) de ' + U.nomeCompetencia(U.somarMeses(comp, -1))),
-      linhaPrecisa(temAtu, 'Aging (contas a pagar) de ' + U.nomeCompetencia(comp)),
-      linhaPrecisa(temRaz, 'Razão de fornecedores de ' + U.nomeCompetencia(comp)),
+      linhaPrecisa(temAnt, maiuscula(cfg.nomeAging) + ' de ' + U.nomeCompetencia(U.somarMeses(comp, -1))),
+      linhaPrecisa(temAtu, maiuscula(cfg.nomeAging) + ' de ' + U.nomeCompetencia(comp)),
+      linhaPrecisa(temRaz, maiuscula(cfg.nomeRazao) + ' de ' + U.nomeCompetencia(comp)),
     ];
     let estado, porque = '';
     if (pode && passo3) estado = '<span class="pilula azul">em andamento</span>';
     else if (pode) estado = '<span class="pilula verde">pronta para conciliar</span>';
-    else { estado = '<span class="pilula ambar">falta arquivo</span>'; porque = 'Suba os dois agings e o razão de fornecedores.'; }
+    else { estado = '<span class="pilula ambar">falta arquivo</span>'; porque = 'Suba os dois ' + cfg.nomeAging.replace(/^aging/, 'agings') + ' e o ' + cfg.nomeRazao + '.'; }
     const rs = passo3 && passo3.resumo;
     // Com o Conciliar A × B gravado, o resumo é o dele (conciliações e o que sobra em aberto).
     const resumo = rs && typeof rs.conciliacoesAB === 'number'
@@ -352,8 +362,8 @@
     return '<div class="cartao passo"><div class="linha-flex"><span class="numero">' + p.numero + '</span><h3 style="flex:1">' + T.esc(p.titulo) + '</h3>' + estado + '</div>' +
       '<p class="suave" style="line-height:1.5">' + T.esc(p.texto) + '</p><ul class="precisa">' + itens.join('') + '</ul>' + resumo +
       (porque ? '<p class="pequeno" style="color:var(--ambar)">' + T.esc(porque) + '</p>' : '') +
-      '<div class="acoes">' + (pode ? '<a class="botao primario" href="' + base + 'passo3">Abrir →</a>' : '<span class="botao primario travado" title="' + T.esc(porque) + '">Abrir →</span>') +
-      (pode && passo3 ? '<a class="botao" href="' + base + 'passo3-relatorio" title="Relatório da conciliação para imprimir, salvar em PDF ou baixar em Excel">📄 Relatório</a>' : '') +
+      '<div class="acoes">' + (pode ? '<a class="botao primario" href="' + base + p.id + '">Abrir →</a>' : '<span class="botao primario travado" title="' + T.esc(porque) + '">Abrir →</span>') +
+      (pode && passo3 ? '<a class="botao" href="' + base + p.id + '-relatorio" title="Relatório da conciliação para imprimir, salvar em PDF ou baixar em Excel">📄 Relatório</a>' : '') +
       '<button type="button" class="botao" data-subir>Subir arquivo</button>' + botaoInativar(p) + '</div></div>';
   }
   function linhaPrecisa(tem, texto) {

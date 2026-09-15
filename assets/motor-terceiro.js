@@ -42,6 +42,17 @@
     return p.length ? 'nome:' + p.join(' ') : 'nome:' + Util.normalizarNome(t.nome);
   }
 
+  // Sentido do razão pela NATUREZA da conta (Dony, 15/09/2026: o ② Adiantamento × financeiro é
+  // "exatamente igual" ao ③, só que a conta é do ATIVO):
+  //  - fornecedores (passivo): a nota é CRÉDITO (aumenta o a pagar) e a baixa é DÉBITO;
+  //  - adiantamento a fornecedores (ativo): o adiantamento é DÉBITO e a compensação é CRÉDITO.
+  // O resto (Parte A, Parte B, regras, IDs) é o mesmo: "nota" e "baixa" são só os papéis de quem
+  // aumenta e de quem diminui o saldo.
+  function ladosDoRazao(natureza, l) {
+    const adiantamento = natureza === 'adiantamento';
+    return { aumento: adiantamento ? (l.debito || 0) : (l.credito || 0), reducao: adiantamento ? (l.credito || 0) : (l.debito || 0) };
+  }
+
   // Documento comparável dos dois lados: só os dígitos, sem zeros à esquerda ("011719" = "11719").
   function normalizarDocumento(s) {
     return String(s === null || s === undefined ? '' : s).replace(/\D+/g, '').replace(/^0+/, '');
@@ -79,13 +90,13 @@
   // aparece em muitos fornecedores, e a NF 60 de pessoas diferentes também.
   // ------------------------------------------------------------------
   const REGRAS_AB = {
-    'doc-fornecedor-par': 'mesmo documento e fornecedor: a baixa mata a nota de mesmo valor',
+    'doc-fornecedor-par': 'mesmo documento e fornecedor: a baixa (ou compensação) mata a nota (ou adiantamento) de mesmo valor',
     'doc-fornecedor': 'mesmo documento e fornecedor: soma igual nos dois lados',
-    'doc-fornecedor-valor': 'mesmo documento e fornecedor: uma nota e um título de mesmo valor (sobra outro título do mesmo documento)',
-    'doc-nome-par': 'mesmo documento e mesmo nome de fornecedor: a baixa mata a nota de mesmo valor',
+    'doc-fornecedor-valor': 'mesmo documento e fornecedor: um lançamento e um título de mesmo valor (sobra outro título do mesmo documento)',
+    'doc-nome-par': 'mesmo documento e mesmo nome de fornecedor: a baixa (ou compensação) mata a nota (ou adiantamento) de mesmo valor',
     'doc-nome': 'mesmo documento e mesmo nome de fornecedor: soma igual nos dois lados',
-    'doc-nome-valor': 'mesmo documento e mesmo nome de fornecedor: uma nota e um título de mesmo valor',
-    'doc-par': 'mesmo documento, nome diferente: a baixa mata a nota de mesmo valor',
+    'doc-nome-valor': 'mesmo documento e mesmo nome de fornecedor: um lançamento e um título de mesmo valor',
+    'doc-par': 'mesmo documento, nome diferente: a baixa (ou compensação) mata a nota (ou adiantamento) de mesmo valor',
     'doc': 'mesmo documento, nome diferente: soma igual nos dois lados',
     'manual': 'marcado à mão',
   };
@@ -202,9 +213,10 @@
     r.linhas.forEach((l) => {
       const lc = lancs[l.i];
       const d = r.porLinha.get(l.digital);
-      const x = guardar({ id: 'RZ:' + Util.hash8(l.digital), lado: 'A', fonte: lc.credito > 0 ? 'nota' : 'baixa',
+      const lados = ladosDoRazao(entrada.natureza, lc);
+      const x = guardar({ id: 'RZ:' + Util.hash8(l.digital), lado: 'A', fonte: lados.aumento > 0 ? 'nota' : 'baixa',
         doc: documentoDaLinha(lc), parcela: '', chave: d.chave, nome: d.nome, cnpj: '', data: lc.data, ordem: l.dia,
-        historico: lc.historico || '', valor: lc.credito > 0 ? lc.credito : -lc.debito, linha: l.i });
+        historico: lc.historico || '', valor: lados.aumento > 0 ? lados.aumento : -lados.reducao, linha: l.i });
       legado.set('RAZ:' + l.digital, x.id);
     });
     titulos(entrada.agingAtual && entrada.agingAtual.titulos, 'B', 'atual', 'TB', 'AGB');
@@ -473,8 +485,9 @@
       const d = nomes.porLinha.get(l.digital);
       if (!razPorChave.has(d.chave)) razPorChave.set(d.chave, { chave: d.chave, notas: 0, baixas: 0, linhas: [] });
       const g = razPorChave.get(d.chave);
-      g.notas += l.credito;
-      g.baixas += l.debito;
+      const lados = ladosDoRazao(entrada.natureza, l);
+      g.notas += lados.aumento;      // fornecedores: notas (créditos) · adiantamento: adiantamentos (débitos)
+      g.baixas += lados.reducao;     // fornecedores: baixas (débitos) · adiantamento: compensações (créditos)
       g.linhas.push({ i: l.i, data: razao.lancamentos[l.i].data, dia: l.dia, historico: l.historico,
         documento: documentoDoHistorico(l.historico), debito: l.debito, credito: l.credito,
         nome: d.nome, origem: d.origem });
@@ -517,8 +530,8 @@
     const soma = (f, campo) => f.reduce((s, x) => s + x[campo], 0);
     const totalAnterior = inicio.valor;
     const totalAtual = agAtu.titulos.reduce((s, t) => s + t.valor, 0);
-    const totalNotas = linhas.reduce((s, l) => s + l.credito, 0);
-    const totalBaixas = linhas.reduce((s, l) => s + l.debito, 0);
+    const totalNotas = linhas.reduce((s, l) => s + ladosDoRazao(entrada.natureza, l).aumento, 0);
+    const totalBaixas = linhas.reduce((s, l) => s + ladosDoRazao(entrada.natureza, l).reducao, 0);
     const totalMovimento = totalNotas - totalBaixas;
     const totalEsperado = totalAnterior + totalMovimento;
     const diferencaTotal = totalEsperado - totalAtual;
@@ -566,6 +579,6 @@
   return {
     calcular, fornecedorDoHistorico, documentoDoHistorico, chaveDoTitulo,
     normalizarDocumento, documentoDaLinha, itensAB, conciliarAutomatico, emAbertoAB, tipoAB, proximoIdAB, REGRAS_AB,
-    compararPorDocumento, arrumarGruposAB, relatorioAB, pendenciasAB, saldoInicialAB, idsDeTitulos, COMO_AB, nomeComparavel,
+    compararPorDocumento, arrumarGruposAB, relatorioAB, pendenciasAB, saldoInicialAB, idsDeTitulos, COMO_AB, nomeComparavel, ladosDoRazao,
   };
 });

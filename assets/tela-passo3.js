@@ -1,10 +1,13 @@
 /*
  * Conciliador Solutta — tela-passo3.js
- * Painel do Passo ③ — Fornecedores × contas a pagar (modelo aging, pedido do Dony 14/09/2026).
+ * Painel dos passos no modelo "Conciliar A × B" (modelo aging):
+ *  - Passo ③ Fornecedores × contas a pagar (pedido do Dony 14/09/2026);
+ *  - Passo ② Adiantamento × financeiro (Dony, 15/09/2026: "exatamente igual: lado A o aging
+ *    anterior mais o razão, lado B o aging do mês, as mesmas regras, do mesmo jeito").
  * A ponte: aging do mês passado + movimento do razão do mês = a contabilidade (esperado);
  * a sobra tem que bater com o aging do mês. O que não bate aparece para conciliar à MÃO
  * (juntar fornecedores que a régua não juntou — instituição de pagamento, variação de nome).
- * Grava sozinho a cada decisão.
+ * O que muda de um passo para o outro está em PASSOS_AB. Grava sozinho a cada decisão.
  */
 (function (raiz) {
   'use strict';
@@ -29,6 +32,27 @@
 
   let E = null;
 
+  // O que muda entre os passos A × B. "aumento"/"reducao" são os nomes, na tela, de quem aumenta
+  // e de quem diminui o saldo da conta (o motor chama de nota e baixa; ver MotorTerceiro.ladosDoRazao).
+  const PASSOS_AB = {
+    passo3: {
+      id: 'passo3', numero: '③', tipo: 'fornecedor_pagar', titulo: 'Fornecedores × contas a pagar',
+      natureza: 'fornecedores', tipoFinanceiro: 'financeiro_pagar', papelRazao: 'principal',
+      nomeAging: 'aging (contas a pagar)', nomeRazao: 'razão de fornecedores',
+      aumento: 'nota', reducao: 'baixa', aumentos: 'notas', reducoes: 'baixas', ladoAumento: 'créditos', ladoReducao: 'débitos',
+      avisoAntes: 'baixa com data antes da nota', avisoCurto: 'baixa antes da nota',
+    },
+    passo2: {
+      id: 'passo2', numero: '②', tipo: 'adiantamento_financeiro', titulo: 'Adiantamento × financeiro',
+      natureza: 'adiantamento', tipoFinanceiro: 'financeiro_adiantamento', papelRazao: 'adiantamento',
+      nomeAging: 'aging de adiantamentos', nomeRazao: 'razão de adiantamento a fornecedores',
+      aumento: 'adiantamento', reducao: 'compensação', aumentos: 'adiantamentos', reducoes: 'compensações', ladoAumento: 'débitos', ladoReducao: 'créditos',
+      avisoAntes: 'compensação com data antes do adiantamento', avisoCurto: 'compensação antes do adiantamento',
+    },
+  };
+  function configDoPasso(passoId) { return PASSOS_AB[passoId] || PASSOS_AB.passo3; }
+  function primeiraMaiuscula(s) { return String(s).charAt(0).toUpperCase() + String(s).slice(1); }
+
   // Saldo inicial escolhido: 'razao' (conforme o razão do mês anterior) ou 'aging' (padrão).
   // Aceita os nomes da versão 13: 'continuar' = razão; 'zero' = aging.
   function modoDoInicio(inicio) {
@@ -36,35 +60,37 @@
     return m === 'razao' || m === 'continuar' ? 'razao' : 'aging';
   }
 
-  // Tudo o que o Passo ③ precisa de um mês: arquivos, registro, cálculo e itens A e B.
+  // Tudo o que um passo A × B precisa de um mês: arquivos, registro, cálculo e itens A e B.
   // Usado pela tela e pelo relatório (tela-relatorio3.js). Devolve null se a rota mudou no meio.
+  // opcoes: { passo: 'passo3' | 'passo2', semAnterior }
   async function carregarDados(codigo, anoMes, conferir, opcoes) {
+    const cfg = configDoPasso(opcoes && opcoes.passo);
     const arm = app().armazenamento;
     const emp = app().empresas.find((e) => String(e.codigo) === String(codigo));
     const comp = anoMes + '-01';
     if (!emp) return { erro: 'Empresa não cadastrada.' };
     const metas = await arm.arquivos(codigo);
-    const arqs = arquivosDoTerceiro(metas, comp);
+    const arqs = arquivosDoPasso(metas, comp, cfg.id);
     if (conferir && !conferir()) return null;
     const falta = [];
-    if (!arqs.agingAnterior) falta.push('o aging (contas a pagar) de ' + U.nomeCompetencia(U.somarMeses(comp, -1)));
-    if (!arqs.agingAtual) falta.push('o aging (contas a pagar) de ' + U.nomeCompetencia(comp));
-    if (!arqs.razao) falta.push('o razão de fornecedores de ' + U.nomeCompetencia(comp));
-    if (falta.length) return { emp, comp, falta };
+    if (!arqs.agingAnterior) falta.push('o ' + cfg.nomeAging + ' de ' + U.nomeCompetencia(U.somarMeses(comp, -1)));
+    if (!arqs.agingAtual) falta.push('o ' + cfg.nomeAging + ' de ' + U.nomeCompetencia(comp));
+    if (!arqs.razao) falta.push('o ' + cfg.nomeRazao + ' de ' + U.nomeCompetencia(comp));
+    if (falta.length) return { emp, comp, falta, cfg };
     const carregar = async (m) => ({ meta: m, conteudo: await arm.conteudoDoArquivo(m.id) });
     const [aAnt, aAtu, raz] = await Promise.all([carregar(arqs.agingAnterior), carregar(arqs.agingAtual), carregar(arqs.razao)]);
     if (conferir && !conferir()) return null;
 
-    const idReg = 'F-' + codigo + '-fornecedor_pagar-' + anoMes;
+    const idReg = idDoRegistro(codigo, anoMes, cfg);
     const concs = await arm.conciliacoes(codigo, comp);
-    const registro = concs.find((c) => c.id === idReg) || { id: idReg, codigo, tipo: 'fornecedor_pagar', competencia: comp, situacao: 'andamento', arquivos: [], decisoes: {}, resumo: {} };
+    const registro = concs.find((c) => c.id === idReg) || { id: idReg, codigo, tipo: cfg.tipo, competencia: comp, situacao: 'andamento', arquivos: [], decisoes: {}, resumo: {} };
     const d = registro.decisoes || {};
     const decisoes = { donos: d.donos || {}, conciliadas: d.conciliadas || [], observacoes: d.observacoes || {}, conciliacoesAB: d.conciliacoesAB || [], historico: d.historico || [], inicio: d.inicio || null };
     // Mês anterior: o que ficou em aberto nele, para "continuar da conciliação anterior".
-    const anterior = (opcoes && opcoes.semAnterior) ? null : await pendenciasDoMesAnterior(codigo, comp);
+    const anterior = (opcoes && opcoes.semAnterior) ? null : await pendenciasDoMesAnterior(codigo, comp, cfg);
     if (conferir && !conferir()) return null;
     const entrada = {
-      competencia: comp, natureza: 'fornecedores',
+      competencia: comp, natureza: cfg.natureza,
       mesAnterior: U.nomeCompetencia(U.somarMeses(comp, -1)), mesAtual: U.nomeCompetencia(comp),
       contaRazao: { conta: raz.conteudo.conta, lancamentos: raz.conteudo.conta.lancamentos },
       agingAnterior: aAnt.conteudo, agingAtual: aAtu.conteudo, decisoes,
@@ -74,43 +100,46 @@
     const itens = M.itensAB(entrada, r);
     const arrumado = M.arrumarGruposAB(decisoes.conciliacoesAB, itens.legado);
     decisoes.conciliacoesAB = arrumado.grupos;
-    return { emp, comp, arquivos: { aAnt, aAtu, raz }, registro, entrada, decisoes, r, itens, arrumou: arrumado.mudou, anterior };
+    return { emp, comp, arquivos: { aAnt, aAtu, raz }, registro, entrada, decisoes, r, itens, arrumou: arrumado.mudou, anterior, cfg };
   }
 
-  // Pendências do mês anterior (o que ficou em aberto na A e na B dele). Vêm do registro do
-  // mês anterior; registro de antes desta versão (sem pendências) é calculado com os arquivos
-  // dele, do zero. Sem conciliação no mês anterior não há do que continuar.
-  async function pendenciasDoMesAnterior(codigo, comp) {
+  function idDoRegistro(codigo, anoMes, cfg) { return 'F-' + codigo + '-' + cfg.tipo + '-' + anoMes; }
+
+  // Pendências do mês anterior (o que ficou em aberto na A e na B dele), do MESMO passo. Vêm do
+  // registro do mês anterior; registro de antes desta versão (sem pendências) é calculado com os
+  // arquivos dele, do zero. Sem conciliação no mês anterior não há do que continuar.
+  async function pendenciasDoMesAnterior(codigo, comp, cfg) {
     const arm = app().armazenamento;
     const compAnt = U.somarMeses(comp, -1);
-    const idAnt = 'F-' + codigo + '-fornecedor_pagar-' + U.anoMes(compAnt);
+    const idAnt = idDoRegistro(codigo, U.anoMes(compAnt), cfg);
     const reg = (await arm.conciliacoes(codigo, compAnt)).find((c) => c.id === idAnt) || null;
     if (!reg) return { competencia: compAnt, pendencias: null };
     if (reg.pendencias) return { competencia: compAnt, pendencias: reg.pendencias, registro: reg };
-    const dadosAnt = await carregarDados(codigo, U.anoMes(compAnt), null, { semAnterior: true });
+    const dadosAnt = await carregarDados(codigo, U.anoMes(compAnt), null, { semAnterior: true, passo: cfg.id });
     if (!dadosAnt || dadosAnt.erro || dadosAnt.falta) return { competencia: compAnt, pendencias: null, registro: reg };
     return { competencia: compAnt, pendencias: M.pendenciasAB(dadosAnt.itens, dadosAnt.decisoes.conciliacoesAB, compAnt), registro: reg, calculado: true };
   }
 
-  async function mostrar(el, codigo, anoMes, conferir) {
+  async function mostrar(el, codigo, anoMes, conferir, passoId) {
+    const cfg = configDoPasso(passoId);
     const comp = anoMes + '-01';
     const voltar = '#/empresa/' + encodeURIComponent(codigo) + '/fornecedores/' + anoMes;
-    T.carregando(el, 'Abrindo o Passo ③ de ' + U.nomeCompetencia(comp) + '…');
-    const dados = await carregarDados(codigo, anoMes, conferir);
+    T.carregando(el, 'Abrindo o Passo ' + cfg.numero + ' de ' + U.nomeCompetencia(comp) + '…');
+    const dados = await carregarDados(codigo, anoMes, conferir, { passo: cfg.id });
     if (!dados) return;
     if (dados.erro) { el.innerHTML = '<div class="aviso ambar">' + T.esc(dados.erro) + ' <a href="#/">Voltar</a></div>'; return; }
     if (dados.falta) {
       el.innerHTML = '<a class="voltar" href="' + voltar + '">← Fornecedores · ' + U.nomeCompetencia(comp) + '</a>' +
-        '<div class="aviso ambar"><span class="icone-aviso">📄</span><div><b>Falta arquivo para o Passo ③.</b><br>Suba ' + dados.falta.map(T.esc).join(', ') + '. ' +
+        '<div class="aviso ambar"><span class="icone-aviso">📄</span><div><b>Falta arquivo para o Passo ' + cfg.numero + ' · ' + T.esc(cfg.titulo) + '.</b><br>Suba ' + dados.falta.map(T.esc).join(', ') + '. ' +
         '<a href="' + voltar + '">Subir arquivos</a></div></div>';
       return;
     }
 
     el.innerHTML = '<div class="tela-passo3"></div>';
     E = {
-      el: el.firstChild, codigo, comp, emp: dados.emp, voltar, registro: dados.registro,
+      el: el.firstChild, codigo, comp, emp: dados.emp, voltar, registro: dados.registro, cfg,
       arquivos: dados.arquivos, entrada: dados.entrada, decisoes: dados.decisoes,
-      aba: app().lerLocal('conciliador-solutta.aba-passo3') || 'ab',
+      aba: app().lerLocal('conciliador-solutta.aba-' + cfg.id) || 'ab',
       filtros: {}, abertos: new Set(), guardadoEm: dados.registro.atualizadoEm || null, fila: Promise.resolve(),
       incluirAnterior: app().lerLocal('conciliador-solutta.ab-anterior') !== '0',
       selA: new Set(), selB: new Set(), abertosAB: new Set(), idDoItem: new Map(),
@@ -125,14 +154,17 @@
     if (dados.arrumou || (dados.registro.atualizadoEm && JSON.stringify(dados.registro.pendencias || null) !== pendenciasDeAgora)) gravar(null);
   }
 
-  // Escolhe os arquivos do ③: aging do mês, aging do mês passado e o razão de fornecedores.
-  function arquivosDoTerceiro(metas, comp) {
+  // Escolhe os arquivos de um passo A × B: aging do mês, aging do mês passado e o razão da conta.
+  //  ③: contas a pagar + razão de fornecedores · ②: aging de adiantamentos + razão de adiantamento.
+  function arquivosDoPasso(metas, comp, passoId) {
+    const cfg = configDoPasso(passoId);
     const compAnt = U.somarMeses(comp, -1);
     const maisNovo = (lista) => lista.slice().sort((a, b) => U.paraMs(b.enviadoEm) - U.paraMs(a.enviadoEm))[0] || null;
-    const pagar = (c) => metas.filter((m) => m.tipo === 'financeiro_pagar' && m.competencia === c);
-    const razoes = (c) => metas.filter((m) => m.tipo === 'razao' && m.conta && m.conta.familia === 'fornecedores' && m.conta.papel === 'principal' && m.competencia === c);
-    return { agingAnterior: maisNovo(pagar(compAnt)), agingAtual: maisNovo(pagar(comp)), razao: maisNovo(razoes(comp)) };
+    const agings = (c) => metas.filter((m) => m.tipo === cfg.tipoFinanceiro && m.competencia === c);
+    const razoes = (c) => metas.filter((m) => m.tipo === 'razao' && m.conta && m.conta.familia === 'fornecedores' && m.conta.papel === cfg.papelRazao && m.competencia === c);
+    return { agingAnterior: maisNovo(agings(compAnt)), agingAtual: maisNovo(agings(comp)), razao: maisNovo(razoes(comp)) };
   }
+  function arquivosDoTerceiro(metas, comp) { return arquivosDoPasso(metas, comp, 'passo3'); }
 
   function calcular() {
     E.entrada.decisoes = E.decisoes;
@@ -178,12 +210,12 @@
     const r = E.r;
     E.el.innerHTML =
       '<a class="voltar" href="' + E.voltar + '">← Fornecedores · ' + U.nomeCompetencia(E.comp) + '</a>' +
-      '<div class="cabecalho"><div class="titulos"><h1>Passo ③ · Fornecedores × contas a pagar</h1>' +
+      '<div class="cabecalho"><div class="titulos"><h1>Passo ' + E.cfg.numero + ' · ' + T.esc(E.cfg.titulo) + '</h1>' +
       '<p class="suave">' + T.esc(E.emp.codigo + ' · ' + E.emp.nome) + ' · ' + U.nomeCompetencia(E.comp) + '</p>' +
       '<p class="suave pequeno">Conta ' + T.esc(r.conta.codigo + ' · ' + r.conta.nome) + ' · aging de ' + T.esc(E.entrada.mesAnterior) + ' e de ' + T.esc(E.entrada.mesAtual) + '</p></div>' +
       '<div class="linha-flex" style="gap:12px"><span class="guardado" id="guardado" title="Cada decisão é gravada na hora">' + (E.guardadoEm ? 'guardado às ' + U.horaLocal(E.guardadoEm) : 'nenhuma decisão tomada ainda') + '</span>' +
-      '<a class="botao pequeno" href="#/empresa/' + encodeURIComponent(E.codigo) + '/fornecedores/' + U.anoMes(E.comp) + '/passo3-relatorio" title="Relatório da conciliação para imprimir, salvar em PDF ou baixar em Excel">📄 Relatório</a>' +
-      '<button type="button" class="botao pequeno perigo" data-acao="limpar-conciliacao" title="Apagar tudo o que foi feito no Passo ③ de um mês e começar do zero">🧹 Limpar conciliação</button></div></div>' +
+      '<a class="botao pequeno" href="#/empresa/' + encodeURIComponent(E.codigo) + '/fornecedores/' + U.anoMes(E.comp) + '/' + E.cfg.id + '-relatorio" title="Relatório da conciliação para imprimir, salvar em PDF ou baixar em Excel">📄 Relatório</a>' +
+      '<button type="button" class="botao pequeno perigo" data-acao="limpar-conciliacao" title="Apagar tudo o que foi feito neste passo num mês e começar do zero">🧹 Limpar conciliação</button></div></div>' +
       desenharPonte() +
       '<div class="abas" id="abas" role="tablist"></div>' +
       '<div class="filtros" id="filtros"></div>' +
@@ -212,7 +244,7 @@
     return '<div class="cartao corpo" style="margin-bottom:14px;border-left:4px solid var(--' + (bate ? 'verde' : 'vermelho') + ')">' +
       '<div class="ponte">' +
       pedaco(rotuloInicial, p.anterior, dicaInicial) +
-      ' <b>+</b> ' + pedaco('Movimento do razão', p.movimento, 'notas (' + T.moeda(p.notas) + ') menos baixas (' + T.moeda(p.baixas) + ') do mês') +
+      ' <b>+</b> ' + pedaco('Movimento do razão', p.movimento, E.cfg.aumentos + ' (' + E.cfg.ladoAumento + ', ' + T.moeda(p.notas) + ') menos ' + E.cfg.reducoes + ' (' + E.cfg.ladoReducao + ', ' + T.moeda(p.baixas) + ') do mês') +
       ' <b>=</b> ' + pedaco('Esperado (contabilidade)', p.esperado, 'é o que o balancete tem que mostrar', 'forte') +
       seta + pedaco('Aging ' + E.entrada.mesAtual, p.atual, 'o que está em aberto agora') +
       '</div>' +
@@ -252,8 +284,8 @@
     { id: 'agingAtu', titulo: 'Aging ' + E.entrada.mesAtual },
   ];
   // Abas ocultas nesta empresa (Dony, 14/09/2026: "não eliminar, deixar ocultos"). Guardadas no
-  // cadastro da empresa: { passo3: [...] }. "Conciliar A × B" sempre aparece.
-  function abasOcultas() { return new Set(((E.emp && E.emp.abasOcultas) || {}).passo3 || []); }
+  // cadastro da empresa, por passo: { passo3: [...], passo2: [...] }. "Conciliar A × B" sempre aparece.
+  function abasOcultas() { return new Set(((E.emp && E.emp.abasOcultas) || {})[E.cfg.id] || []); }
 
   function desenharAbas() {
     const ocultas = abasOcultas();
@@ -267,7 +299,7 @@
   async function configurarAbas() {
     const ocultas = abasOcultas();
     const escolha = await T.janela({
-      titulo: 'Abas do Passo ③ nesta empresa',
+      titulo: 'Abas do Passo ' + E.cfg.numero + ' nesta empresa',
       corpo: '<p class="suave" style="margin-bottom:8px;line-height:1.5">Desmarque as abas que esta empresa não usa. Elas ficam <b>ocultas</b> (nada é apagado) e voltam quando você marcar de novo.</p>' +
         '<label class="item-aba"><input type="checkbox" checked disabled> <b>Conciliar A × B</b> <span class="suave pequeno">sempre aparece</span></label>' +
         ABAS().filter((a) => a.id !== 'ab').map((a) => '<label class="item-aba"><input type="checkbox" data-aba-visivel="' + a.id + '"' + (ocultas.has(a.id) ? '' : ' checked') + '> ' + T.esc(a.titulo) + '</label>').join(''),
@@ -279,13 +311,13 @@
     try {
       // Reler antes de gravar: outra pessoa pode ter mexido no cadastro.
       const emp = (await arm.empresas()).find((e) => String(e.codigo) === String(E.codigo));
-      const todas = Object.assign({}, emp.abasOcultas || {}, { passo3: escolha });
+      const todas = Object.assign({}, emp.abasOcultas || {}, { [E.cfg.id]: escolha });
       const salvo = await arm.salvarEmpresa(Object.assign({}, emp, { abasOcultas: todas }));
       E.emp = salvo;
       const i = app().empresas.findIndex((e) => String(e.codigo) === String(E.codigo));
       if (i >= 0) app().empresas[i] = salvo;
-      await arm.registrarNoLog({ codigo: E.codigo, acao: 'abas-ocultas', alvo: 'passo3', detalhe: escolha.join(', ') || '(nenhuma)' });
-      if (escolha.indexOf(E.aba) >= 0) { E.aba = 'ab'; app().gravarLocal('conciliador-solutta.aba-passo3', 'ab'); }
+      await arm.registrarNoLog({ codigo: E.codigo, acao: 'abas-ocultas', alvo: E.cfg.id, detalhe: escolha.join(', ') || '(nenhuma)' });
+      if (escolha.indexOf(E.aba) >= 0) { E.aba = 'ab'; app().gravarLocal('conciliador-solutta.aba-' + E.cfg.id, 'ab'); }
       E.el.querySelector('.cartao.corpo').outerHTML = '';
       E.el.querySelector('#abas').insertAdjacentHTML('beforebegin', desenharPonte());
       desenharAbas();
@@ -329,12 +361,12 @@
   const TIPO_AB = { AxA: 'A×A', AxB: 'A×B', BxB: 'B×B' };
   const COMO_AB = M.COMO_AB; // rótulo curto de cada regra (definido no motor)
 
-  const NOME_FONTE = { anterior: 'aging', atual: 'aging', nota: 'razão · nota', baixa: 'razão · baixa' };
+  function nomeDaFonte(fonte) { return fonte === 'nota' ? 'razão · ' + E.cfg.aumento : fonte === 'baixa' ? 'razão · ' + E.cfg.reducao : 'aging'; }
   function rotuloFonte(x) {
     if (x.fonte === 'anterior') return 'aging ' + E.entrada.mesAnterior;
     if (x.fonte === 'atual') return 'aging ' + E.entrada.mesAtual;
-    if (x.fonte === 'pendente') return 'pendente de ' + U.nomeCompetencia(x.origem) + (x.fonteOriginal ? ' · ' + (NOME_FONTE[x.fonteOriginal] || x.fonteOriginal) : '');
-    return x.fonte === 'nota' ? 'razão · nota' : 'razão · baixa';
+    if (x.fonte === 'pendente') return 'pendente de ' + U.nomeCompetencia(x.origem) + (x.fonteOriginal ? ' · ' + nomeDaFonte(x.fonteOriginal) : '');
+    return nomeDaFonte(x.fonte);
   }
   // Na tabela estreita de cada parte: "aging jun/26", "nota", "baixa", "pend. jul/26".
   function rotuloCurto(x) {
@@ -342,7 +374,7 @@
     if (x.fonte === 'anterior') return 'aging ' + curto(E.entrada.mesAnterior);
     if (x.fonte === 'atual') return 'aging ' + curto(E.entrada.mesAtual);
     if (x.fonte === 'pendente') return 'pend. ' + curto(U.nomeCompetencia(x.origem));
-    return x.fonte;
+    return x.fonte === 'nota' ? E.cfg.aumento : E.cfg.reducao;
   }
 
   // ------------------------------------------------------------------
@@ -366,10 +398,10 @@
     const mesAnt = T.esc(U.nomeCompetencia(ant.competencia)), mes = T.esc(U.nomeCompetencia(E.comp));
     const v = valoresDoInicio();
     const dinheiro = (c) => U.formatarCentavos(c);
-    // Mês anterior sem conciliação no Passo ③: só dá para partir do aging.
+    // Mês anterior sem conciliação neste passo: só dá para partir do aging.
     if (!ant.pendencias) {
       return '<div class="linha-inicio">📄 Saldo inicial de ' + mes + ' <b>conforme o aging de ' + mesAnt + '</b> (' + dinheiro(v.pelaAging.valor) + '). ' +
-        '<span class="suave">Para usar o saldo conforme o razão de ' + mesAnt + ', concilie ' + mesAnt + ' no Passo ③.</span></div>';
+        '<span class="suave">Para usar o saldo conforme o razão de ' + mesAnt + ', concilie ' + mesAnt + ' no Passo ' + E.cfg.numero + '.</span></div>';
     }
     const p = ant.pendencias;
     // Mês anterior fechou sem nada em aberto: aging e razão dão o mesmo saldo, não há o que escolher.
@@ -602,7 +634,7 @@
       (grupos.length ? '<b>' + grupos.length.toLocaleString('pt-BR') + '</b> conciliação(ões) com ID: ' + conta('AxA') + ' A×A · ' + conta('AxB') + ' A×B' + (conta('BxB') ? ' · ' + conta('BxB') + ' B×B' : '') + ' · ' + aMao + ' à mão · em aberto: <b>' + ab.abertosA.length + '</b> na A e <b>' + ab.abertosB.length + '</b> na B. ' : 'Nada conciliado ainda. ') +
       'O <b>⚡ Conciliar</b> casa pelo <b>documento</b> — primeiro com o mesmo fornecedor, depois com o mesmo nome de fornecedor, depois só pelo documento — e dá um ID para cada conciliação (1, 2, 3…).' +
       (Math.abs(forcado) >= 1 ? ' <span class="falta">Conciliações à mão sem bater: ' + U.formatarCentavos(forcado) + '.</span>' : '') +
-      (conferir.length ? '<br><span style="color:var(--ambar)">⚠ Para conferir — baixa com data antes da nota:</span> ' +
+      (conferir.length ? '<br><span style="color:var(--ambar)">⚠ Para conferir — ' + E.cfg.avisoAntes + ':</span> ' +
         conferir.slice(0, 15).map((g) => '<button type="button" class="lapis" data-ver-id="' + g.id + '" title="Ver a conciliação #' + g.id + '"><b>#' + g.id + '</b></button>').join(' ') + (conferir.length > 15 ? ' …' : '') : '') +
       '</p></div>';
   }
@@ -678,7 +710,7 @@
           '<td class="num"><b>#' + g.id + '</b></td>' +
           '<td><span class="pilula ' + (g.tipo === 'AxB' ? 'azul' : 'cinza') + '">' + TIPO_AB[g.tipo] + '</span></td>' +
           '<td><span class="selo ' + (g.regra === 'manual' ? 'mao' : 'opcional') + '" title="' + T.esc(M.REGRAS_AB[g.regra] || '') + '">' + T.esc(COMO_AB[g.regra] || g.regra) + '</span>' +
-          (g.aviso === 'baixa-antes-da-nota' ? '<br><span class="selo suspeita" title="A baixa tem data anterior à nota (7.11): confira">baixa antes da nota</span>' : '') + '</td>' +
+          (g.aviso === 'baixa-antes-da-nota' ? '<br><span class="selo suspeita" title="' + primeiraMaiuscula(E.cfg.avisoAntes) + ' (7.11): confira">' + E.cfg.avisoCurto + '</span>' : '') + '</td>' +
           '<td class="num">' + T.nome(g.documento) + '</td>' +
           '<td class="nome">' + T.nome(g.nome) + (g.obs ? '<br><span class="suave pequeno">✎ ' + T.esc(g.obs) + '</span>' : '') +
           (faltam ? '<br><span class="falta pequeno">' + faltam + ' item(ns) não estão mais nos arquivos</span>' : '') + '</td>' +
@@ -736,17 +768,17 @@
   }
 
   // Limpar a conciliação de um mês (Dony, 14/09/2026: "escolho o mês da conciliação e limpo ela
-  // todinha"). Apaga o registro do Passo ③ desse mês: conciliações com ID (automáticas e à mão),
+  // todinha"). Apaga o registro deste passo nesse mês: conciliações com ID (automáticas e à mão),
   // observações e fornecedores ajustados à mão. Os arquivos continuam guardados; o registro vai
   // para _apagados (nada some de verdade).
   async function limparConciliacao() {
     const arm = app().armazenamento;
     let registros;
     try {
-      registros = (await arm.conciliacoes(E.codigo)).filter((c) => c.tipo === 'fornecedor_pagar')
+      registros = (await arm.conciliacoes(E.codigo)).filter((c) => c.tipo === E.cfg.tipo)
         .sort((a, b) => (a.competencia < b.competencia ? 1 : a.competencia > b.competencia ? -1 : 0));
     } catch (e) { T.avisoRapido(T.mensagemDeErro(e), 'erro'); return; }
-    if (!registros.length) { T.avisoRapido('Nenhuma conciliação do Passo ③ gravada nesta empresa: não há o que limpar.', 'ok'); return; }
+    if (!registros.length) { T.avisoRapido('Nenhuma conciliação do Passo ' + E.cfg.numero + ' gravada nesta empresa: não há o que limpar.', 'ok'); return; }
     const descreve = (c) => {
       const gs = (c.decisoes && c.decisoes.conciliacoesAB) || [];
       const mao = gs.filter((g) => g.regra === 'manual').length;
@@ -756,10 +788,10 @@
     const inicial = registros.find((c) => c.competencia === E.comp) || registros[0];
     const mesDe = (id) => U.nomeCompetencia((registros.find((c) => c.id === id) || inicial).competencia);
     const escolhido = await T.janela({
-      titulo: 'Limpar a conciliação do Passo ③',
+      titulo: 'Limpar a conciliação do Passo ' + E.cfg.numero + ' · ' + E.cfg.titulo,
       corpo: '<div class="campo"><label for="mes-limpar">Mês da conciliação</label><select id="mes-limpar">' +
         registros.map((c) => '<option value="' + T.esc(c.id) + '"' + (c === inicial ? ' selected' : '') + '>' + T.esc(descreve(c)) + '</option>').join('') + '</select></div>' +
-        '<p style="line-height:1.55;margin-top:12px">Apaga <b>tudo</b> o que foi feito no Passo ③ desse mês: as conciliações com ID (automáticas e à mão), as observações e os fornecedores ajustados à mão. Depois é como começar do zero.</p>' +
+        '<p style="line-height:1.55;margin-top:12px">Apaga <b>tudo</b> o que foi feito no Passo ' + E.cfg.numero + ' desse mês: as conciliações com ID (automáticas e à mão), as observações e os fornecedores ajustados à mão. Depois é como começar do zero.</p>' +
         '<p class="suave pequeno" style="line-height:1.5">Os arquivos (agings e razão) continuam guardados. Uma cópia do que foi apagado vai para a pasta <b>_apagados</b> da pasta de dados — nada some de verdade.</p>',
       botoes: [{ texto: 'Cancelar', valor: null }, { texto: 'Limpar ' + mesDe(inicial.id), tipo: 'perigo', antes: (j) => j.querySelector('#mes-limpar').value }],
       aoAbrir: (j) => {
@@ -853,7 +885,7 @@
       : '<p class="suave pequeno" style="margin:0 0 10px">Todos os fornecedores. <b>Aging ' + T.esc(E.entrada.mesAnterior) + ' + movimento = esperado</b>; a diferença é contra o aging ' + T.esc(E.entrada.mesAtual) + '.</p>';
     alvo.innerHTML = explica + '<div id="tab"></div>';
     T.tabelaPaginada(alvo.querySelector('#tab'), {
-      cabecalho: '<th style="width:24px"></th><th>Fornecedor</th><th>CNPJ</th><th class="num">' + T.esc(E.entrada.mesAnterior) + '</th><th class="num">Notas</th><th class="num">Baixas</th><th class="num">Movim.</th><th class="num">Esperado</th><th class="num">' + T.esc(E.entrada.mesAtual) + '</th><th class="num">Diferença</th><th>Situação</th><th></th>',
+      cabecalho: '<th style="width:24px"></th><th>Fornecedor</th><th>CNPJ</th><th class="num">' + T.esc(E.entrada.mesAnterior) + '</th><th class="num">' + primeiraMaiuscula(E.cfg.aumentos) + '</th><th class="num">' + primeiraMaiuscula(E.cfg.reducoes) + '</th><th class="num">Movim.</th><th class="num">Esperado</th><th class="num">' + T.esc(E.entrada.mesAtual) + '</th><th class="num">Diferença</th><th>Situação</th><th></th>',
       linhas: lista, porPagina: 200,
       vazio: soDiferencas ? 'Tudo batendo — nenhuma diferença. 🎉' : 'Nenhum fornecedor com estes filtros.',
       linha: (f) => {
@@ -872,6 +904,17 @@
     });
   }
 
+  // Colunas do razão no sentido da conta: ③ nota (crédito) e baixa (débito); ② adiantamento
+  // (débito) e compensação (crédito).
+  function cabecalhoRazao(comLado) {
+    const rot = (nome, lado) => primeiraMaiuscula(nome) + (comLado ? ' (' + lado.slice(0, 4) + '.)' : '');
+    return '<th class="num">' + rot(E.cfg.aumento, E.cfg.ladoAumento) + '</th><th class="num">' + rot(E.cfg.reducao, E.cfg.ladoReducao) + '</th>';
+  }
+  function tdsRazao(l) {
+    const lados = M.ladosDoRazao(E.cfg.natureza, l);
+    return T.tdValor(lados.aumento) + T.tdValor(lados.reducao);
+  }
+
   function detalheFornecedor(f) {
     const r = E.r;
     const rz = r.razPorChave.get(f.chave);
@@ -880,9 +923,9 @@
       '<div class="tabela-caixa"><table class="tabela"><thead><tr><th>Vencimento</th><th>Documento</th><th class="num">Valor</th></tr></thead><tbody>' +
       g.titulos.slice(0, 40).map((t) => '<tr><td class="num">' + T.esc(t.vencimento || '—') + '</td><td>' + T.nome(t.documento) + '</td>' + T.tdValor(t.valor) + '</tr>').join('') + '</tbody></table></div>' : '';
     const tabRaz = rz && rz.linhas.length ? '<p class="pequeno" style="margin:8px 0 4px"><b>Razão do mês</b> (' + rz.linhas.length + ' lançamentos)</p>' +
-      '<div class="tabela-caixa"><table class="tabela"><thead><tr><th>Data</th><th>NF/Doc</th><th class="historico">Histórico</th><th class="num">Nota (créd.)</th><th class="num">Baixa (déb.)</th><th></th></tr></thead><tbody>' +
+      '<div class="tabela-caixa"><table class="tabela"><thead><tr><th>Data</th><th>NF/Doc</th><th class="historico">Histórico</th>' + cabecalhoRazao(true) + '<th></th></tr></thead><tbody>' +
       rz.linhas.slice(0, 80).map((l) => '<tr><td class="num">' + T.esc(l.data) + '</td><td>' + T.nome(l.documento) + '</td><td class="historico">' + T.esc(l.historico) + '</td>' +
-        T.tdValor(l.credito) + T.tdValor(l.debito) + '<td><button type="button" class="lapis" data-dono-linha="' + l.i + '" title="Esta linha é de outro fornecedor">✎</button></td></tr>').join('') +
+        tdsRazao(l) + '<td><button type="button" class="lapis" data-dono-linha="' + l.i + '" title="Esta linha é de outro fornecedor">✎</button></td></tr>').join('') +
       '</tbody></table></div>' + (rz.linhas.length > 80 ? '<p class="suave pequeno">… e mais ' + (rz.linhas.length - 80) + '.</p>' : '') : '<p class="suave pequeno">Sem lançamentos no razão para este fornecedor.</p>';
     return tabRaz + tabTit('Aging ' + E.entrada.mesAnterior, a) + tabTit('Aging ' + E.entrada.mesAtual, at);
   }
@@ -891,10 +934,10 @@
     const linhas = E.r.semFornecedor.linhas.map((i) => E.r.linhas[i]);
     alvo.innerHTML = '<p class="suave pequeno" style="margin:0 0 8px">' + linhas.length + ' linha(s) do razão que o programa não conseguiu dizer de quem são. Clique no ✎ para dar o fornecedor.</p><div id="tab"></div>';
     T.tabelaPaginada(alvo.querySelector('#tab'), {
-      cabecalho: '<th>Data</th><th>NF/Doc</th><th class="historico">Histórico</th><th class="num">Nota</th><th class="num">Baixa</th><th></th>',
+      cabecalho: '<th>Data</th><th>NF/Doc</th><th class="historico">Histórico</th>' + cabecalhoRazao(false) + '<th></th>',
       linhas, vazio: 'Nenhuma linha sem fornecedor. 👍',
       linha: (l) => { const lc = E.arquivos.raz.conteudo.conta.lancamentos[l.i]; return '<tr><td class="num">' + T.esc(lc.data) + '</td><td>' + T.nome(M.documentoDaLinha(lc)) + '</td>' +
-        '<td class="historico">' + T.esc(lc.historico) + '</td>' + T.tdValor(lc.credito) + T.tdValor(lc.debito) +
+        '<td class="historico">' + T.esc(lc.historico) + '</td>' + tdsRazao(lc) +
         '<td><button type="button" class="botao pequeno" data-dono-linha="' + l.i + '">✎ dar fornecedor</button></td></tr>'; },
     });
   }
@@ -906,11 +949,11 @@
     const lista = E.r.linhas.filter((l) => { const d = E.r.porLinha.get(l.digital); return combina(busca, d.nome, l.historico) || (busca && M.documentoDaLinha(lancs[l.i]).indexOf(M.normalizarDocumento(busca) || busca) >= 0); });
     alvo.innerHTML = '<div id="tab"></div>';
     T.tabelaPaginada(alvo.querySelector('#tab'), {
-      cabecalho: '<th>Data</th><th>NF/Doc</th><th class="historico">Histórico</th><th>Fornecedor</th><th class="num">Nota</th><th class="num">Baixa</th><th></th>',
+      cabecalho: '<th>Data</th><th>NF/Doc</th><th class="historico">Histórico</th><th>Fornecedor</th>' + cabecalhoRazao(false) + '<th></th>',
       linhas: lista, porPagina: 300, vazio: 'Nenhuma linha.',
       linha: (l) => { const d = E.r.porLinha.get(l.digital); const lc = lancs[l.i]; return '<tr><td class="num">' + T.esc(lc.data) + '</td><td>' + T.nome(M.documentoDaLinha(lc)) + '</td>' +
         '<td class="historico">' + T.esc(lc.historico) + '</td><td class="nome">' + (d.chave === SEM ? '<span class="falta">sem fornecedor</span>' : T.esc(d.nome)) +
-        ' <button type="button" class="lapis" data-dono-linha="' + l.i + '">✎</button></td>' + T.tdValor(lc.credito) + T.tdValor(lc.debito) + '<td></td></tr>'; },
+        ' <button type="button" class="lapis" data-dono-linha="' + l.i + '">✎</button></td>' + tdsRazao(lc) + '<td></td></tr>'; },
     });
   }
 
@@ -948,7 +991,7 @@
 
   async function aoClicar(ev) {
     const aba = ev.target.closest('[data-aba]');
-    if (aba) { E.aba = aba.getAttribute('data-aba'); app().gravarLocal('conciliador-solutta.aba-passo3', E.aba); desenharAbas(); desenharAba(); return; }
+    if (aba) { E.aba = aba.getAttribute('data-aba'); app().gravarLocal('conciliador-solutta.aba-' + E.cfg.id, E.aba); desenharAbas(); desenharAba(); return; }
     const abrir = ev.target.closest('[data-abrir]');
     if (abrir) { const k = abrir.getAttribute('data-abrir'); if (E.abertos.has(k)) E.abertos.delete(k); else E.abertos.add(k); redesenhaMantendo(); return; }
     const conciliar = ev.target.closest('[data-conciliar]');
@@ -1090,5 +1133,5 @@
     });
   }
 
-  raiz.TelaPasso3 = { mostrar, arquivosDoTerceiro, carregarDados, modoDoInicio, estado: () => E, TIPO_AB, COMO_AB };
+  raiz.TelaPasso3 = { mostrar, arquivosDoTerceiro, arquivosDoPasso, carregarDados, modoDoInicio, configDoPasso, PASSOS_AB, estado: () => E, TIPO_AB, COMO_AB };
 })(self);

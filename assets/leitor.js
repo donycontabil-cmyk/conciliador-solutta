@@ -19,6 +19,7 @@
     razao: 'Razão contábil',
     financeiro_pagar: 'Contas a pagar em aberto',
     financeiro_receber: 'Contas a receber em aberto',
+    financeiro_adiantamento: 'Adiantamentos a fornecedores em aberto',
     balancete: 'Balancete',
     extrato: 'Extrato bancário',
     desconhecido: 'Arquivo não reconhecido',
@@ -79,6 +80,12 @@
     if (recFin.tipo) {
       const fin = LerFinanceiro.lerTitulos(planilha.abas);
       r.tipo = fin.tipo;
+      // Relatório de ADIANTAMENTOS (Passo ②) tem as mesmas colunas do contas a pagar: o nome do
+      // arquivo diz ("aging adiantamento 07.2026"). Na tela de subir dá para trocar o tipo.
+      if (r.tipo === 'financeiro_pagar' && /adiant/i.test(Util.semAcento(String(nomeArquivo || '')))) {
+        r.tipo = 'financeiro_adiantamento';
+        fin.tipo = 'financeiro_adiantamento';
+      }
       r.motivo = recFin.motivo;
       r.financeiro = fin;
       r.avisos = r.avisos.concat(fin.avisos);

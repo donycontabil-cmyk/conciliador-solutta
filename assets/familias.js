@@ -45,8 +45,8 @@
   // Cada regra: { familia, papel, teste(nomeNormalizado, classificacao) }.
   // A primeira que servir decide. Acrescentar um caso = acrescentar uma linha.
   const REGRAS_DE_PAPEL = [
-    { familia: 'fornecedores', papel: 'adiantamento', descricao: 'ADIANT + FORNEC',
-      teste: (n) => /ADIANT/.test(n) && /FORNEC/.test(n) },
+    { familia: 'fornecedores', papel: 'adiantamento', descricao: 'ADIANT + FORNEC; ou no ativo: ADIANT + PARCEIRO (como o "contas a pagar - parceiros")',
+      teste: (n, c) => /ADIANT/.test(n) && (/FORNEC/.test(n) || (/PARCEIRO/.test(n) && ativo(c))) },
     { familia: 'clientes', papel: 'adiantamento', descricao: 'ADIANT + CLIENTE, RECEBIMENTOS ANTECIPADOS, ADIANTAMENTOS RECEBIDOS',
       teste: (n) => (/ADIANT/.test(n) && /CLIENTE/.test(n)) || /RECEBIMENTOS? ANTECIPADOS?/.test(n) || /ADIANTAMENTOS? RECEBIDOS?/.test(n) },
     { familia: 'fornecedores', papel: 'principal', descricao: 'FORNECEDOR(ES); ou no passivo: PARCEIROS / (CONTAS|DUPLICATAS|TITULOS) A PAGAR, sem ADIANT',
@@ -100,8 +100,12 @@
           texto: 'Confere no razão novo se cada ajuste do ① entrou com valor, data e contas certas.', construido: false, etapa: 2 },
         { id: 'passo12', numero: '1.2', tipo: 'fornecedor_auditoria_razao', titulo: 'Auditoria do razão',
           texto: 'Guarda o razão final congelado e avisa quando alguém mexe num mês já fechado.', construido: false, etapa: 2 },
+        // Dony, 15/09/2026: "exatamente igual ao de fornecedores" — Parte A = aging de adiantamentos do
+        // mês passado + razão de adiantamento do mês; Parte B = aging de adiantamentos do mês.
         { id: 'passo2', numero: '②', tipo: 'adiantamento_financeiro', titulo: 'Adiantamento × financeiro',
-          texto: 'Confronta o adiantamento com o relatório de adiantamentos do financeiro. Regra a definir com o Dony.', construido: false, etapa: 2 },
+          texto: 'Aging de adiantamentos do mês passado + movimento do razão de adiantamento do mês = a contabilidade; a sobra bate com o aging de adiantamentos do mês.',
+          precisa: [{ papel: 'aging_anterior', texto: 'Aging de adiantamentos do mês passado' }, { papel: 'aging_atual', texto: 'Aging de adiantamentos do mês' }, { papel: 'razao_adiantamento', texto: 'Razão de adiantamento a fornecedores do mês' }],
+          construido: true, semChecklist: true },
         { id: 'passo3', numero: '③', tipo: 'fornecedor_pagar', titulo: 'Fornecedores × contas a pagar (aging)',
           texto: 'Aging do mês passado + movimento do razão do mês = a contabilidade; a sobra bate com o aging do mês. Fornecedor por fornecedor.',
           precisa: [{ papel: 'aging_anterior', texto: 'Aging (contas a pagar) do mês passado' }, { papel: 'aging_atual', texto: 'Aging (contas a pagar) do mês' }, { papel: 'razao_fornecedores', texto: 'Razão de fornecedores do mês' }],

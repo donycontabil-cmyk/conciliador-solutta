@@ -65,7 +65,7 @@
         '<p class="suave pequeno" style="margin-top:6px">Saldos no sentido débito − crédito (negativo = credor), como no razão.</p>' +
         '</div>';
     }
-    if (r.tipo === 'financeiro_pagar' || r.tipo === 'financeiro_receber') {
+    if (r.tipo === 'financeiro_pagar' || r.tipo === 'financeiro_receber' || r.tipo === 'financeiro_adiantamento') {
       const f = r.financeiro;
       // Aberto de uma competência (ex.: agosto): atalho para dizer se o aging é o do mês ou o do
       // mês anterior (Dony, 15/09/2026: "subir o aging do mês anterior, o do fechamento de julho").
@@ -78,6 +78,7 @@
       const sugeridas = competenciaDaTela ? [competenciaDaTela, U.somarMeses(competenciaDaTela, -1)] : [];
       return '<div class="cartao lido" data-i="' + i + '">' + cab + '<span class="pilula verde">' + T.esc(r.nomeDoTipo) + '</span></div>' +
         '<dl><dt>Tipo</dt><dd><select class="filtro" data-tipo="' + i + '"><option value="financeiro_pagar"' + (r.tipo === 'financeiro_pagar' ? ' selected' : '') + '>Contas a pagar em aberto</option>' +
+        '<option value="financeiro_adiantamento"' + (r.tipo === 'financeiro_adiantamento' ? ' selected' : '') + '>Adiantamentos a fornecedores em aberto (Passo ②)</option>' +
         '<option value="financeiro_receber"' + (r.tipo === 'financeiro_receber' ? ' selected' : '') + '>Contas a receber em aberto</option></select></dd>' +
         '<dt>Posição</dt><dd>' + (f.posicao ? T.esc(f.posicao) : '<span class="suave">o relatório não diz a data da posição</span>') + '</dd>' +
         '<dt>Competência</dt><dd><select class="filtro" data-competencia="' + i + '">' + opcoesDeCompetencia(r.competencia || competenciaDaTela, sugeridas) + '</select> ' +
@@ -144,7 +145,7 @@
     lidos.querySelectorAll('[data-competencia]').forEach((sel) => {
       lidos.querySelectorAll('[data-atalho-comp="' + sel.getAttribute('data-competencia') + '"]').forEach((b) => b.classList.toggle('primario', b.getAttribute('data-valor') === sel.value));
     });
-    const guardaveis = resultados.filter((r) => r.tipo === 'razao' || r.tipo === 'financeiro_pagar' || r.tipo === 'financeiro_receber').length;
+    const guardaveis = resultados.filter((r) => r.tipo === 'razao' || r.tipo === 'financeiro_pagar' || r.tipo === 'financeiro_receber' || r.tipo === 'financeiro_adiantamento').length;
     botaoGuardar.disabled = guardaveis === 0;
     botaoGuardar.textContent = guardaveis ? 'Guardar ' + (guardaveis > 1 ? 'os ' + guardaveis + ' arquivos reconhecidos' : 'o arquivo reconhecido') : 'Nada para guardar';
 
@@ -188,7 +189,7 @@
               else saida.push({ arquivo: r.nomeArquivo, tipo: 'verde', texto: 'Conta ' + c.codigo + ' ' + c.nome + ': guardado em ' + U.nomeCompetencia(comp) + ' (' + c.lancamentos.length.toLocaleString('pt-BR') + ' lançamentos).' });
             }
             if (!guardadas && !r.contas.length) saida.push({ arquivo: r.nomeArquivo, tipo: 'ambar', texto: 'Nenhuma conta encontrada.' });
-          } else if (r.tipo === 'financeiro_pagar' || r.tipo === 'financeiro_receber') {
+          } else if (r.tipo === 'financeiro_pagar' || r.tipo === 'financeiro_receber' || r.tipo === 'financeiro_adiantamento') {
             const selTipo = janelaEl.querySelector('[data-tipo="' + i + '"]');
             const tipo = selTipo ? selTipo.value : r.tipo;
             const f = r.financeiro;

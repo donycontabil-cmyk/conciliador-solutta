@@ -1,6 +1,7 @@
 /*
  * Conciliador Solutta — tela-relatorio3.js
- * Relatório da conciliação do Passo ③ (Conciliar A × B). Pedido do Dony (14/09/2026):
+ * Relatório da conciliação dos passos A × B (③ Fornecedores × contas a pagar e ② Adiantamento ×
+ * financeiro). Pedido do Dony (14/09/2026):
  * "relatórios da conciliação, bem bonito, demonstrando o que foi conciliado manualmente e o
  * que foi automático, agrupado por ID".
  * Uma folha pronta para imprimir ou salvar em PDF (quem faz o PDF é o próprio navegador) e
@@ -25,19 +26,20 @@
 
   let R = null; // estado desta tela
 
-  async function mostrar(el, codigo, anoMes, conferir) {
+  async function mostrar(el, codigo, anoMes, conferir, passoId) {
+    const cfg = raiz.TelaPasso3.configDoPasso(passoId);
     const comp = anoMes + '-01';
-    const voltar = '#/empresa/' + encodeURIComponent(codigo) + '/fornecedores/' + anoMes + '/passo3';
+    const voltar = '#/empresa/' + encodeURIComponent(codigo) + '/fornecedores/' + anoMes + '/' + cfg.id;
     T.carregando(el, 'Montando o relatório de ' + U.nomeCompetencia(comp) + '…');
-    const dados = await raiz.TelaPasso3.carregarDados(codigo, anoMes, conferir);
+    const dados = await raiz.TelaPasso3.carregarDados(codigo, anoMes, conferir, { passo: cfg.id });
     if (!dados) return;
     if (dados.erro) { el.innerHTML = '<div class="aviso ambar">' + T.esc(dados.erro) + ' <a href="#/">Voltar</a></div>'; return; }
     if (dados.falta) {
-      el.innerHTML = '<a class="voltar" href="' + voltar + '">← Passo ③ · ' + U.nomeCompetencia(comp) + '</a>' +
-        '<div class="aviso ambar"><span class="icone-aviso">📄</span><div><b>Sem relatório: falta arquivo para o Passo ③.</b><br>Suba ' + dados.falta.map(T.esc).join(', ') + '.</div></div>';
+      el.innerHTML = '<a class="voltar" href="' + voltar + '">← Passo ' + cfg.numero + ' · ' + U.nomeCompetencia(comp) + '</a>' +
+        '<div class="aviso ambar"><span class="icone-aviso">📄</span><div><b>Sem relatório: falta arquivo para o Passo ' + cfg.numero + '.</b><br>Suba ' + dados.falta.map(T.esc).join(', ') + '.</div></div>';
       return;
     }
-    R = { el, codigo, comp, voltar, dados, rel: M.relatorioAB(dados.itens, dados.decisoes.conciliacoesAB), opcoes: lerOpcoes(), emitido: U.agoraISO() };
+    R = { el, codigo, comp, voltar, dados, cfg, rel: M.relatorioAB(dados.itens, dados.decisoes.conciliacoesAB), opcoes: lerOpcoes(), emitido: U.agoraISO() };
     desenhar();
   }
 
@@ -76,12 +78,12 @@
   // Partes da folha
   // ------------------------------------------------------------------
   function nomeDoMes(x) { return U.nomeCompetencia(R.comp); }
-  const NOME_FONTE = { anterior: 'aging', atual: 'aging', nota: 'razão · nota', baixa: 'razão · baixa' };
+  function nomeDaFonte(fonte) { return fonte === 'nota' ? 'razão · ' + R.cfg.aumento : fonte === 'baixa' ? 'razão · ' + R.cfg.reducao : 'aging'; }
   function fonte(x) {
     if (x.fonte === 'anterior') return 'aging ' + R.dados.entrada.mesAnterior;
     if (x.fonte === 'atual') return 'aging ' + R.dados.entrada.mesAtual;
-    if (x.fonte === 'pendente') return 'pendente de ' + U.nomeCompetencia(x.origem) + (x.fonteOriginal ? ' · ' + (NOME_FONTE[x.fonteOriginal] || x.fonteOriginal) : '');
-    return x.fonte === 'nota' ? 'razão · nota' : 'razão · baixa';
+    if (x.fonte === 'pendente') return 'pendente de ' + U.nomeCompetencia(x.origem) + (x.fonteOriginal ? ' · ' + nomeDaFonte(x.fonteOriginal) : '');
+    return nomeDaFonte(x.fonte);
   }
   // De onde veio o saldo inicial da contabilidade: conforme o aging ou conforme o razão do mês anterior.
   function textoInicio() {
@@ -114,8 +116,8 @@
     return '<header class="rel-capa">' +
       '<div class="rel-topo"><div class="rel-marca"><span class="selo-marca">S</span>' + T.esc(cfg.programa || 'Conciliador Solutta') + '</div>' +
       '<div class="rel-sobretitulo">Relatório de conciliação</div></div>' +
-      '<h1>Fornecedores × contas a pagar</h1>' +
-      '<p class="rel-subtitulo">Passo ③ · Conciliar A × B · <b>' + T.esc(nomeDoMes()) + '</b></p>' +
+      '<h1>' + T.esc(R.cfg.titulo) + '</h1>' +
+      '<p class="rel-subtitulo">Passo ' + R.cfg.numero + ' · Conciliar A × B · <b>' + T.esc(nomeDoMes()) + '</b></p>' +
       '<dl class="rel-ficha">' + ficha.map((f) => '<div><dt>' + T.esc(f[0]) + '</dt><dd>' + T.esc(f[1]) + '</dd></div>').join('') + '</dl>' +
       '</header>';
   }
@@ -143,7 +145,7 @@
       (regras.length ? '<table class="rel-tab rel-regras"><thead><tr><th>Como o ⚡ Conciliar achou</th><th class="num">Conciliações</th><th class="num">Itens</th></tr></thead><tbody>' +
         regras.map((k) => '<tr><td><b>' + T.esc(COMO[k]) + '</b> <span class="suave">— ' + T.esc(M.REGRAS_AB[k] || '') + '</span></td><td class="num">' + rel.porRegra[k].conciliacoes + '</td><td class="num">' + rel.porRegra[k].itens + '</td></tr>').join('') +
         '</tbody></table>' : '') +
-      (t.paraConferir.length ? '<p class="rel-alerta">⚠ Para conferir — baixa com data antes da nota: ' + t.paraConferir.map((id) => '<b>#' + id + '</b>').join(', ') + '</p>' : '') +
+      (t.paraConferir.length ? '<p class="rel-alerta">⚠ Para conferir — ' + R.cfg.avisoAntes + ': ' + t.paraConferir.map((id) => '<b>#' + id + '</b>').join(', ') + '</p>' : '') +
       (t.comItemFaltando ? '<p class="rel-alerta">⚠ ' + t.comItemFaltando + ' conciliação(ões) com item que não está mais nos arquivos (arquivo trocado depois de conciliar).</p>' : '') +
       '</section>';
   }
@@ -174,7 +176,7 @@
     sub.push((manual ? 'Conciliado à mão por ' : 'Conciliado pelo ⚡ Conciliar · ') + quemQuando(g));
     if (!manual && M.REGRAS_AB[g.regra]) sub.push(T.esc(M.REGRAS_AB[g.regra]));
     if (g.obs) sub.push('✎ ' + T.esc(g.obs));
-    if (g.aviso === 'baixa-antes-da-nota') sub.push('<span class="rel-aviso">⚠ baixa com data antes da nota</span>');
+    if (g.aviso === 'baixa-antes-da-nota') sub.push('<span class="rel-aviso">⚠ ' + R.cfg.avisoAntes + '</span>');
     if (Math.abs(x.diferenca) >= 1) sub.push('<span class="negativo">diferença ' + dinheiro(x.diferenca) + '</span>');
     if (x.faltando) sub.push('<span class="negativo">' + x.faltando + ' item(ns) não estão mais nos arquivos</span>');
     return '<div class="rel-grupo' + (manual ? ' manual' : '') + '">' +
@@ -229,7 +231,7 @@
   // Imprimir / PDF e Excel
   // ------------------------------------------------------------------
   function nomeDoArquivo(extensao) {
-    return U.nomeSeguro('Conciliação ③ ' + R.dados.emp.codigo + ' ' + R.dados.emp.nome + ' ' + U.anoMes(R.comp), 90) + (extensao || '');
+    return U.nomeSeguro('Conciliação ' + R.cfg.numero + ' ' + R.dados.emp.codigo + ' ' + R.dados.emp.nome + ' ' + U.anoMes(R.comp), 90) + (extensao || '');
   }
 
   function imprimir() {
@@ -261,7 +263,7 @@
     }
 
     const cab = [
-      ['Relatório de conciliação — Passo ③ · Fornecedores × contas a pagar'],
+      ['Relatório de conciliação — Passo ' + R.cfg.numero + ' · ' + R.cfg.titulo],
       ['Empresa', d.emp.codigo + ' · ' + d.emp.nome],
       ['Competência', U.nomeCompetencia(R.comp)],
       ['Conta', (d.r.conta.codigo || '') + ' · ' + (d.r.conta.nome || '')],
@@ -295,7 +297,7 @@
         const g = x.grupo;
         for (const i of x.itens) {
           linhas.push([g.id, TIPO[g.tipo] || g.tipo, COMO[g.regra] || g.regra, g.documento || '', g.nome || '', reais(g.valorA), reais(g.valorB), g.quem || '',
-            g.quando ? U.dataHoraLocal(g.quando) : '', g.obs || '', g.aviso === 'baixa-antes-da-nota' ? 'baixa antes da nota' : '',
+            g.quando ? U.dataHoraLocal(g.quando) : '', g.obs || '', g.aviso === 'baixa-antes-da-nota' ? R.cfg.avisoCurto : '',
             i.faltando ? '' : i.lado, i.faltando ? '' : i.doc, i.faltando ? 'item não está mais nos arquivos' : fonte(i), i.faltando ? '' : (i.data || ''),
             i.faltando ? '' : (i.nome || ''), i.faltando ? i.id : (i.historico || ''), i.faltando ? '' : reais(i.valor)]);
         }

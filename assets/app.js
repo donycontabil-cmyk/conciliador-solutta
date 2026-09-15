@@ -146,8 +146,9 @@
       else if (r.nome === 'empresa') await raiz.TelaEmpresa.mostrar(conteudo, r.codigo, conferir);
       else if (r.nome === 'familia') await raiz.TelaFamilia.mostrar(conteudo, r.codigo, r.familia, r.anoMes, conferir);
       else if (r.nome === 'passo' && r.passo === 'passo1') await raiz.TelaPasso1.mostrar(conteudo, r.codigo, r.anoMes, conferir);
-      else if (r.nome === 'passo' && r.passo === 'passo3') await raiz.TelaPasso3.mostrar(conteudo, r.codigo, r.anoMes, conferir);
-      else if (r.nome === 'passo' && r.passo === 'passo3-relatorio') await raiz.TelaRelatorio3.mostrar(conteudo, r.codigo, r.anoMes, conferir);
+      // Passos no modelo "Conciliar A × B": ③ Fornecedores × contas a pagar e ② Adiantamento × financeiro.
+      else if (r.nome === 'passo' && (r.passo === 'passo3' || r.passo === 'passo2')) await raiz.TelaPasso3.mostrar(conteudo, r.codigo, r.anoMes, conferir, r.passo);
+      else if (r.nome === 'passo' && (r.passo === 'passo3-relatorio' || r.passo === 'passo2-relatorio')) await raiz.TelaRelatorio3.mostrar(conteudo, r.codigo, r.anoMes, conferir, r.passo.replace('-relatorio', ''));
       else conteudo.innerHTML = '<div class="aviso ambar">Esta tela não existe. <a href="#/">Voltar para as empresas</a>.</div>';
     } catch (e) {
       console.error(e);

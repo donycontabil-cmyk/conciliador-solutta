@@ -17,7 +17,7 @@
     }
     const arquivos = await app().armazenamento.arquivos(codigo);
     if (conferir && !conferir()) return;
-    const deFornecedores = arquivos.filter((a) => (a.conta && a.conta.familia === 'fornecedores') || a.tipo === 'financeiro_pagar');
+    const deFornecedores = arquivos.filter((a) => (a.conta && a.conta.familia === 'fornecedores') || a.tipo === 'financeiro_pagar' || a.tipo === 'financeiro_adiantamento');
     const competencias = Array.from(new Set(deFornecedores.map((a) => U.anoMes(a.competencia)))).sort().reverse();
     const detalhes = [emp.cnpj ? 'CNPJ ' + U.formatarCnpj(emp.cnpj) : null, emp.regime, emp.atividade, emp.grupo ? 'Grupo ' + emp.grupo : null].filter(Boolean);
 
