@@ -88,7 +88,85 @@
     return saldoAnterior && /(agencia|conta corrente|extrato)/.test(textoDasPrimeirasLinhas(abas, 15));
   }
 
+  // ------------------------------------------------------------------
+  // Contas a pagar de outro cliente real (16/09/2026 — "sempre vai ser enviado desta forma"): várias
+  // abas (Cash Report, Contas a Pagar em Aberto, Monthly Average, Pagar, Fornecedores) e SÓ a aba
+  // "Pagar" conta: Filial | Chave | Nº Documento | Fornecedor | Data de Entrada | Data de Vencimento |
+  // Valor Bruto | Data Pagamento | Valor Pago | Situação | Origem | Contabil | Tipo | … Entram só os
+  // títulos com Situação "Em Aberto" (coluna J) e Contabil "Outras Contas a Pagar" (coluna L) — regra
+  // do Dony. O Nº Documento traz a parcela ("3760204/1"): a nota vai no documento, a parcela à parte.
+  // ------------------------------------------------------------------
+  const REGRA_ABA_PAGAR = { situacao: 'em aberto', contabil: 'outras contas a pagar', nomeContabil: 'Outras Contas a Pagar' };
+
+  function acharAbaPagar(abas) {
+    for (let a = 0; a < abas.length; a++) {
+      if (!/^pagar$/i.test(String(abas[a].nome || '').trim())) continue;
+      const linhas = abas[a].linhas;
+      for (let r = 0; r < Math.min(20, linhas.length); r++) {
+        const chaves = (linhas[r] || []).map(chaveTitulo);
+        const col = (nome) => { const i = chaves.indexOf(nome); return i >= 0 ? i : undefined; };
+        const m = { nome: col('fornecedor'), valor: col('valorbruto'), vencimento: col('datadevencimento'), documento: col('ndocumento'),
+          status: col('situacao'), contabil: col('contabil') };
+        if (m.nome !== undefined && m.valor !== undefined && m.status !== undefined && m.contabil !== undefined) return { aba: a, linha: r, mapa: m };
+      }
+    }
+    return null;
+  }
+
+  function lerAbaPagar(abas, cab, opcoes) {
+    const linhas = abas[cab.aba].linhas;
+    const mapa = cab.mapa;
+    const texto = (l, i) => (i === undefined || l[i] === null || l[i] === undefined ? '' : String(l[i]).replace(/\s+/g, ' ').trim());
+    const norm = (v) => Util.semAcento(v).toLowerCase();
+    const titulos = [];
+    const descartados = [];
+    const fora = {}; // motivo -> quantidade (milhares de títulos pagos: só a conta, sem a lista)
+    for (let r = cab.linha + 1; r < linhas.length; r++) {
+      const l = linhas[r];
+      if (!l || !l.some((c) => c !== null && String(c).trim() !== '')) continue;
+      const situacao = texto(l, mapa.status);
+      const contabil = texto(l, mapa.contabil);
+      if (norm(situacao) !== REGRA_ABA_PAGAR.situacao) {
+        const m = 'Situação "' + (situacao || 'vazia') + '" (não está em aberto)';
+        fora[m] = (fora[m] || 0) + 1;
+        continue;
+      }
+      if (norm(contabil) !== REGRA_ABA_PAGAR.contabil) {
+        const m = 'Contabil "' + (contabil || 'vazio') + '" (só entra ' + REGRA_ABA_PAGAR.nomeContabil + ')';
+        fora[m] = (fora[m] || 0) + 1;
+        continue;
+      }
+      const nome = texto(l, mapa.nome);
+      const valor = Util.paraNumero(l[mapa.valor]);
+      const textoLinha = l.filter((c) => c !== null).map(String).join(' | ');
+      if (valor === null) { descartados.push({ linha: r + 1, motivo: 'em aberto sem valor', texto: textoLinha }); continue; }
+      if (!nome) { descartados.push({ linha: r + 1, motivo: 'em aberto sem fornecedor', texto: textoLinha }); continue; }
+      const venc = mapa.vencimento !== undefined ? Util.lerData(l[mapa.vencimento]) : null;
+      const doc = Util.separarDocumento(texto(l, mapa.documento));
+      titulos.push({
+        nome, cnpj: '', cnpjValido: false, valor: Util.centavos(valor),
+        vencimento: venc ? venc.texto : '', documento: doc.documento, parcela: doc.parcela,
+        status: situacao, contabil,
+      });
+    }
+    Object.keys(fora).forEach((m) => descartados.push({ linha: null, motivo: m, quantidade: fora[m], texto: '' }));
+    return {
+      tipo: (opcoes && opcoes.tipo) || 'financeiro_pagar',
+      titulos,
+      total: titulos.reduce((t, x) => t + x.valor, 0),
+      descartados,
+      avisos: [],
+      posicao: null,
+      formato: 'aba "' + abas[cab.aba].nome + '": Situação Em Aberto e Contabil ' + REGRA_ABA_PAGAR.nomeContabil,
+    };
+  }
+
   function reconhecer(abas) {
+    const pagar = acharAbaPagar(abas);
+    if (pagar) {
+      return { tipo: 'financeiro_pagar', certeza: true, cabecalho: pagar, abaPagar: true,
+        motivo: 'Contas a pagar (aba "' + abas[pagar.aba].nome + '"): só os títulos com Situação Em Aberto e Contabil ' + REGRA_ABA_PAGAR.nomeContabil + '.' };
+    }
     const cab = acharCabecalho(abas);
     if (!cab) return { tipo: null, motivo: 'Não achei o cabeçalho de um relatório de títulos (nome, valor e vencimento ou documento) nas primeiras 20 linhas.' };
     const texto = textoDasPrimeirasLinhas(abas, cab.linha + 1);
@@ -105,6 +183,7 @@
   function lerTitulos(abas, opcoes) {
     const rec = reconhecer(abas);
     if (!rec.tipo) throw new Error(rec.motivo);
+    if (rec.abaPagar) return lerAbaPagar(abas, rec.cabecalho, opcoes);
     const { aba, linha: linhaCab, mapa } = rec.cabecalho;
     const linhas = abas[aba].linhas;
     const titulos = [];

@@ -237,6 +237,19 @@
 
   function soDigitos(s) { return String(s === null || s === undefined ? '' : s).replace(/\D+/g, ''); }
 
+  // Nº do documento com a parcela junto (contas a pagar de um cliente real, 16/09/2026):
+  // "3760204/1" -> nota 3760204, parcela 1; "62026/1/R1" -> 62026, "1/R1" (renegociado);
+  // "42092/ 42093/ COMPL/R1" -> "42092/ 42093/ COMPL", "R1"; "A24864" fica como está.
+  // Parcela = número curto (até 3 dígitos) depois da barra, com o "/R<n>" da renegociação.
+  function separarDocumento(s) {
+    const t = String(s === null || s === undefined ? '' : s).replace(/\s+/g, ' ').trim();
+    let m = t.match(/^([A-Za-z]?\d+)\s*\/\s*(\d{1,3}(?:\s*\/\s*R\d*)?)$/i);
+    if (m) return { documento: m[1], parcela: m[2].replace(/\s+/g, '').toUpperCase() };
+    m = t.match(/^(.*?)\s*\/\s*(R\d*)$/i);
+    if (m && m[1]) return { documento: m[1], parcela: m[2].toUpperCase() };
+    return { documento: t, parcela: '' };
+  }
+
   // ------------------------------------------------------------------
   // CNPJ e CPF
   // Parte 4: CNPJ só vale com dígito verificador válido (número de nota com 14
@@ -357,7 +370,7 @@
     MESES, dataValida, montarData, dataDeSerie, lerData, dataDeNumero, hoje,
     competenciaDe, partesCompetencia, inicioDaCompetencia, fimDaCompetencia, somarMeses,
     nomeCompetencia, anoMes, agoraISO, paraMs, horaLocal, dataHoraLocal,
-    semAcento, normalizarTitulo, normalizarNome, consertarAE, soDigitos,
+    semAcento, normalizarTitulo, normalizarNome, consertarAE, soDigitos, separarDocumento,
     dvCnpj, limparCnpj, cnpjValido, cnpjMatriz, formatarCnpj, cpfValido, formatarCpf,
     hash8, hashBytes, nomeSeguro, escaparHtml,
   };

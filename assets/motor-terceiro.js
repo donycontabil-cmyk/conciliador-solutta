@@ -64,7 +64,10 @@
   //     "BAIXA POR COMPENSAÇÃO NA TOP 1703 81" a nota é a 81 (1703 é a operação; a coluna
   //     Núm. Documento traz o número da compensação, que não existe no aging) — regra do Dony;
   //  3) senão, a coluna Núm. Documento ("DESPESAS COM 072026", "RENEGOCIAÇÃO ... 062026").
+  // Quando o leitor já tirou a nota do histórico (razão por contrapartida, 16/09/2026: "Compra cfe
+  // 52919516 de …", "PAGAMENTO DOC 158467/1 DE …"), vale a dele (l.nota).
   function documentoDaLinha(l) {
+    if (l.nota) return normalizarDocumento(l.nota);
     const h = documentoDoHistorico(l.historico);
     if (h) return normalizarDocumento(h);
     const top = Util.semAcento(String(l.historico || '')).toUpperCase().match(/COMPENSACAO\s+NA\s+TOP\s+\d+\s+0*(\d+)/);
@@ -454,7 +457,8 @@
         i, digital: base + '|' + n, conta: String(razao.conta.codigo || ''),
         dc: l.credito > 0 ? 'C' : 'D', dia: Util.montarData(l.dia, l.mes, l.ano).numero,
         debito: l.debito, credito: l.credito, historico: l.historico || '',
-        fornecedorDeclarado: { nome: fornecedorDoHistorico(l.historico) },
+        // O fornecedor que o leitor tirou do histórico (desenho E) vale; senão, depois da última vírgula.
+        fornecedorDeclarado: { nome: l.fornecedor !== undefined ? l.fornecedor : fornecedorDoHistorico(l.historico) },
       };
     });
 

@@ -42,15 +42,18 @@
   // Razão de adiantamento de um cliente real (15/09/2026, desenho D): "Cont. Contábil | [nome da conta,
   // sem título] | Cta Red.: | Dt. Movto | Lote | Lanç | C.P. Histórico | Documento | Débito |
   // Crédito | Saldo Acum. | D/C" — por isso "dtmovto", "cphistorico", "ctared", "contcontabil" e "saldoacum".
+  // Razão por contrapartida de outro cliente (16/09/2026, desenho E): "ID Documento | Data | … |
+  // Descrição Documento | Histórico | Contra-Partida | Descrição | R$ Débito | R$ Crédito | R$ Saldo".
   const SINONIMOS = {
     data: ['data', 'dt', 'datalanc', 'datadolancamento', 'datalancamento', 'datamovimento', 'datamov', 'dtmovto', 'dtmovimento', 'dtmov'],
-    numero: ['numero', 'num', 'lancamento', 'lanc', 'lcto', 'nlanc', 'nlancamento', 'numlancamento', 'lote', 'numlote'],
+    numero: ['numero', 'num', 'lancamento', 'lanc', 'lcto', 'nlanc', 'nlancamento', 'numlancamento', 'lote', 'numlote', 'iddocumento'],
     historico: ['complhis', 'complementohistorico', 'historicocomplemento', 'complemento', 'historico', 'historicos', 'cphistorico', 'cphist'],
     contrapartida: ['ctacpart', 'contrapartida', 'cpart', 'cpartida', 'ctacpartida', 'contracpartida', 'ccontrapartida', 'contacontrapartida', 'contacontabilcontrapartida'],
     filial: ['filial'],
-    debito: ['debito', 'debitos', 'valordebito', 'vlrdebito'],
-    credito: ['credito', 'creditos', 'valorcredito', 'vlrcredito'],
-    saldo: ['saldo', 'saldoatual', 'saldoacum', 'saldoacumulado'],
+    debito: ['debito', 'debitos', 'valordebito', 'vlrdebito', 'rdebito'],
+    credito: ['credito', 'creditos', 'valorcredito', 'vlrcredito', 'rcredito'],
+    saldo: ['saldo', 'saldoatual', 'saldoacum', 'saldoacumulado', 'rsaldo'],
+    descricaoDocumento: ['descricaodocumento'],
     saldoExercicio: ['saldoexercicio'],
     // Razão em LISTA (uma linha por lançamento, a conta numa coluna) — desenhos C e D (clientes reais).
     conta: ['contareduzida', 'contacontabil', 'contaredz', 'reduzida', 'ctared', 'ctareduzida', 'ctaredz', 'contared'],
@@ -378,11 +381,211 @@
     };
   }
 
+  // ------------------------------------------------------------------
+  // Desenho E — razão POR CONTRAPARTIDA de outro cliente real (16/09/2026, "o razão também tem uma
+  // estrutura diferente"): cabeçalho "ID Documento | Data | Dia | Mês | Ano | Descrição Documento |
+  // Histórico | Contra-Partida | Descrição | R$ Débito | R$ Crédito | R$ Saldo" e as linhas em blocos
+  // "Conta Contábil : 2.1.1.03.0003 Outras Contas a Pagar (débitos, créditos)". O arquivo é o razão de
+  // UMA conta: no bloco dela vêm os lançamentos a débito (a contrapartida na coluna Contra-Partida);
+  // cada outro bloco é uma conta de contrapartida e traz os lançamentos a crédito da conta (ali a
+  // coluna Contra-Partida repete a própria conta). Débito e crédito são sempre os da conta do razão.
+  // "SALDO INICIAL" numa linha do bloco dela; no fim, uma linha só com o total dos débitos e dos
+  // créditos. O saldo corrido (R$ Saldo) segue a ordem de data e ID: o da última linha é o saldo final.
+  // O histórico diz a nota e o fornecedor ("Compra cfe 52919516 de X", "PAGAMENTO DOC 158467/1 DE X",
+  // "Compensação 1307/1/R1 de X", "IRRF na Compra cfe 158797 DE X", "… S/ NF 7058/1 - X",
+  // "Juros no Pgto de documento 20268/1 de X", "DIFAL 82026 X").
+  // ------------------------------------------------------------------
+  const RE_BLOCO_E = /^\s*conta\s+cont[aá]bil\s*:\s*(\d+(?:\.\d+)+)\s+(.*?)\s*\(\s*(-?[\d.]*\d,\d{2})\s*,\s*(-?[\d.]*\d,\d{2})\s*\)\s*$/i;
+
+  function blocoE(linha) {
+    for (const c of celulasCheias(linha)) {
+      if (typeof c.v !== 'string') continue;
+      const m = c.v.match(RE_BLOCO_E);
+      if (m) return { classificacao: m[1], nome: m[2].replace(/\s+/g, ' ').trim(), debito: numeroDe(m[3]), credito: numeroDe(m[4]) };
+    }
+    return null;
+  }
+
+  function ehRazaoPorContrapartida(abas) {
+    return abas.some((a) => {
+      const rCab = a.linhas.findIndex((l) => l && ehCabecalho(l) && mapearCabecalho(l).contrapartida !== undefined);
+      return rCab >= 0 && a.linhas.slice(rCab + 1, rCab + 400).some((l) => l && blocoE(l));
+    });
+  }
+
+  // Nota (documento do título) e fornecedor lidos do histórico do desenho E.
+  const PADROES_E = [
+    /\bcompra\s+cfe\s+(\S+)\s+de\s+(.+)$/i,                 // Compra cfe N de X · IRRF / ISS / VLR INSS na compra cfe N de X
+    /^pagamento\s+doc\s+(.+?)\s+de\s+(.+)$/i,               // PAGAMENTO DOC 158467/1 DE X
+    /^compensa[çc][ãa]o\s+(.+?)\s+de\s+(.+)$/i,              // Compensação 1307/1/R1 de X
+    /\bdocumento\s+(\S+)\s+de\s+(.+)$/i,                    // Juros / Multa no Pgto de documento 20268/1 de X
+    /\bs\/\s*nf\s+(\S+)\s+-\s+(.+)$/i,                      // VLR REF. RETENÇÃO DE CRF (PIS) S/ NF 7058/1 - X
+    /\bdesconto\s+(\S+)\s+de\s+(.+)$/i,                     // VL REF. DESCONTO 1948/1 DE X
+    /^difal\s+(\S+)\s+(.+)$/i,                              // DIFAL 82026 X
+  ];
+  const SO_FORNECEDOR_E = [
+    /^estorno\s+de\s+adiantamento\s+de\s+(.+)$/i,           // ESTORNO DE ADIANTAMENTO DE X
+    /^adiantamento\s+a\s+(.+)$/i,                           // ADIANTAMENTO A X
+  ];
+  function limparFornecedorE(s) {
+    return String(s || '').replace(/^[\d.\/-]+\s+/, '').replace(/\s+\d{6,}$/, '').replace(/\s+/g, ' ').trim();
+  }
+  function notaEFornecedorE(historico, descricaoDocumento) {
+    const h = String(historico || '').replace(/\s+/g, ' ').trim();
+    for (const re of PADROES_E) {
+      const m = h.match(re);
+      if (m) return { nota: Util.separarDocumento(m[1]).documento, fornecedor: limparFornecedorE(m[2]) };
+    }
+    const nf = String(descricaoDocumento || '').match(/\bNF\s*N?[ºo°.]*\s*:?\s*([A-Za-z]?\d+)/i);
+    for (const re of SO_FORNECEDOR_E) {
+      const m = h.match(re);
+      if (m) return { nota: nf ? nf[1] : '', fornecedor: limparFornecedorE(m[1]) };
+    }
+    return { nota: nf ? nf[1] : '', fornecedor: '' };
+  }
+
+  function lerPorContrapartida(abas) {
+    const avisos = [];
+    let linhasIgnoradas = 0;
+    const blocos = [];
+    const lidas = [];
+    let saldoInicial = null, dataSaldoInicial = null, blocoSaldoInicial = null;
+    let totalD = null, totalC = null;
+    let info = { empresa: '', cnpj: '', periodo: null, titulo: '' };
+    const texto = (linha, i) => (i === undefined || linha[i] === null || linha[i] === undefined ? '' : String(linha[i]).replace(/\s+/g, ' ').trim());
+
+    for (const aba of abas) {
+      const linhas = aba.linhas;
+      const rCab = linhas.findIndex((l) => l && ehCabecalho(l) && mapearCabecalho(l).contrapartida !== undefined);
+      if (rCab < 0) continue;
+      const mapa = mapearCabecalho(linhas[rCab]);
+      const infoAba = lerCabecalhoDoRelatorio(linhas, rCab);
+      info = { empresa: info.empresa || infoAba.empresa, cnpj: info.cnpj || infoAba.cnpj, periodo: info.periodo || infoAba.periodo, titulo: info.titulo || infoAba.titulo };
+      // "ID Documento" é título de célula mesclada: o número pode vir na coluna seguinte (sem título).
+      if (mapa.numero !== undefined && !chaveTitulo(linhas[rCab][mapa.numero + 1])) {
+        const amostra = linhas.slice(rCab + 1, rCab + 300).filter((l) => l && mapa.data !== undefined && Util.lerData(l[mapa.data]));
+        const comNumero = (i) => amostra.filter((l) => /^\d+$/.test(texto(l, i))).length;
+        if (comNumero(mapa.numero + 1) > comNumero(mapa.numero)) mapa.numero = mapa.numero + 1;
+      }
+      let bloco = null;
+      for (let r = rCab + 1; r < linhas.length; r++) {
+        const linha = linhas[r];
+        if (!linha || !celulasCheias(linha).length || ehCabecalho(linha)) continue;
+        const b = blocoE(linha);
+        if (b) { bloco = Object.assign(b, { somaD: 0, somaC: 0 }); blocos.push(bloco); continue; }
+        const data = mapa.data !== undefined ? Util.lerData(linha[mapa.data]) : null;
+        const deb = mapa.debito !== undefined ? numeroDe(linha[mapa.debito]) : null;
+        const cred = mapa.credito !== undefined ? numeroDe(linha[mapa.credito]) : null;
+        const hist = texto(linha, mapa.historico);
+        const desc = texto(linha, mapa.descricaoDocumento);
+        if (/^saldo\s+inicial/i.test(desc) || /^saldo\s+inicial/i.test(hist)) {
+          if (saldoInicial === null) { saldoInicial = mapa.saldo !== undefined ? numeroDe(linha[mapa.saldo]) : null; dataSaldoInicial = data; blocoSaldoInicial = bloco; }
+          linhasIgnoradas++;
+          continue;
+        }
+        if (!data) {
+          if (deb !== null && cred !== null) { totalD = deb; totalC = cred; } // linha de totais do fim
+          linhasIgnoradas++;
+          continue;
+        }
+        if (!bloco || (deb === null && cred === null)) { linhasIgnoradas++; continue; }
+        bloco.somaD += deb || 0;
+        bloco.somaC += cred || 0;
+        lidas.push({ bloco, r, id: texto(linha, mapa.numero), data, desc, hist,
+          cp: texto(linha, mapa.contrapartida), cpNome: texto(linha, mapa.descricaoConta),
+          debito: deb || 0, credito: cred || 0, saldo: mapa.saldo !== undefined ? numeroDe(linha[mapa.saldo]) : null });
+      }
+    }
+
+    // A conta do razão: a que é contrapartida dos lançamentos dos OUTROS blocos (desempate: o bloco do saldo inicial).
+    const candidatos = blocos.map((b) => ({ classificacao: b.classificacao, nome: b.nome, bloco: b }));
+    const cps = new Map();
+    lidas.forEach((l) => { if (l.cp) cps.set(l.cp, { classificacao: l.cp, nome: l.cpNome, bloco: null }); });
+    cps.forEach((c) => { if (!candidatos.some((x) => x.classificacao === c.classificacao)) candidatos.push(c); });
+    let principal = null;
+    for (const c of candidatos) {
+      const outras = lidas.filter((l) => l.bloco.classificacao !== c.classificacao);
+      const comEla = outras.filter((l) => l.cp === c.classificacao).length;
+      const nota = outras.length ? comEla / outras.length : (c.bloco ? 1 : 0);
+      const saldo = c.bloco && c.bloco === blocoSaldoInicial ? 1 : 0;
+      if (!principal || nota > principal.nota || (nota === principal.nota && saldo > principal.saldo)) principal = { c, nota, saldo };
+    }
+    const contas = [];
+    if (principal && principal.nota >= 0.9) {
+      const p = principal.c;
+      const daConta = (l) => l.bloco.classificacao === p.classificacao;
+      const fora = lidas.filter((l) => !daConta(l) && l.cp !== p.classificacao);
+      if (fora.length) avisos.push(fora.length + ' linha(s) de outros blocos sem a conta ' + p.classificacao + ' na contrapartida ficaram de fora.');
+      const ordenadas = lidas.filter((l) => daConta(l) || l.cp === p.classificacao)
+        .sort((a, b) => a.data.numero - b.data.numero || (Number(a.id) || 0) - (Number(b.id) || 0) || a.r - b.r);
+      const conta = {
+        codigo: p.classificacao, classificacao: p.classificacao, nome: p.nome, saldoAnterior: null, lancamentos: [],
+        totalDebitoDeclarado: totalD, totalCreditoDeclarado: totalC, saldoFinalDeclarado: null, avisos: [],
+      };
+      let totalDebito = 0, totalCredito = 0;
+      for (const l of ordenadas) {
+        const lido = notaEFornecedorE(l.hist, l.desc);
+        totalDebito += l.debito;
+        totalCredito += l.credito;
+        conta.lancamentos.push({
+          data: l.data.texto, dia: l.data.dia, mes: l.data.mes, ano: l.data.ano,
+          numero: l.id, historico: l.hist, descricaoDocumento: l.desc,
+          // No bloco da conta, a contrapartida está na coluna; nos outros blocos, é a conta do bloco.
+          contrapartida: daConta(l) ? (l.cp + (l.cpNome ? ' ' + l.cpNome : '')).trim() : l.bloco.classificacao + ' ' + l.bloco.nome,
+          documento: '', nota: lido.nota, fornecedor: lido.fornecedor,
+          debito: l.debito, credito: l.credito, saldo: null,
+        });
+      }
+      // Sentido do saldo (o arquivo mostra o saldo credor positivo nas contas do passivo): o saldo
+      // inicial + o movimento tem que dar o saldo corrido da última linha.
+      const ultimo = ordenadas.length ? ordenadas[ordenadas.length - 1].saldo : null;
+      if (saldoInicial !== null) {
+        const comoDC = saldoInicial + totalDebito - totalCredito;
+        const comoCD = saldoInicial - totalDebito + totalCredito;
+        if (ultimo !== null && ultimo === comoCD && ultimo !== comoDC) {
+          conta.saldoAnterior = -saldoInicial;
+          conta.saldoFinalDeclarado = -ultimo;
+          conta.avisos.push('Este razão mostra o saldo como crédito − débito; o programa guardou como débito − crédito.');
+        } else {
+          conta.saldoAnterior = saldoInicial;
+          conta.saldoFinalDeclarado = ultimo;
+        }
+      }
+      conferirConta(conta);
+      blocos.forEach((b) => {
+        if ((b.debito !== null && b.debito !== b.somaD) || (b.credito !== null && b.credito !== b.somaC)) {
+          conta.confere = false;
+          conta.avisos.push('O bloco ' + b.classificacao + ' ' + b.nome + ' declara ' + Util.formatarCentavos(b.debito) + ' / ' + Util.formatarCentavos(b.credito) +
+            ', mas as linhas somam ' + Util.formatarCentavos(b.somaD) + ' / ' + Util.formatarCentavos(b.somaC) + '.');
+        }
+      });
+      contas.push(conta);
+    } else if (lidas.length) {
+      avisos.push('Não consegui dizer de qual conta é este razão (nenhuma conta aparece como contrapartida dos outros blocos).');
+    }
+    if (!lidas.length) avisos.push('Não achei lançamentos neste razão.');
+
+    let periodo = info.periodo;
+    let periodoOrigem = periodo ? 'conteudo' : null;
+    if (!periodo && lidas.length) {
+      const numeros = lidas.map((l) => l.data.numero);
+      let de = Math.min.apply(null, numeros);
+      if (dataSaldoInicial && dataSaldoInicial.numero + 1 <= de) de = dataSaldoInicial.numero + 1;
+      periodo = { de: Util.dataDeNumero(de).texto, ate: Util.dataDeNumero(Math.max.apply(null, numeros)).texto };
+      periodoOrigem = dataSaldoInicial ? 'conteudo' : 'datas-dos-lancamentos';
+      if (!dataSaldoInicial) avisos.push('O arquivo não diz o período: usei a primeira e a última data dos lançamentos. Confirme a competência.');
+    }
+    return { tipo: 'razao', desenho: 'E', empresa: info.empresa, cnpj: info.cnpj, titulo: info.titulo, periodo, periodoOrigem, contas, avisos, linhasIgnoradas };
+  }
+
   /**
    * Diz se as abas são um razão, um balancete ou outra coisa.
    * @returns { tipo: 'razao' | 'balancete' | null, motivo }
    */
   function reconhecer(abas) {
+    if (ehRazaoPorContrapartida(abas)) {
+      return { tipo: 'razao', porContrapartida: true, motivo: 'Razão por contrapartida: blocos "Conta Contábil" com Data, Histórico, Contra-Partida, Débito e Crédito.' };
+    }
     let temCabecalho = false, temConta = false, balancete = false, temFlat = false;
     for (const aba of abas) {
       for (const linha of aba.linhas) {
@@ -408,6 +611,8 @@
    */
   function ler(abas, opcoes) {
     const nomeArquivo = (opcoes && opcoes.nomeArquivo) || '';
+    // Razão por contrapartida (desenho E) tem um leitor próprio.
+    if (ehRazaoPorContrapartida(abas)) return lerPorContrapartida(abas);
     // Razão em lista (desenho C) tem um leitor próprio: uma linha por lançamento, conta na coluna.
     const temBloco = abas.some((a) => a.linhas.some((l) => l && lerLinhaDeConta(l)));
     const temFlat = !temBloco && abas.some((a) => a.linhas.some((l) => l && ehCabecalhoFlat(l)));
@@ -619,5 +824,5 @@
     delete c.totalCreditoDeclarado;
   }
 
-  return { reconhecer, ler, mapearCabecalho, ehCabecalho, lerLinhaDeConta, periodoPeloNome, lerFaixaDeDatas };
+  return { reconhecer, ler, mapearCabecalho, ehCabecalho, lerLinhaDeConta, periodoPeloNome, lerFaixaDeDatas, notaEFornecedorE };
 });
