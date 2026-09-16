@@ -280,13 +280,15 @@
     else if (pode) estado = '<span class="pilula verde">pronta para conciliar</span>';
     else { estado = '<span class="pilula ambar">falta arquivo</span>'; porque = 'Abra o passo, escolha o período e suba cada arquivo no lugar dele.'; }
     const rs = passo3 && passo3.resumo;
+    // Natureza (D/C) no lugar do sinal, como na conciliação.
+    const comDC = (c) => T.valorDC(c, raiz.MotorTerceiro.ladoDC(c, cfg.natureza));
     // Com o Conciliar A × B gravado, o resumo é o dele (conciliações e o que sobra em aberto).
     const resumo = rs && typeof rs.conciliacoesAB === 'number'
       ? '<p class="suave pequeno">Última gravação: ' + T.esc(passo3.atualizadoPor || '') + ' em ' + U.dataHoraLocal(passo3.atualizadoEm) +
-        '<br>' + rs.conciliacoesAB + ' conciliação(ões) com ID · em aberto: ' + rs.abertosA + ' na A e ' + rs.abertosB + ' na B · diferença ' + T.moeda(rs.diferencaAB) + '</p>'
+        '<br>' + rs.conciliacoesAB + ' conciliação(ões) com ID · em aberto: ' + rs.abertosA + ' na A e ' + rs.abertosB + ' na B · diferença R$ ' + comDC(rs.diferencaAB) + '</p>'
       : rs && typeof rs.diferenca === 'number'
         ? '<p class="suave pequeno">Última gravação: ' + T.esc(passo3.atualizadoPor || '') + ' em ' + U.dataHoraLocal(passo3.atualizadoEm) +
-          '<br>' + rs.batem + ' batem · ' + rs.comDiferenca + ' com diferença · diferença ' + T.moeda(rs.diferenca) + '</p>' : '';
+          '<br>' + rs.batem + ' batem · ' + rs.comDiferenca + ' com diferença · diferença R$ ' + comDC(rs.diferenca) + '</p>' : '';
     return '<div class="cartao passo"><div class="linha-flex"><span class="numero">' + p.numero + '</span><h3 style="flex:1">' + T.esc(p.titulo) + '</h3>' + estado + '</div>' +
       '<p class="suave" style="line-height:1.5">' + T.esc(p.texto) + '</p><ul class="precisa">' + itens.join('') + '</ul>' + resumo +
       (porque ? '<p class="pequeno" style="color:var(--ambar)">' + T.esc(porque) + '</p>' : '') +

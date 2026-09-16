@@ -52,6 +52,11 @@
   };
   function configDoPasso(passoId) { return PASSOS_AB[passoId] || PASSOS_AB.passo3; }
   function primeiraMaiuscula(s) { return String(s).charAt(0).toUpperCase() + String(s).slice(1); }
+  // Natureza (D/C) no lugar do sinal (Dony, 16/09/2026: "só pelo valor positivo ou negativo me atrapalha").
+  function dc(v) { return M.ladoDC(v, E.cfg.natureza); }
+  function textoDC(v) { return T.valorDC(v, dc(v)); }   // "1.236,55 C"
+  function htmlDC(v) { return T.htmlDC(v, dc(v)); }     // com a marca colorida
+  function tdDC(v, extra) { return T.tdValorDC(v, dc(v), extra); }
 
   // Saldo inicial escolhido: 'razao' (conforme o razão do mês anterior) ou 'aging' (padrão).
   // Aceita os nomes da versão 13: 'continuar' = razão; 'zero' = aging.
@@ -388,7 +393,7 @@
     const ini = p.inicio || { modo: 'aging' };
     const rotuloInicial = ini.modo === 'razao' ? 'Saldo inicial · razão ' + E.entrada.mesAnterior : 'Saldo inicial · aging ' + E.entrada.mesAnterior;
     const dicaInicial = ini.modo === 'razao'
-      ? 'Conforme o RAZÃO de ' + E.entrada.mesAnterior + ' (saldo da contabilidade): aging ' + T.moeda(ini.aging) + ' − ' + ini.qtdTirados + ' título(s) que ficaram em aberto na Parte B (' + T.moeda(ini.tirados) + ') + ' + ini.qtdPendentes + ' pendência(s) da Parte A (' + T.moeda(ini.pendentesA) + ')'
+      ? 'Conforme o RAZÃO de ' + E.entrada.mesAnterior + ' (saldo da contabilidade): aging ' + textoDC(ini.aging) + ' − ' + ini.qtdTirados + ' título(s) que ficaram em aberto na Parte B (' + textoDC(ini.tirados) + ') + ' + ini.qtdPendentes + ' pendência(s) da Parte A (' + textoDC(ini.pendentesA) + ')'
       : 'Conforme o AGING de ' + E.entrada.mesAnterior + ': o que estava em aberto no financeiro no fim do mês passado';
     return '<div class="cartao corpo cartao-ponte" style="margin-bottom:14px;border-left:4px solid var(--' + (bate ? 'verde' : 'vermelho') + ')">' +
       '<div class="ponte">' +
@@ -398,7 +403,7 @@
       seta + pedaco('Aging ' + E.entrada.mesAtual, p.atual, 'o que está em aberto agora') +
       '</div>' +
       '<div class="linha-flex" style="margin-top:12px;justify-content:space-between">' +
-      '<div class="' + (bate ? 'ok' : 'falta') + '" style="font-size:16px;font-weight:600">' + (bate ? '✓ Fecha no centavo' : '● Diferença de ' + T.moeda(Math.abs(p.diferenca)) + ' para conciliar') + '</div>' +
+      '<div class="' + (bate ? 'ok' : 'falta') + '" style="font-size:16px;font-weight:600">' + (bate ? '✓ Fecha no centavo' : '● Diferença de R$ ' + htmlDC(p.diferenca) + ' para conciliar <span class="suave pequeno" style="font-weight:400">(contabilidade − financeiro)</span>') + '</div>' +
       // A contagem por fornecedor só aparece se alguma aba por fornecedor estiver à vista.
       (['diferencas', 'fornecedores', 'sem'].some((id) => !abasOcultas().has(id))
         ? '<div class="suave pequeno">' + E.r.resumo.batem + ' batem · ' + E.r.resumo.comDiferenca + ' com diferença · ' + E.r.resumo.semFornecedor + ' linhas sem fornecedor</div>' : '') +
@@ -407,7 +412,7 @@
 
   function pedaco(rotulo, valor, dica, forte) {
     return '<span class="ponte-item" title="' + T.esc(dica) + '"><span class="rotulo">' + T.esc(rotulo) + '</span>' +
-      '<b class="num' + (forte ? ' forte' : '') + '">' + U.formatarCentavos(valor) + '</b></span>';
+      '<b class="num' + (forte ? ' forte' : '') + '">' + htmlDC(valor) + '</b></span>';
   }
 
   function contador(id) {
@@ -546,7 +551,7 @@
     if (!ant) return '';
     const mesAnt = T.esc(U.nomeCompetencia(ant.competencia)), mes = T.esc(U.nomeCompetencia(E.comp));
     const v = valoresDoInicio();
-    const dinheiro = (c) => U.formatarCentavos(c);
+    const dinheiro = (c) => textoDC(c);
     // Mês anterior sem conciliação neste passo: só dá para partir do aging.
     if (!ant.pendencias) {
       return '<div class="linha-inicio">📄 Saldo inicial de ' + mes + ' <b>conforme o aging de ' + mesAnt + '</b> (' + dinheiro(v.pelaAging.valor) + '). ' +
@@ -611,8 +616,8 @@
     const v = valoresDoInicio();
     const escolha = await T.janela({
       titulo: 'Saldo inicial de ' + mes,
-      corpo: '<p style="line-height:1.55"><b>📄 Conforme o AGING de ' + T.esc(mesAnt) + '</b> (' + U.formatarCentavos(v.pelaAging.valor) + '): o aging estava certo; a Parte B de ' + T.esc(mesAnt) + ' vira a Parte A de ' + T.esc(mes) + '.</p>' +
-        '<p style="line-height:1.55;margin-top:8px"><b>📒 Conforme o RAZÃO de ' + T.esc(mesAnt) + '</b> (' + U.formatarCentavos(v.peloRazao.valor) + '): vale o saldo da contabilidade; a diferença de ' + T.esc(mesAnt) + ' continua.</p>' +
+      corpo: '<p style="line-height:1.55"><b>📄 Conforme o AGING de ' + T.esc(mesAnt) + '</b> (' + textoDC(v.pelaAging.valor) + '): o aging estava certo; a Parte B de ' + T.esc(mesAnt) + ' vira a Parte A de ' + T.esc(mes) + '.</p>' +
+        '<p style="line-height:1.55;margin-top:8px"><b>📒 Conforme o RAZÃO de ' + T.esc(mesAnt) + '</b> (' + textoDC(v.peloRazao.valor) + '): vale o saldo da contabilidade; a diferença de ' + T.esc(mesAnt) + ' continua.</p>' +
         (E.decisoes.conciliacoesAB.length ? '<p class="falta pequeno" style="margin-top:10px">Se mudar, as conciliações deste mês são desfeitas para conciliar de novo.</p>' : ''),
       botoes: [{ texto: 'Cancelar', valor: null }, { texto: 'Conforme o aging', valor: 'aging' }, { texto: 'Conforme o razão', tipo: 'primario', valor: 'razao' }],
     });
@@ -665,7 +670,7 @@
   // fornecedor — "selecionei um fornecedor e a outra perninha está em outro"): fornecedor e
   // documento separados por vírgula ("POSTO CENTRAL, SILVA"); valor e data por ponto e vírgula
   // (a vírgula já é a dos centavos).
-  const CAMPOS_LADO = ['doc', 'forn', 'valor', 'data'];
+  const CAMPOS_LADO = ['doc', 'forn', 'valor', 'data', 'dc'];
   function termos(texto, separador) { return String(texto || '').split(separador).map((s) => s.trim()).filter(Boolean); }
   function filtroDoLado(lado) {
     const docTexto = termos(filtro(lado + '.doc'), /[,;]/);
@@ -673,7 +678,8 @@
     const forns = termos(filtro(lado + '.forn'), /[,;]/);
     const valores = termos(filtro(lado + '.valor'), /;/).map(filtroValor).filter(Boolean);
     const datas = termos(filtro(lado + '.data'), /;/).map(filtroData).filter(Boolean);
-    return (x) => (!docTexto.length || docs.some((d) => x.doc.indexOf(d) >= 0)) &&
+    const soDC = filtro(lado + '.dc');
+    return (x) => (!soDC || dc(x.valor) === soDC) && (!docTexto.length || docs.some((d) => x.doc.indexOf(d) >= 0)) &&
       (!forns.length || forns.some((f) => combina(f, x.nome, x.historico || ''))) &&
       (!valores.length || valores.some((f) => f(x))) && (!datas.length || datas.some((f) => f(x)));
   }
@@ -688,6 +694,8 @@
       campo('forn', 'Fornecedor', 'Nome do fornecedor, ou pedaço do histórico. Mais de um: POSTO CENTRAL, SILVA') +
       campo('valor', 'Valor', 'Valor (1.236,55), parte dele, ou faixa: 100 a 500 — com ou sem sinal. Mais de um: 791,43; 5.105,88') +
       campo('data', 'Data', 'Data (08/07/2026), parte dela (07/2026), ou faixa: 01/07 a 15/07. Mais de uma: 08/07; 22/07') +
+      '<select data-filtro="' + lado + '.dc" class="' + (filtro(lado + '.dc') ? 'ativo' : '') + '" title="Só os débitos ou só os créditos">' +
+      [['', 'D e C'], ['D', 'Só débito'], ['C', 'Só crédito']].map((o) => '<option value="' + o[0] + '"' + (filtro(lado + '.dc') === o[0] ? ' selected' : '') + '>' + o[1] + '</option>').join('') + '</select>' +
       '<button type="button" class="lapis" data-limpar-lado="' + lado + '" title="Limpar os filtros desta parte"' + (algum ? '' : ' disabled') + '>✕</button>' +
       '</div>' +
       (algum ? '<p class="dica-lado">Mais de um fornecedor ou documento: separe com vírgula (<b>POSTO CENTRAL, SILVA</b>). Os itens marcados ficam no topo, mesmo fora do filtro.</p>' : '');
@@ -790,7 +798,7 @@
       (grupos.length ? '<b>' + grupos.length.toLocaleString('pt-BR') + '</b> conciliação(ões) com ID: ' + conta('AxA') + ' A×A · ' + conta('AxB') + ' A×B' + (conta('BxB') ? ' · ' + conta('BxB') + ' B×B' : '') + ' · ' + aMao + ' à mão' + (porValor ? ' · <b>' + porValor + '</b> só pelo valor' : '') + ' · em aberto: <b>' + ab.abertosA.length + '</b> na A e <b>' + ab.abertosB.length + '</b> na B. ' : 'Nada conciliado ainda. ') +
       'O <b>⚡ Conciliar</b> casa pelo <b>documento</b> — primeiro com o mesmo fornecedor, depois com o mesmo nome de fornecedor, depois só pelo documento — e dá um ID para cada conciliação (1, 2, 3…). ' +
       'O <b>≈ Conciliar só pelo valor</b> casa o que sobrou por valor igual, sem documento e sem fornecedor (só valor quebrado) — confira em <b>Conciliados só pelo valor</b>.' +
-      (Math.abs(forcado) >= 1 ? ' <span class="falta">Conciliações à mão sem bater: ' + U.formatarCentavos(forcado) + '.</span>' : '') +
+      (Math.abs(forcado) >= 1 ? ' <span class="falta">Conciliações à mão sem bater: ' + textoDC(forcado) + '.</span>' : '') +
       (conferir.length ? '<br><span style="color:var(--ambar)">⚠ Para conferir — ' + E.cfg.avisoAntes + ':</span> ' +
         conferir.slice(0, 15).map((g) => '<button type="button" class="lapis" data-ver-id="' + g.id + '" title="Ver a conciliação #' + g.id + '"><b>#' + g.id + '</b></button>').join(' ') + (conferir.length > 15 ? ' …' : '') : '') +
       '</p></div>';
@@ -800,7 +808,7 @@
     const total = itens.reduce((s, x) => s + x.valor, 0);
     const filtrado = CAMPOS_LADO.some((n) => filtro(lado + '.' + n));
     return '<div class="cartao corpo coluna-ab"><div class="linha-flex" style="margin-bottom:6px"><h3 style="flex:1">' + T.esc(titulo) + '</h3>' +
-      '<span class="pilula ' + (lado === 'A' ? 'azul' : 'ambar') + '" title="Soma da lista (sem os marcados de fora do filtro)">' + U.formatarCentavos(total) + '</span></div>' +
+      '<span class="pilula ' + (lado === 'A' ? 'azul' : 'ambar') + '" title="Soma da lista (sem os marcados de fora do filtro)">' + textoDC(total) + '</span></div>' +
       '<p class="suave pequeno" style="margin:0 0 8px">' + T.esc(sub) + ' · ' + itens.length.toLocaleString('pt-BR') + ' ' + rot + (filtrado ? ' <b>(filtrado)</b>' : '') +
       (fixos.length ? ' · <b>+' + fixos.length + ' marcado(s)</b> de fora do filtro, no topo' : '') + '</p>' +
       filtrosDoLadoHtml(lado) +
@@ -813,7 +821,7 @@
       alta: true, porPagina: 200,
       ordem: { id: 'ab-itens-' + lado, fixo: (x) => !!(E.fixos && E.fixos.has(x.id)), colunas: [null, TXT((x) => x.doc), TXT((x) => (x.chave === SEM ? '' : x.nome)),
         DATA((x) => x.data), VALOR((x) => x.valor), NUM((x) => { const g = E.idDoItem.get(x.id); return g ? g.id : null; })] },
-      cabecalho: '<th class="caixa"><input type="checkbox" data-marca-todos="' + lado + '" title="Marcar todos os em aberto desta lista (com os filtros de agora)"></th><th>Documento</th><th>Fornecedor</th><th>Data · origem</th><th class="num">Valor</th><th>ID</th>',
+      cabecalho: '<th class="caixa"><input type="checkbox" data-marca-todos="' + lado + '" title="Marcar todos os em aberto desta lista (com os filtros de agora)"></th><th>Documento</th><th>Fornecedor</th><th>Data · origem</th><th class="num" title="Sem sinal: D = débito · C = crédito">Valor · D/C</th><th>ID</th>',
       linhas: itens, vazio: 'Nada nesta lista.',
       linha: (x) => {
         const g = E.idDoItem.get(x.id);
@@ -824,7 +832,7 @@
           '<td class="nome">' + (fixo ? '<span class="selo suspeita" title="Marcado antes, com outro filtro">marcado</span> ' : '') +
           (x.chave === SEM ? '<span class="falta">sem fornecedor</span>' : T.esc(x.nome)) + (x.historico ? '<br><span class="suave pequeno">' + T.esc(x.historico.slice(0, 70)) + '</span>' : '') + '</td>' +
           '<td class="num" title="' + T.esc(rotuloFonte(x)) + '">' + T.esc(x.data || '—') + '<br><span class="pequeno suave">' + T.esc(rotuloCurto(x)) + '</span></td>' +
-          '<td class="num ' + (x.valor < 0 ? 'negativo' : '') + '">' + U.formatarCentavos(x.valor) + '</td>' +
+          tdDC(x.valor) + '' +
           '<td style="white-space:nowrap">' + (g ? '<button type="button" class="lapis" data-ver-id="' + g.id + '" title="Ver a conciliação #' + g.id + ' (' + T.esc(M.REGRAS_AB[g.regra] || '') + ')"><b>#' + g.id + '</b></button><br><span class="selo ' + (M.ehPorValor(g) ? 'valor' : 'opcional') + '">' + (M.ehPorValor(g) ? 'só valor' : TIPO_AB[g.tipo]) + '</span>' : '') + '</td></tr>';
       },
     };
@@ -851,9 +859,9 @@
     const fora = Array.from(E.selA).concat(Array.from(E.selB)).filter((id) => !naTela.has(id)).length;
     // Barra fixa no rodapé: aparece assim que marca, sem precisar rolar a tela.
     barra.innerHTML = '<div class="espaco-barra"></div><div class="barra-selecao" role="region" aria-label="Itens marcados">' +
-      '<span>Parte A: <b class="num">' + U.formatarCentavos(sa) + '</b> (' + E.selA.size + ')</span>' +
-      '<span>Parte B: <b class="num">' + U.formatarCentavos(sb) + '</b> (' + E.selB.size + ')</span>' +
-      '<span class="' + (bate ? 'ok' : 'falta') + '">' + (bate ? '✓ bate' : 'diferença ' + U.formatarCentavos(dif)) + '</span>' +
+      '<span>Parte A: <b class="num">' + textoDC(sa) + '</b> (' + E.selA.size + ')</span>' +
+      '<span>Parte B: <b class="num">' + textoDC(sb) + '</b> (' + E.selB.size + ')</span>' +
+      '<span class="' + (bate ? 'ok' : 'falta') + '">' + (bate ? '✓ bate' : 'diferença ' + textoDC(dif)) + '</span>' +
       '<span class="explica">vira o ID #' + M.proximoIdAB(E.decisoes.conciliacoesAB) + ' · ' + TIPO_AB[M.tipoAB(E.selA.size, E.selB.size)] +
       (fora ? ' · ' + fora + ' marcado(s) fora do filtro' : '') + '</span>' +
       '<button type="button" class="botao primario" data-acao="conciliar-ab">✓ Conciliar manualmente</button>' +
@@ -886,8 +894,8 @@
           '<td class="nome">' + T.nome(g.nome) + (g.obs ? '<br><span class="suave pequeno">✎ ' + T.esc(g.obs) + '</span>' : '') +
           (faltam ? '<br><span class="falta pequeno">' + faltam + ' item(ns) não estão mais nos arquivos</span>' : '') + '</td>' +
           '<td class="num">' + T.esc(dataDoGrupo(g) || '—') + '</td>' +
-          T.tdValor(g.valorA) + T.tdValor(g.valorB) +
-          '<td class="pequeno" style="white-space:nowrap">' + g.a.length + ' de A · ' + g.b.length + ' de B' + (Math.abs(dif) >= 1 ? '<br><span class="falta">diferença ' + U.formatarCentavos(dif) + '</span>' : '') + '</td>' +
+          tdDC(g.valorA) + tdDC(g.valorB) +
+          '<td class="pequeno" style="white-space:nowrap">' + g.a.length + ' de A · ' + g.b.length + ' de B' + (Math.abs(dif) >= 1 ? '<br><span class="falta">diferença ' + textoDC(dif) + '</span>' : '') + '</td>' +
           '<td class="pequeno suave">' + T.esc(g.quem || '') + (g.quando ? '<br>' + U.dataHoraLocal(g.quando) : '') + '</td>' +
           '<td class="num"><button type="button" class="botao pequeno perigo" data-desfazer-ab="' + g.id + '">Desfazer</button></td></tr>' +
           (aberto ? linhaDetalheAB(g) : '');
@@ -904,11 +912,11 @@
 
   function linhaDetalheAB(g) {
     const itens = g.a.concat(g.b).map((id) => E.itens.porId.get(id) || { id, faltando: true });
-    return '<tr class="sub"><td></td><td colspan="11"><div class="tabela-caixa"><table class="tabela"><thead><tr><th>Lado</th><th>Documento</th><th>Origem</th><th>Data</th><th class="historico">Fornecedor · histórico</th><th class="num">Valor</th></tr></thead><tbody>' +
+    return '<tr class="sub"><td></td><td colspan="11"><div class="tabela-caixa"><table class="tabela"><thead><tr><th>Lado</th><th>Documento</th><th>Origem</th><th>Data</th><th class="historico">Fornecedor · histórico</th><th class="num">Valor · D/C</th></tr></thead><tbody>' +
       itens.map((x) => x.faltando ? '<tr><td colspan="6" class="falta pequeno">Item que não está mais nos arquivos (' + T.esc(x.id) + ')</td></tr>' :
         '<tr><td><b>' + x.lado + '</b></td><td class="num">' + T.nome(x.doc) + '</td><td class="pequeno suave">' + T.esc(rotuloFonte(x)) + '</td><td class="num">' + T.esc(x.data || '—') + '</td>' +
         '<td class="historico">' + (x.chave === SEM ? '<span class="falta">sem fornecedor</span>' : T.esc(x.nome)) + (x.historico ? '<br><span class="suave pequeno">' + T.esc(x.historico) + '</span>' : '') + '</td>' +
-        '<td class="num ' + (x.valor < 0 ? 'negativo' : '') + '">' + U.formatarCentavos(x.valor) + '</td></tr>').join('') +
+        tdDC(x.valor) + '</tr>').join('') +
       '</tbody></table></div></td></tr>';
   }
 
@@ -1067,8 +1075,8 @@
       // Diferença não bloqueia: pergunta mostrando os dois valores (Parte 7.11), com o motivo.
       const r = await T.janela({
         titulo: 'Conciliar manualmente com diferença?',
-        corpo: '<p style="line-height:1.7">Parte A: <b>' + T.moeda(valorA) + '</b> (' + a.length + ' item(ns))<br>Parte B: <b>' + T.moeda(valorB) + '</b> (' + b.length + ' item(ns))<br>' +
-          '<span class="falta">Diferença: <b>' + T.moeda(valorA - valorB) + '</b></span></p>' +
+        corpo: '<p style="line-height:1.7">Parte A: <b>R$ ' + textoDC(valorA) + '</b> (' + a.length + ' item(ns))<br>Parte B: <b>R$ ' + textoDC(valorB) + '</b> (' + b.length + ' item(ns))<br>' +
+          '<span class="falta">Diferença: <b>R$ ' + textoDC(valorA - valorB) + '</b></span></p>' +
           '<div class="campo" style="margin-top:10px"><label for="obs-ab">Observação (por que concilia assim)</label><input id="obs-ab" autocomplete="off" maxlength="200" placeholder="Ex.: juros pagos no boleto" autofocus></div>',
         botoes: [{ texto: 'Cancelar', valor: null }, { texto: 'Conciliar com diferença', tipo: 'primario', antes: (j) => ({ obs: j.querySelector('#obs-ab').value.trim() }) }],
         aoAbrir: (j) => { j.querySelector('#obs-ab').addEventListener('keydown', (e) => { if (e.key === 'Enter') j.querySelector('footer .primario').click(); }); },
@@ -1087,10 +1095,10 @@
     if (obs) g.obs = obs;
     E.decisoes.conciliacoesAB = E.decisoes.conciliacoesAB.concat([g]);
     E.selA = new Set(); E.selB = new Set();
-    historico('Conciliou à mão #' + g.id + ' (' + TIPO_AB[g.tipo] + '): ' + a.length + ' de A e ' + b.length + ' de B (' + U.formatarCentavos(valorA) + ' × ' + U.formatarCentavos(valorB) + ')');
+    historico('Conciliou à mão #' + g.id + ' (' + TIPO_AB[g.tipo] + '): ' + a.length + ' de A e ' + b.length + ' de B (' + textoDC(valorA) + ' × ' + textoDC(valorB) + ')');
     redesenharAB();
     T.avisoRapido('Conciliado à mão: ID #' + g.id + ' (' + TIPO_AB[g.tipo] + ')', 'ok');
-    gravar('terceiro-ab-conciliar', '#' + g.id + ' · ' + a.length + '+' + b.length + ' · ' + U.formatarCentavos(valorA));
+    gravar('terceiro-ab-conciliar', '#' + g.id + ' · ' + a.length + '+' + b.length + ' · ' + textoDC(valorA));
   }
 
   function abaFornecedores(alvo, soDiferencas) {
@@ -1118,8 +1126,8 @@
         let h = '<tr class="' + (aberto ? 'destaque' : '') + '"><td><button type="button" class="lapis" data-abrir="' + T.esc(f.chave) + '">' + (aberto ? '▾' : '▸') + '</button></td>' +
           '<td class="nome"><b>' + T.esc(f.nome) + '</b>' + (f.observacao ? '<br><span class="suave pequeno">✎ ' + T.esc(f.observacao) + '</span>' : '') + '</td>' +
           '<td class="num">' + (f.cnpj ? U.formatarCnpj(f.cnpj) : '—') + '</td>' +
-          T.tdValor(f.anterior) + T.tdValor(f.notas) + T.tdValor(f.baixas) + T.tdValor(f.movimento) + T.tdValor(f.esperado) + T.tdValor(f.atual) +
-          '<td class="num ' + (Math.abs(f.diferenca) < 1 ? 'zero' : 'negativo') + '"><b>' + U.formatarCentavos(f.diferenca) + '</b></td>' +
+          tdDC(f.anterior) + T.tdValor(f.notas) + T.tdValor(f.baixas) + tdDC(f.movimento) + tdDC(f.esperado) + tdDC(f.atual) +
+          '<td class="num ' + (Math.abs(f.diferenca) < 1 ? 'zero' : 'negativo') + '"><b>' + htmlDC(f.diferenca) + '</b></td>' +
           '<td>' + pil(f.situacao) + '</td>' +
           '<td class="num" style="white-space:nowrap">' + (f.linhasRazao ? '<button type="button" class="botao pequeno leve" data-juntar="' + T.esc(f.chave) + '" title="Juntar com outro fornecedor (mesmo dono)">✎ juntar</button>' : '') +
           (f.situacao !== 'bate' ? ' <button type="button" class="botao pequeno" data-conciliar="' + T.esc(f.chave) + '">' + (f.situacao === 'conciliada' ? 'desfazer' : '✓ conciliar') + '</button>' : '') + '</td></tr>';
@@ -1144,9 +1152,9 @@
     const r = E.r;
     const rz = r.razPorChave.get(f.chave);
     const a = r.anterior.get(f.chave); const at = r.atual.get(f.chave);
-    const tabTit = (titulo, g) => g && g.titulos.length ? '<p class="pequeno" style="margin:8px 0 4px"><b>' + titulo + '</b> (' + g.titulos.length + ' · ' + T.moeda(g.valor) + ')</p>' +
+    const tabTit = (titulo, g) => g && g.titulos.length ? '<p class="pequeno" style="margin:8px 0 4px"><b>' + titulo + '</b> (' + g.titulos.length + ' · R$ ' + textoDC(g.valor) + ')</p>' +
       '<div class="tabela-caixa"><table class="tabela"><thead><tr><th>Vencimento</th><th>Documento</th><th class="num">Valor</th></tr></thead><tbody>' +
-      g.titulos.slice(0, 40).map((t) => '<tr><td class="num">' + T.esc(t.vencimento || '—') + '</td><td>' + T.nome(t.documento) + '</td>' + T.tdValor(t.valor) + '</tr>').join('') + '</tbody></table></div>' : '';
+      g.titulos.slice(0, 40).map((t) => '<tr><td class="num">' + T.esc(t.vencimento || '—') + '</td><td>' + T.nome(t.documento) + '</td>' + tdDC(t.valor) + '</tr>').join('') + '</tbody></table></div>' : '';
     const tabRaz = rz && rz.linhas.length ? '<p class="pequeno" style="margin:8px 0 4px"><b>Razão do mês</b> (' + rz.linhas.length + ' lançamentos)</p>' +
       '<div class="tabela-caixa"><table class="tabela"><thead><tr><th>Data</th><th>NF/Doc</th><th class="historico">Histórico</th>' + cabecalhoRazao(true) + '<th></th></tr></thead><tbody>' +
       rz.linhas.slice(0, 80).map((l) => '<tr><td class="num">' + T.esc(l.data) + '</td><td>' + T.nome(l.documento) + '</td><td class="historico">' + T.esc(l.historico) + '</td>' +
@@ -1192,13 +1200,13 @@
     const busca = filtro('busca');
     const lista = conteudo.titulos.filter((t) => combina(busca, t.nome) || (U.soDigitos(busca) && t.cnpj && t.cnpj.indexOf(U.soDigitos(busca)) >= 0));
     const total = lista.reduce((s, t) => s + t.valor, 0);
-    alvo.innerHTML = '<p class="suave pequeno" style="margin:0 0 8px">Aging de ' + T.esc(mes) + ': ' + lista.length + ' título(s) em aberto · ' + T.moeda(total) + '.</p><div id="tab"></div>';
+    alvo.innerHTML = '<p class="suave pequeno" style="margin:0 0 8px">Aging de ' + T.esc(mes) + ': ' + lista.length + ' título(s) em aberto · R$ ' + textoDC(total) + '.</p><div id="tab"></div>';
     T.tabelaPaginada(alvo.querySelector('#tab'), {
       ordem: { id: 'ab-aging', colunas: [TXT((x) => x.nome), TXT((x) => x.cnpj), DATA((x) => x.vencimento), TXT((x) => x.documento), VALOR((x) => x.valor)] },
-      cabecalho: '<th>Fornecedor</th><th>CNPJ</th><th>Vencimento</th><th>Documento</th><th class="num">Valor</th>',
+      cabecalho: '<th>Fornecedor</th><th>CNPJ</th><th>Vencimento</th><th>Documento</th><th class="num">Valor · D/C</th>',
       linhas: lista, porPagina: 300, vazio: 'Nenhum título.',
       linha: (t) => '<tr><td class="nome">' + T.esc(t.nome) + '</td><td class="num">' + (t.cnpj ? U.formatarCnpj(t.cnpj) : '—') + '</td>' +
-        '<td class="num">' + T.esc(t.vencimento || '—') + '</td><td>' + T.nome(t.documento) + '</td>' + T.tdValor(t.valor) + '</tr>',
+        '<td class="num">' + T.esc(t.vencimento || '—') + '</td><td>' + T.nome(t.documento) + '</td>' + tdDC(t.valor) + '</tr>',
     });
   }
 

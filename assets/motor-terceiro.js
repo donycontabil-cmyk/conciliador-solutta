@@ -53,6 +53,16 @@
     return { aumento: adiantamento ? (l.debito || 0) : (l.credito || 0), reducao: adiantamento ? (l.credito || 0) : (l.debito || 0) };
   }
 
+  // Débito ou crédito de um valor da conciliação A × B (Dony, 16/09/2026: "coloca a natureza do
+  // lançamento, débito ou crédito; só pelo sinal me atrapalha"). O valor + é o lado que AUMENTA o
+  // saldo da conta — crédito em fornecedores (passivo), débito em adiantamento (ativo) — e o − é o
+  // outro lado. Vale para lançamento, título e saldo. Zero não tem lado ('').
+  function ladoDC(valor, natureza) {
+    const v = Number(valor) || 0;
+    if (!v) return '';
+    return (v > 0) === (natureza === 'adiantamento') ? 'D' : 'C';
+  }
+
   // Documento comparável dos dois lados: só os dígitos, sem zeros à esquerda ("011719" = "11719").
   function normalizarDocumento(s) {
     return String(s === null || s === undefined ? '' : s).replace(/\D+/g, '').replace(/^0+/, '');
@@ -642,6 +652,6 @@
     calcular, fornecedorDoHistorico, documentoDoHistorico, chaveDoTitulo,
     normalizarDocumento, documentoDaLinha, itensAB, conciliarAutomatico, emAbertoAB, tipoAB, proximoIdAB, REGRAS_AB,
     compararPorDocumento, arrumarGruposAB, relatorioAB, pendenciasAB, saldoInicialAB, idsDeTitulos, COMO_AB, nomeComparavel, ladosDoRazao,
-    conciliarPorValor, valorRedondo, ehPorValor,
+    conciliarPorValor, valorRedondo, ehPorValor, ladoDC,
   };
 });

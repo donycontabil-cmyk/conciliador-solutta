@@ -317,6 +317,10 @@ details.detalhe-linha summary { cursor: pointer; color: var(--primaria); font-si
 .ponte-item .num { font-size: 17px; font-variant-numeric: tabular-nums; }
 .ponte-item .num.forte { font-weight: 700; color: var(--primaria-escura); }
 td.num .forte, td .forte { font-weight: 700; }
+/* Natureza do valor na conciliação (D = débito, C = crédito) no lugar do sinal. */
+.dc { display: inline-block; min-width: 17px; padding: 0 4px; border-radius: 4px; font-size: 11px; font-weight: 700; line-height: 16px; text-align: center; vertical-align: 1px; }
+.dc.d { color: var(--azul); background: var(--azul-fundo); }
+.dc.c { color: var(--ambar); background: var(--ambar-fundo); }
 td.num.forte { font-weight: 700; }
 
 /* ---------- Conciliar A × B (Passo ③) ---------- */
@@ -327,10 +331,10 @@ td.num.forte { font-weight: 700; }
 .coluna-ab table.tabela th, .coluna-ab table.tabela td { padding: 6px 7px; }
 .coluna-ab table.tabela td.nome { min-width: 160px; }
 /* Filtros de cada parte: documento, fornecedor, valor e data */
-.filtros-lado { display: grid; grid-template-columns: minmax(0, .8fr) minmax(0, 1.3fr) minmax(0, 1fr) minmax(0, 1fr) auto; gap: 6px; align-items: center; margin: 0 0 8px; }
-.filtros-lado input { width: 100%; min-width: 0; border: 1px solid var(--borda-forte); border-radius: 6px; padding: 5px 8px; font-size: 12.5px; background: #fff; }
-.filtros-lado input:focus { outline: 2px solid #b9cde0; border-color: var(--primaria); }
-.filtros-lado input.ativo { border-color: var(--primaria); background: var(--primaria-clara); }
+.filtros-lado { display: grid; grid-template-columns: minmax(0, .8fr) minmax(0, 1.3fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, .8fr) auto; gap: 6px; align-items: center; margin: 0 0 8px; }
+.filtros-lado input, .filtros-lado select { width: 100%; min-width: 0; border: 1px solid var(--borda-forte); border-radius: 6px; padding: 5px 8px; font-size: 12.5px; background: #fff; }
+.filtros-lado input:focus, .filtros-lado select:focus { outline: 2px solid #b9cde0; border-color: var(--primaria); }
+.filtros-lado input.ativo, .filtros-lado select.ativo { border-color: var(--primaria); background: var(--primaria-clara); }
 .filtros-lado .lapis[disabled] { opacity: .35; cursor: default; }
 .dica-lado { margin: -2px 0 8px; font-size: 12px; color: var(--texto-suave); }
 /* Marcado com outro filtro: fica no topo da lista */

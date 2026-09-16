@@ -95,8 +95,10 @@
         ' + ' + ini.qtdPendentes + ' pendência(s) da A ' + dinheiro(ini.pendentesA) + ')' + (c && c.naoAchados.length ? ' · ' + c.naoAchados.length + ' título(s) da B não achados' : '')
       : 'conforme o AGING de ' + mesAnt + ' · ' + dinheiro(p.anterior);
   }
-  function dinheiro(c) { return U.formatarCentavos(c); }
-  function tdDinheiro(c) { return '<td class="num' + (c < 0 ? ' negativo' : '') + '">' + dinheiro(c) + '</td>'; }
+  // Valor com a natureza (D/C) no lugar do sinal (Dony, 16/09/2026).
+  function dc(c) { return M.ladoDC(c, R.cfg.natureza); }
+  function dinheiro(c) { return T.htmlDC(c, dc(c)); }
+  function tdDinheiro(c) { return '<td class="num">' + dinheiro(c) + '</td>'; }
   function quemQuando(g) { return (g.quem ? T.esc(g.quem) : '—') + (g.quando ? ' · ' + U.dataHoraLocal(g.quando) : ''); }
 
   function capa() {
@@ -195,7 +197,7 @@
       '<span class="rel-nome">' + T.esc(g.nome || '') + '</span>' +
       '<span class="rel-valores">A <b>' + dinheiro(g.valorA || 0) + '</b> · B <b>' + dinheiro(g.valorB || 0) + '</b></span></div>' +
       '<div class="rel-grupo-sub">' + sub.join(' · ') + '</div>' +
-      '<table class="rel-tab"><thead><tr><th style="width:34px">Lado</th><th style="width:78px">Documento</th><th style="width:118px">Origem</th><th style="width:74px">Data</th><th>Fornecedor · histórico</th><th class="num" style="width:92px">Valor</th></tr></thead><tbody>' +
+      '<table class="rel-tab"><thead><tr><th style="width:34px">Lado</th><th style="width:78px">Documento</th><th style="width:118px">Origem</th><th style="width:74px">Data</th><th>Fornecedor · histórico</th><th class="num" style="width:104px">Valor · D/C</th></tr></thead><tbody>' +
       x.itens.map((i) => i.faltando
         ? '<tr><td colspan="6" class="negativo">Item que não está mais nos arquivos (' + T.esc(i.id) + ')</td></tr>'
         : '<tr><td><b>' + i.lado + '</b></td><td class="doc">' + T.nome(i.doc) + '</td><td>' + T.esc(fonte(i)) + '</td><td>' + T.esc(i.data || '—') + '</td>' +
@@ -216,7 +218,7 @@
     const rel = R.rel;
     const tabela = (titulo, lista, total) => '<h3 class="rel-sub">' + T.esc(titulo) + ' <small>(' + lista.length + ' item(ns))</small></h3>' +
       (lista.length
-        ? '<table class="rel-tab"><thead><tr><th style="width:78px">Documento</th><th style="width:118px">Origem</th><th style="width:74px">Data</th><th>Fornecedor · histórico</th><th class="num" style="width:92px">Valor</th></tr></thead><tbody>' +
+        ? '<table class="rel-tab"><thead><tr><th style="width:78px">Documento</th><th style="width:118px">Origem</th><th style="width:74px">Data</th><th>Fornecedor · histórico</th><th class="num" style="width:104px">Valor · D/C</th></tr></thead><tbody>' +
           lista.map((i) => '<tr><td class="doc">' + T.nome(i.doc) + '</td><td>' + T.esc(fonte(i)) + '</td><td>' + T.esc(i.data || '—') + '</td>' +
             '<td>' + T.esc(i.nome || '') + (i.historico ? '<br><span class="suave">' + T.esc(i.historico) + '</span>' : '') + '</td>' + tdDinheiro(i.valor) + '</tr>').join('') +
           '</tbody><tfoot><tr><td colspan="4">Total em aberto</td>' + tdDinheiro(total) + '</tr></tfoot></table>'
@@ -281,11 +283,11 @@
     ];
     const resumo = cab.concat([
       ['Ponte'],
-      [((p.inicio && p.inicio.modo === 'razao') ? 'Saldo inicial · razão ' : 'Saldo inicial · aging ') + d.entrada.mesAnterior, reais(p.anterior)],
-      ['Movimento do razão', reais(p.movimento)],
-      ['Esperado (contabilidade)', reais(p.esperado)],
-      ['Aging ' + d.entrada.mesAtual, reais(p.atual)],
-      ['Diferença da ponte', reais(p.diferenca)],
+      [((p.inicio && p.inicio.modo === 'razao') ? 'Saldo inicial · razão ' : 'Saldo inicial · aging ') + d.entrada.mesAnterior, reais(p.anterior), dc(p.anterior)],
+      ['Movimento do razão', reais(p.movimento), dc(p.movimento)],
+      ['Esperado (contabilidade)', reais(p.esperado), dc(p.esperado)],
+      ['Aging ' + d.entrada.mesAtual, reais(p.atual), dc(p.atual)],
+      ['Diferença da ponte', reais(p.diferenca), dc(p.diferenca)],
       [],
       ['Conciliações com ID', t.conciliacoes],
       ['  A×A', t.AxA], ['  A×B', t.AxB],
@@ -293,13 +295,13 @@
       ['Manuais (à mão)', t.manuais],
       ['Só pelo valor (≈)', t.porValor],
       ['Manuais com diferença', t.manuaisComDiferenca],
-      ['Em aberto · Parte A (itens)', rel.abertosA.length], ['Em aberto · Parte A (valor)', reais(rel.valorAbertoA)],
-      ['Em aberto · Parte B (itens)', rel.abertosB.length], ['Em aberto · Parte B (valor)', reais(rel.valorAbertoB)],
-      ['Diferença a investigar', reais(rel.valorAbertoA - rel.valorAbertoB)],
+      ['Em aberto · Parte A (itens)', rel.abertosA.length], ['Em aberto · Parte A (valor)', reais(rel.valorAbertoA), dc(rel.valorAbertoA)],
+      ['Em aberto · Parte B (itens)', rel.abertosB.length], ['Em aberto · Parte B (valor)', reais(rel.valorAbertoB), dc(rel.valorAbertoB)],
+      ['Diferença a investigar', reais(rel.valorAbertoA - rel.valorAbertoB), dc(rel.valorAbertoA - rel.valorAbertoB)],
     ]);
-    X.utils.book_append_sheet(wb, folha(resumo, [34, 60], [1], 7), 'Resumo');
+    X.utils.book_append_sheet(wb, folha(resumo, [34, 60, 6], [1], 7), 'Resumo');
 
-    const cabecalhoItens = ['ID', 'Tipo', 'Como', 'Documento (ID)', 'Fornecedor (ID)', 'Parte A (ID)', 'Parte B (ID)', 'Quem', 'Quando', 'Observação', 'Aviso', 'Lado', 'Documento', 'Origem', 'Data', 'Fornecedor', 'Histórico', 'Valor'];
+    const cabecalhoItens = ['ID', 'Tipo', 'Como', 'Documento (ID)', 'Fornecedor (ID)', 'Parte A (ID)', 'Parte B (ID)', 'Quem', 'Quando', 'Observação', 'Aviso', 'Lado', 'Documento', 'Origem', 'Data', 'Fornecedor', 'Histórico', 'Valor', 'D/C'];
     const linhasDe = (lista) => {
       const linhas = [cabecalhoItens];
       for (const x of lista) {
@@ -308,19 +310,19 @@
           linhas.push([g.id, TIPO[g.tipo] || g.tipo, COMO[g.regra] || g.regra, g.documento || '', g.nome || '', reais(g.valorA), reais(g.valorB), g.quem || '',
             g.quando ? U.dataHoraLocal(g.quando) : '', g.obs || '', g.aviso === 'baixa-antes-da-nota' ? R.cfg.avisoCurto : '',
             i.faltando ? '' : i.lado, i.faltando ? '' : i.doc, i.faltando ? 'item não está mais nos arquivos' : fonte(i), i.faltando ? '' : (i.data || ''),
-            i.faltando ? '' : (i.nome || ''), i.faltando ? i.id : (i.historico || ''), i.faltando ? '' : reais(i.valor)]);
+            i.faltando ? '' : (i.nome || ''), i.faltando ? i.id : (i.historico || ''), i.faltando ? '' : reais(i.valor), i.faltando ? '' : dc(i.valor)]);
         }
       }
       return linhas;
     };
-    const larguras = [6, 6, 20, 14, 30, 13, 13, 16, 16, 30, 18, 5, 12, 18, 11, 30, 50, 13];
+    const larguras = [6, 6, 20, 14, 30, 13, 13, 16, 16, 30, 18, 5, 12, 18, 11, 30, 50, 13, 5];
     X.utils.book_append_sheet(wb, folha(linhasDe(rel.manuais), larguras, [5, 6, 17], 1), 'Manuais');
     X.utils.book_append_sheet(wb, folha(linhasDe(rel.automaticas), larguras, [5, 6, 17], 1), 'Automáticas');
     if (rel.porValor.length) X.utils.book_append_sheet(wb, folha(linhasDe(rel.porValor), larguras, [5, 6, 17], 1), 'Só pelo valor');
 
-    const abertos = (lista) => [['Documento', 'Origem', 'Data', 'Fornecedor', 'Histórico', 'Valor']].concat(lista.map((i) => [i.doc, fonte(i), i.data || '', i.nome || '', i.historico || '', reais(i.valor)]));
-    X.utils.book_append_sheet(wb, folha(abertos(rel.abertosA), [12, 18, 11, 34, 60, 13], [5], 1), 'Em aberto A');
-    X.utils.book_append_sheet(wb, folha(abertos(rel.abertosB), [12, 18, 11, 34, 60, 13], [5], 1), 'Em aberto B');
+    const abertos = (lista) => [['Documento', 'Origem', 'Data', 'Fornecedor', 'Histórico', 'Valor', 'D/C']].concat(lista.map((i) => [i.doc, fonte(i), i.data || '', i.nome || '', i.historico || '', reais(i.valor), dc(i.valor)]));
+    X.utils.book_append_sheet(wb, folha(abertos(rel.abertosA), [12, 18, 11, 34, 60, 13, 5], [5], 1), 'Em aberto A');
+    X.utils.book_append_sheet(wb, folha(abertos(rel.abertosB), [12, 18, 11, 34, 60, 13, 5], [5], 1), 'Em aberto B');
 
     const bytes = X.write(wb, { bookType: 'xlsx', type: 'array' });
     T.baixar(new Uint8Array(bytes), nomeDoArquivo('.xlsx'), 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');

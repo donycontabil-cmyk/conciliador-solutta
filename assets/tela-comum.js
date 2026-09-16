@@ -19,6 +19,21 @@
     return '<td class="num' + (n === 0 ? ' zero' : '') + (extra ? ' ' + extra : '') + '">' + U.formatarCentavos(n) + '</td>';
   }
   function moeda(c) { return 'R$ ' + U.formatarCentavos(c); }
+  // Valor com a natureza no lugar do sinal (Dony, 16/09/2026): "1.236,55 C" / "1.236,55 D".
+  // dc = 'D' | 'C' | '' (quem decide é o passo, pela natureza da conta).
+  function valorDC(c, dc) {
+    const n = Math.round(Number(c) || 0);
+    return U.formatarCentavos(Math.abs(n)) + (n && dc ? ' ' + dc : '');
+  }
+  function marcaDC(dc) { return dc ? ' <span class="dc ' + dc.toLowerCase() + '" title="' + (dc === 'D' ? 'Débito' : 'Crédito') + '">' + dc + '</span>' : ''; }
+  function htmlDC(c, dc) {
+    const n = Math.round(Number(c) || 0);
+    return U.formatarCentavos(Math.abs(n)) + (n ? marcaDC(dc) : '');
+  }
+  function tdValorDC(c, dc, extra) {
+    const n = Math.round(Number(c) || 0);
+    return '<td class="num' + (n === 0 ? ' zero' : '') + (extra ? ' ' + extra : '') + '">' + htmlDC(n, dc) + '</td>';
+  }
   function nome(n) { return n && String(n).trim() ? esc(n) : '—'; }
 
   // ------------------------------------------------------------------
@@ -302,7 +317,7 @@
   }
 
   raiz.Tela = {
-    esc, valor, tdValor, moeda, nome, avisoRapido, mensagemDeErro, janela, confirmar, pilula, seloComo, COMO, SITUACOES,
+    esc, valor, tdValor, moeda, valorDC, htmlDC, tdValorDC, marcaDC, nome, avisoRapido, mensagemDeErro, janela, confirmar, pilula, seloComo, COMO, SITUACOES,
     baixar, lerArquivoComoBytes, debounce, tabelaPaginada, ordenarLinhas, carregando,
   };
 })(self);
