@@ -721,9 +721,12 @@
 
     const ab = M.emAbertoAB(it, grupos);
     const busca = filtro('busca');
-    const mostrar = filtro('mostrar');            // '' = em aberto · 'conciliados' · 'todos'
+    const mostrar = filtro('mostrar');            // '' = em aberto · 'conciliados' · 'valor' (só pelo valor) · 'todos'
     const b = buscaAB(busca);
-    const naLista = (x) => (mostrar === 'todos' || (mostrar === 'conciliados' ? E.idDoItem.has(x.id) : !E.idDoItem.has(x.id))) && b.item(x);
+    const naLista = (x) => (mostrar === 'todos' ? true
+      : mostrar === 'conciliados' ? E.idDoItem.has(x.id)
+      : mostrar === 'valor' ? M.ehPorValor(E.idDoItem.get(x.id))
+      : !E.idDoItem.has(x.id)) && b.item(x);
     const doLadoA = filtroDoLado('A'), doLadoB = filtroDoLado('B');
     const passaA = (x) => (E.incluirAnterior || (x.fonte !== 'anterior' && x.fonte !== 'pendente')) && naLista(x) && doLadoA(x);
     const passaB = (x) => naLista(x) && doLadoB(x);
@@ -740,12 +743,12 @@
 
     E.el.querySelector('#filtros').innerHTML =
       '<input type="search" class="busca" data-filtro="busca" placeholder="Busca nos dois lados: documento, fornecedor, valor, data ou #ID" title="Vale para a Parte A, a Parte B e a lista de conciliações. Cada parte tem também os seus filtros." value="' + T.esc(busca) + '">' +
-      '<select class="filtro" data-filtro="mostrar">' + [['', 'Em aberto'], ['conciliados', 'Conciliados'], ['todos', 'Todos']].map((o) =>
+      '<select class="filtro" data-filtro="mostrar">' + [['', 'Em aberto'], ['conciliados', 'Conciliados'], ['valor', 'Conciliados só pelo valor'], ['todos', 'Todos']].map((o) =>
         '<option value="' + o[0] + '"' + (mostrar === o[0] ? ' selected' : '') + '>' + o[1] + '</option>').join('') + '</select>' +
       '<label class="linha-flex" style="gap:6px"><input type="checkbox" id="ab-anterior"' + (E.incluirAnterior ? ' checked' : '') + '> <span class="pequeno">Parte A = aging ' + T.esc(E.entrada.mesAnterior) + (E.itens.continuacao ? ' + pendências' : '') + ' + razão</span></label>' +
       '<span class="suave pequeno">(desmarque para <b>só o razão</b>)</span>';
 
-    const rot = mostrar === 'todos' ? 'item(ns)' : (mostrar === 'conciliados' ? 'conciliado(s)' : 'em aberto');
+    const rot = mostrar === 'todos' ? 'item(ns)' : mostrar === 'conciliados' ? 'conciliado(s)' : mostrar === 'valor' ? 'conciliado(s) só pelo valor' : 'em aberto';
     alvo.innerHTML = cartaoInicio() + resumoAB(ab, grupos) +
       '<div class="grade-ab">' +
       colunaAB('A', 'Parte A · contabilidade', E.incluirAnterior ? 'aging ' + E.entrada.mesAnterior + ' + razão de ' + (E.entrada.nomeRazao || E.entrada.mesAtual) : 'só o razão de ' + (E.entrada.nomeRazao || E.entrada.mesAtual), filtradosA, fixosA, rot) +
@@ -756,13 +759,14 @@
     T.tabelaPaginada(alvo.querySelector('#colA'), tabelaItens('A', listaA));
     T.tabelaPaginada(alvo.querySelector('#colB'), tabelaItens('B', listaB));
     atualizarBarraAB();
-    desenharListaAB(alvo.querySelector('#lista-ab'), b);
+    desenharListaAB(alvo.querySelector('#lista-ab'), b, mostrar === 'valor');
   }
 
   function resumoAB(ab, grupos) {
     const conta = (tipo) => grupos.filter((g) => g.tipo === tipo).length;
     const aMao = grupos.filter((g) => g.regra === 'manual').length;
-    const auto = grupos.length - aMao;
+    const porValor = grupos.filter(M.ehPorValor).length;
+    const auto = grupos.length - aMao - porValor;
     const dif = ab.valorA - ab.valorB;
     // Conciliação à mão "assim mesmo" (sem bater) tira valores diferentes dos dois lados.
     const forcado = grupos.reduce((s, g) => s + (g.valorA - g.valorB), 0);
@@ -776,12 +780,16 @@
       '</div>' +
       '<div class="linha-flex">' +
       '<button type="button" class="botao primario" data-acao="conciliar-tudo" title="Acha tudo o que casa pelo documento e marca cada conciliação com um ID">⚡ Conciliar</button>' +
+      // Dony, 16/09/2026: só roda quando ele aperta (valores quebrados, sem documento e sem fornecedor).
+      '<button type="button" class="botao" data-acao="conciliar-valor" title="Depois do ⚡ pelo documento, casa o que sobrou por VALOR igual, sem olhar documento e fornecedor. Só valor quebrado: inteiro terminado em zero (10, 100, 200…) fica de fora.">≈ Conciliar só pelo valor</button>' +
       (auto ? '<button type="button" class="botao pequeno perigo" data-acao="desfazer-automaticas">Desfazer as automáticas</button>' : '') +
+      (porValor ? '<button type="button" class="botao pequeno perigo" data-acao="desfazer-valor">Desfazer as só pelo valor</button>' : '') +
       (aMao ? '<button type="button" class="botao pequeno perigo" data-acao="desfazer-manuais">Desfazer as manuais</button>' : '') +
       '</div></div>' +
       '<p class="suave pequeno" style="margin:10px 0 0">' +
-      (grupos.length ? '<b>' + grupos.length.toLocaleString('pt-BR') + '</b> conciliação(ões) com ID: ' + conta('AxA') + ' A×A · ' + conta('AxB') + ' A×B' + (conta('BxB') ? ' · ' + conta('BxB') + ' B×B' : '') + ' · ' + aMao + ' à mão · em aberto: <b>' + ab.abertosA.length + '</b> na A e <b>' + ab.abertosB.length + '</b> na B. ' : 'Nada conciliado ainda. ') +
-      'O <b>⚡ Conciliar</b> casa pelo <b>documento</b> — primeiro com o mesmo fornecedor, depois com o mesmo nome de fornecedor, depois só pelo documento — e dá um ID para cada conciliação (1, 2, 3…).' +
+      (grupos.length ? '<b>' + grupos.length.toLocaleString('pt-BR') + '</b> conciliação(ões) com ID: ' + conta('AxA') + ' A×A · ' + conta('AxB') + ' A×B' + (conta('BxB') ? ' · ' + conta('BxB') + ' B×B' : '') + ' · ' + aMao + ' à mão' + (porValor ? ' · <b>' + porValor + '</b> só pelo valor' : '') + ' · em aberto: <b>' + ab.abertosA.length + '</b> na A e <b>' + ab.abertosB.length + '</b> na B. ' : 'Nada conciliado ainda. ') +
+      'O <b>⚡ Conciliar</b> casa pelo <b>documento</b> — primeiro com o mesmo fornecedor, depois com o mesmo nome de fornecedor, depois só pelo documento — e dá um ID para cada conciliação (1, 2, 3…). ' +
+      'O <b>≈ Conciliar só pelo valor</b> casa o que sobrou por valor igual, sem documento e sem fornecedor (só valor quebrado) — confira em <b>Conciliados só pelo valor</b>.' +
       (Math.abs(forcado) >= 1 ? ' <span class="falta">Conciliações à mão sem bater: ' + U.formatarCentavos(forcado) + '.</span>' : '') +
       (conferir.length ? '<br><span style="color:var(--ambar)">⚠ Para conferir — ' + E.cfg.avisoAntes + ':</span> ' +
         conferir.slice(0, 15).map((g) => '<button type="button" class="lapis" data-ver-id="' + g.id + '" title="Ver a conciliação #' + g.id + '"><b>#' + g.id + '</b></button>').join(' ') + (conferir.length > 15 ? ' …' : '') : '') +
@@ -815,7 +823,7 @@
           (x.chave === SEM ? '<span class="falta">sem fornecedor</span>' : T.esc(x.nome)) + (x.historico ? '<br><span class="suave pequeno">' + T.esc(x.historico.slice(0, 70)) + '</span>' : '') + '</td>' +
           '<td class="num" title="' + T.esc(rotuloFonte(x)) + '">' + T.esc(x.data || '—') + '<br><span class="pequeno suave">' + T.esc(rotuloCurto(x)) + '</span></td>' +
           '<td class="num ' + (x.valor < 0 ? 'negativo' : '') + '">' + U.formatarCentavos(x.valor) + '</td>' +
-          '<td style="white-space:nowrap">' + (g ? '<button type="button" class="lapis" data-ver-id="' + g.id + '" title="Ver a conciliação #' + g.id + ' (' + T.esc(M.REGRAS_AB[g.regra] || '') + ')"><b>#' + g.id + '</b></button><br><span class="selo opcional">' + TIPO_AB[g.tipo] + '</span>' : '') + '</td></tr>';
+          '<td style="white-space:nowrap">' + (g ? '<button type="button" class="lapis" data-ver-id="' + g.id + '" title="Ver a conciliação #' + g.id + ' (' + T.esc(M.REGRAS_AB[g.regra] || '') + ')"><b>#' + g.id + '</b></button><br><span class="selo ' + (M.ehPorValor(g) ? 'valor' : 'opcional') + '">' + (M.ehPorValor(g) ? 'só valor' : TIPO_AB[g.tipo]) + '</span>' : '') + '</td></tr>';
       },
     };
   }
@@ -842,11 +850,13 @@
       '<button type="button" class="botao" data-acao="limpar-ab">Limpar</button></div>';
   }
 
-  function desenharListaAB(el, b) {
+  function desenharListaAB(el, b, soValor) {
     const grupos = E.decisoes.conciliacoesAB;
     if (!grupos.length) { el.innerHTML = ''; return; }
-    const lista = grupos.filter(b.grupo).sort((x, y) => x.id - y.id);
-    el.innerHTML = '<h3 style="margin:18px 0 8px">Conciliações com ID (' + lista.length.toLocaleString('pt-BR') + (lista.length !== grupos.length ? ' de ' + grupos.length.toLocaleString('pt-BR') : '') + ')</h3><div id="tab-ab"></div>';
+    const lista = grupos.filter((g) => b.grupo(g) && (!soValor || M.ehPorValor(g))).sort((x, y) => x.id - y.id);
+    el.innerHTML = '<h3 style="margin:18px 0 8px">' + (soValor ? 'Conciliações só pelo valor' : 'Conciliações com ID') + ' (' + lista.length.toLocaleString('pt-BR') + (lista.length !== grupos.length ? ' de ' + grupos.length.toLocaleString('pt-BR') : '') + ')</h3>' +
+      (soValor ? '<div class="aviso ambar" style="margin:0 0 10px"><span class="icone-aviso">≈</span><div>Casadas <b>só pelo valor</b> (valor quebrado igual), sem olhar documento e fornecedor. Confira cada uma: abra no ▸ e, se não for, clique em <b>Desfazer</b>.</div></div>' : '') +
+      '<div id="tab-ab"></div>';
     T.tabelaPaginada(el.querySelector('#tab-ab'), {
       alta: false, porPagina: 100,
       cabecalho: '<th style="width:24px"></th><th>ID</th><th>Tipo</th><th>Como</th><th>Documento</th><th>Fornecedor</th><th class="num">Parte A</th><th class="num">Parte B</th><th>Itens</th><th>Quem</th><th></th>',
@@ -858,7 +868,7 @@
         return '<tr class="' + (aberto ? 'destaque' : '') + '"><td><button type="button" class="lapis" data-abrir-ab="' + g.id + '" title="Ver os itens">' + (aberto ? '▾' : '▸') + '</button></td>' +
           '<td class="num"><b>#' + g.id + '</b></td>' +
           '<td><span class="pilula ' + (g.tipo === 'AxB' ? 'azul' : 'cinza') + '">' + TIPO_AB[g.tipo] + '</span></td>' +
-          '<td><span class="selo ' + (g.regra === 'manual' ? 'mao' : 'opcional') + '" title="' + T.esc(M.REGRAS_AB[g.regra] || '') + '">' + T.esc(COMO_AB[g.regra] || g.regra) + '</span>' +
+          '<td><span class="selo ' + (g.regra === 'manual' ? 'mao' : M.ehPorValor(g) ? 'valor' : 'opcional') + '" title="' + T.esc(M.REGRAS_AB[g.regra] || '') + '">' + T.esc(COMO_AB[g.regra] || g.regra) + '</span>' +
           (g.aviso === 'baixa-antes-da-nota' ? '<br><span class="selo suspeita" title="' + primeiraMaiuscula(E.cfg.avisoAntes) + ' (7.11): confira">' + E.cfg.avisoCurto + '</span>' : '') + '</td>' +
           '<td class="num">' + T.nome(g.documento) + '</td>' +
           '<td class="nome">' + T.nome(g.nome) + (g.obs ? '<br><span class="suave pequeno">✎ ' + T.esc(g.obs) + '</span>' : '') +
@@ -916,6 +926,39 @@
     gravar('terceiro-ab-automatico', texto);
   }
 
+  // ≈ Conciliar só pelo valor (Dony, 16/09/2026): só quando ele aperta. Antes, o que casa pelo
+  // documento (o ⚡) — o valor sozinho é a última tentativa.
+  async function conciliarSoPeloValor() {
+    const quem = app().usuario.nome, quando = U.agoraISO();
+    const pelosDocs = M.conciliarAutomatico(E.itens, E.decisoes.conciliacoesAB, quem, quando);
+    const porValor = M.conciliarPorValor(E.itens, E.decisoes.conciliacoesAB.concat(pelosDocs), quem, quando);
+    if (!porValor.length) {
+      T.avisoRapido('Nada casa só pelo valor (com valor quebrado) no que ficou em aberto' + (pelosDocs.length ? '. O ⚡ pelo documento achou ' + pelosDocs.length + ' e elas NÃO foram gravadas: aperte ⚡ Conciliar.' : '.'), 'ok', 8000);
+      return;
+    }
+    const n = (regra) => porValor.filter((g) => g.regra === regra).length;
+    const conferir = porValor.filter((g) => g.aviso).length;
+    const ok = await T.confirmar({
+      titulo: 'Conciliar só pelo valor?',
+      texto: (pelosDocs.length ? 'Antes, o <b>⚡ pelo documento</b> acha <b>' + pelosDocs.length + '</b> conciliação(ões) novas.<br>' : '') +
+        'Só pelo valor (sem olhar documento e fornecedor, só valor quebrado): <b>' + porValor.length + '</b> conciliação(ões) — ' +
+        n('valor-par') + ' dentro da Parte A e ' + n('valor') + ' da Parte A com a Parte B' + (conferir ? ', ' + conferir + ' para conferir (' + E.cfg.avisoAntes + ')' : '') + '.<br><br>' +
+        'Depois, confira em <b>Mostrar → Conciliados só pelo valor</b>; o que não for, é só desfazer.',
+      botao: 'Conciliar só pelo valor',
+    });
+    if (!ok) return;
+    E.decisoes.conciliacoesAB = E.decisoes.conciliacoesAB.concat(pelosDocs, porValor);
+    const faixa = (xs) => xs.length === 1 ? 'ID #' + xs[0].id : 'IDs #' + xs[0].id + ' a #' + xs[xs.length - 1].id;
+    const texto = (pelosDocs.length ? pelosDocs.length + ' pelo documento (' + faixa(pelosDocs) + ') e ' : '') +
+      porValor.length + ' só pelo valor (' + faixa(porValor) + '): ' + n('valor-par') + ' A×A e ' + n('valor') + ' A×B';
+    historico('≈ Conciliar só pelo valor: ' + texto);
+    E.filtros[E.aba + '.mostrar'] = 'valor'; // já mostra as novas para conferir
+    redesenharAB();
+    const ab = M.emAbertoAB(E.itens, E.decisoes.conciliacoesAB);
+    T.avisoRapido('≈ ' + texto + '. Em aberto: ' + ab.abertosA.length + ' na A e ' + ab.abertosB.length + ' na B.', 'ok', 9000);
+    gravar('terceiro-ab-valor', texto);
+  }
+
   // Limpar a conciliação de um mês (Dony, 14/09/2026: "escolho o mês da conciliação e limpo ela
   // todinha"). Apaga o registro deste passo nesse mês: conciliações com ID (automáticas e à mão),
   // observações e fornecedores ajustados à mão. Os arquivos continuam guardados; o registro vai
@@ -971,23 +1014,28 @@
 
   // Desfazer em lote (Dony, 14/09/2026: "desfazer as automáticas e desfazer as manuais também").
   // Uma por uma continua no botão Desfazer de cada ID, na lista.
-  async function desfazerEmLote(manuais) {
-    const saem = E.decisoes.conciliacoesAB.filter((g) => (g.regra === 'manual') === manuais);
+  // tipo: 'manuais' (à mão) · 'automaticas' (⚡ pelo documento) · 'valor' (≈ só pelo valor).
+  const LOTES = {
+    manuais: { de: (g) => g.regra === 'manual', nome: 'manuais', titulo: 'Desfazer as conciliações manuais',
+      texto: (n) => 'As <b>' + n + '</b> conciliações feitas à mão voltam para <b>em aberto</b> (as observações delas também saem). As outras continuam.' },
+    automaticas: { de: (g) => g.regra !== 'manual' && !M.ehPorValor(g), nome: 'automáticas', titulo: 'Desfazer as conciliações automáticas',
+      texto: (n) => 'As <b>' + n + '</b> conciliações feitas pelo ⚡ Conciliar (pelo documento) voltam para <b>em aberto</b>. As feitas à mão e as só pelo valor continuam.' },
+    valor: { de: M.ehPorValor, nome: 'só pelo valor', titulo: 'Desfazer as conciliações só pelo valor',
+      texto: (n) => 'As <b>' + n + '</b> conciliações feitas pelo ≈ Conciliar só pelo valor voltam para <b>em aberto</b>. As outras continuam.' },
+  };
+  async function desfazerEmLote(tipo) {
+    const lote = LOTES[tipo];
+    const saem = E.decisoes.conciliacoesAB.filter(lote.de);
     if (!saem.length) return;
-    const ok = await T.confirmar({
-      titulo: manuais ? 'Desfazer as conciliações manuais' : 'Desfazer as conciliações automáticas',
-      texto: manuais
-        ? 'As <b>' + saem.length.toLocaleString('pt-BR') + '</b> conciliações feitas à mão voltam para <b>em aberto</b> (as observações delas também saem). As automáticas continuam.'
-        : 'As <b>' + saem.length.toLocaleString('pt-BR') + '</b> conciliações feitas pelo ⚡ Conciliar voltam para <b>em aberto</b>. As feitas à mão continuam.',
-      botao: 'Desfazer', perigo: true,
-    });
+    const ok = await T.confirmar({ titulo: lote.titulo, texto: lote.texto(saem.length.toLocaleString('pt-BR')), botao: 'Desfazer', perigo: true });
     if (!ok) return;
-    E.decisoes.conciliacoesAB = E.decisoes.conciliacoesAB.filter((g) => (g.regra === 'manual') !== manuais);
+    const ids = new Set(saem.map((g) => g.id));
+    E.decisoes.conciliacoesAB = E.decisoes.conciliacoesAB.filter((g) => !ids.has(g.id));
     saem.forEach((g) => E.abertosAB.delete(g.id));
-    historico('Desfez ' + saem.length + ' conciliações ' + (manuais ? 'manuais' : 'automáticas') + ': ' + saem.slice(0, 20).map((g) => '#' + g.id).join(', ') + (saem.length > 20 ? '…' : ''));
+    historico('Desfez ' + saem.length + ' conciliações ' + lote.nome + ': ' + saem.slice(0, 20).map((g) => '#' + g.id).join(', ') + (saem.length > 20 ? '…' : ''));
     redesenharAB();
-    T.avisoRapido(saem.length + ' conciliação(ões) ' + (manuais ? 'manuais' : 'automáticas') + ' desfeita(s).', 'ok');
-    gravar(manuais ? 'terceiro-ab-desfazer-manuais' : 'terceiro-ab-desfazer-automaticas', saem.length + ' conciliações');
+    T.avisoRapido(saem.length + ' conciliação(ões) ' + lote.nome + ' desfeita(s).', 'ok');
+    gravar('terceiro-ab-desfazer-' + tipo, saem.length + ' conciliações');
   }
 
   async function conciliarAB() {
@@ -1171,8 +1219,10 @@
       else if (a === 'trocar-inicio') await trocarInicio();
       else if (a === 'limpar-conciliacao') await limparConciliacao();
       else if (a === 'conciliar-tudo') conciliarTudo();
-      else if (a === 'desfazer-automaticas') await desfazerEmLote(false);
-      else if (a === 'desfazer-manuais') await desfazerEmLote(true);
+      else if (a === 'conciliar-valor') await conciliarSoPeloValor();
+      else if (a === 'desfazer-automaticas') await desfazerEmLote('automaticas');
+      else if (a === 'desfazer-valor') await desfazerEmLote('valor');
+      else if (a === 'desfazer-manuais') await desfazerEmLote('manuais');
       else if (a === 'conciliar-ab') await conciliarAB();
       else if (a === 'limpar-ab') { E.selA = new Set(); E.selB = new Set(); redesenhaMantendo(); }
       return;

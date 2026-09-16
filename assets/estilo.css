@@ -194,6 +194,8 @@ details.inativos .numero {
 .selo.inversa { color: #6b3fa0; border-color: #d7c4ec; background: #f3edfa; }
 .selo.suspeita { color: var(--ambar); border-color: #efd28e; background: var(--ambar-fundo); }
 .selo.mao { color: var(--cinza); border-color: var(--borda-forte); background: var(--cinza-fundo); }
+/* Conciliado só pelo valor (sem documento e fornecedor): roxo, para conferir. */
+.selo.valor { color: #6b3fa0; border-color: #d7c4ec; background: #f3edfa; }
 .ok { color: var(--verde); }
 .falta { color: var(--vermelho); }
 
@@ -395,6 +397,7 @@ table.tabela tr.fixo td:first-child { box-shadow: inset 3px 0 0 var(--ambar); }
 .rel-marcador.ambar { background: #d69a1f; }
 .rel-marcador.azul { background: var(--azul); }
 .rel-marcador.vermelho { background: var(--vermelho); }
+.rel-marcador.roxo { background: #6b3fa0; }
 .rel-explica { color: var(--texto-suave); margin: -2px 0 10px; }
 .rel-vazio { color: var(--texto-suave); font-style: italic; margin: 6px 0; }
 .rel-ponte { display: flex; flex-wrap: wrap; gap: 6px; align-items: stretch; margin-bottom: 12px; }
@@ -407,6 +410,7 @@ table.tabela tr.fixo td:first-child { box-shadow: inset 3px 0 0 var(--ambar); }
 .rel-numero { border: 1px solid var(--borda); border-left: 4px solid var(--borda-forte); border-radius: 8px; padding: 8px 12px; }
 .rel-numero.azul { border-left-color: var(--azul); }
 .rel-numero.ambar { border-left-color: #d69a1f; }
+.rel-numero.roxo { border-left-color: #6b3fa0; }
 .rel-numero .rotulo { font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--texto-suave); font-weight: 600; }
 .rel-numero .valor { font-size: 19px; font-weight: 700; font-variant-numeric: tabular-nums; margin-top: 1px; }
 .rel-numero .det { font-size: 11px; color: var(--texto-suave); }
@@ -417,6 +421,7 @@ table.tabela tr.fixo td:first-child { box-shadow: inset 3px 0 0 var(--ambar); }
 .rel-grupo { border: 1px solid var(--borda); border-radius: 8px; margin-bottom: 9px; overflow: hidden; }
 .rel-grupo-cab { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 6px 10px; background: #f2f5f8; border-bottom: 1px solid var(--borda); }
 .rel-grupo.manual .rel-grupo-cab { background: #fff6df; }
+.rel-grupo.valor .rel-grupo-cab { background: #f3edfa; }
 .rel-id { font-weight: 800; background: var(--primaria); color: #fff; border-radius: 6px; padding: 1px 8px; font-variant-numeric: tabular-nums; }
 .rel-doc { font-variant-numeric: tabular-nums; color: var(--texto-suave); white-space: nowrap; }
 .rel-nome { font-weight: 600; flex: 1; min-width: 160px; }

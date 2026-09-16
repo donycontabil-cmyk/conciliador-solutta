@@ -101,13 +101,17 @@
     'doc-nome-valor': 'mesmo documento e mesmo nome de fornecedor: um lançamento e um título de mesmo valor',
     'doc-par': 'mesmo documento, nome diferente: a baixa (ou compensação) mata a nota (ou adiantamento) de mesmo valor',
     'doc': 'mesmo documento, nome diferente: soma igual nos dois lados',
+    // Só pelo valor (botão próprio, ver conciliarPorValor): sem olhar documento nem fornecedor.
+    'valor-par': 'só pelo valor, sem documento e sem fornecedor: dentro da Parte A, quem aumenta com quem diminui o saldo, de mesmo valor quebrado',
+    'valor': 'só pelo valor, sem documento e sem fornecedor: um item da Parte A e um da Parte B de mesmo valor quebrado',
     'manual': 'marcado à mão',
   };
+  function ehPorValor(g) { return !!g && (g.regra === 'valor' || g.regra === 'valor-par'); }
   // Rótulo curto de cada regra na tela e no relatório.
   const COMO_AB = {
     'doc-fornecedor-par': 'doc + fornecedor · par', 'doc-fornecedor': 'doc + fornecedor', 'doc-fornecedor-valor': 'doc + fornecedor · valor',
     'doc-nome-par': 'doc + nome · par', 'doc-nome': 'doc + nome', 'doc-nome-valor': 'doc + nome · valor',
-    'doc-par': 'só doc · par', 'doc': 'só doc', 'manual': 'à mão',
+    'doc-par': 'só doc · par', 'doc': 'só doc', 'valor-par': 'só valor · par', 'valor': 'só valor', 'manual': 'à mão',
   };
 
   // Nome do fornecedor comparável dos dois lados ("AGUA VIVA" = "Agua Viva"): as palavras próprias
@@ -345,6 +349,58 @@
     return novos;
   }
 
+  // ------------------------------------------------------------------
+  // Conciliar SÓ PELO VALOR (Dony, 16/09/2026): há contas em que nem o documento nem o fornecedor
+  // ligam os dois lados ("a compra é a nota 45 do Zequinha, de 200 reais, e o pagamento saiu como
+  // Bradesco cartão de crédito, 200 reais: nunca vou achar"). Botão próprio, em todas as conciliações
+  // A × B, que só roda quando ele aperta. Casa o que ficou em aberto por valor igual, sem olhar
+  // documento e fornecedor — e só valor QUEBRADO, para evitar coincidência: valor inteiro terminado
+  // em zero (10, 20, 100, 200, 250, 1.000…) fica de fora; 200,15 e 281,00 entram.
+  //   1. valor-par — dentro da Parte A: quem aumenta o saldo com quem diminui, de mesmo valor (a mais
+  //      perto na data; a redução antes do aumento concilia, mas fica marcada para conferir);
+  //   2. valor — Parte A com Parte B: um item da A e um título da B de mesmo valor (o mais antigo primeiro).
+  // As conciliações ganham ID como as outras e aparecem à parte ("Conciliados só pelo valor").
+  // ------------------------------------------------------------------
+  function valorRedondo(centavos) { return Math.abs(Number(centavos) || 0) % 1000 === 0; }
+
+  function conciliarPorValor(itens, existentes, quem, quando) {
+    const usados = new Set();
+    (existentes || []).forEach((g) => (g.a || []).concat(g.b || []).forEach((id) => usados.add(id)));
+    let proximo = proximoIdAB(existentes);
+    const serve = (x) => !usados.has(x.id) && !valorRedondo(x.valor);
+    const novos = [];
+    const soma = (xs) => xs.reduce((s, x) => s + x.valor, 0);
+    function registrar(a, b, regra) {
+      const todos = a.concat(b);
+      const nomeDe = (todos.find((x) => x.chave !== SEM) || todos[0]).nome;
+      const g = { id: proximo++, tipo: tipoAB(a.length, b.length), regra, documento: (todos.find((x) => x.doc) || {}).doc || '', nome: nomeDe,
+        a: a.map((x) => x.id), b: b.map((x) => x.id), valorA: soma(a), valorB: soma(b), quem: quem || '', quando: quando || '' };
+      const aumento = a.find((x) => x.valor > 0), reducao = a.find((x) => x.valor < 0);
+      if (aumento && reducao && aumento.fonte !== 'anterior' && aumento.fonte !== 'pendente' && reducao.ordem < aumento.ordem) g.aviso = 'baixa-antes-da-nota';
+      novos.push(g);
+      todos.forEach((x) => usados.add(x.id));
+    }
+    // 1. Dentro da Parte A.
+    const aumentos = itens.A.filter((x) => serve(x) && x.valor > 0).sort((p, q) => p.ordem - q.ordem);
+    const reducoes = itens.A.filter((x) => serve(x) && x.valor < 0).sort((p, q) => p.ordem - q.ordem);
+    for (const r of reducoes) {
+      let melhor = -1;
+      aumentos.forEach((n, j) => {
+        if (n.valor !== -r.valor) return;
+        if (melhor < 0 || Math.abs(n.ordem - r.ordem) < Math.abs(aumentos[melhor].ordem - r.ordem)) melhor = j;
+      });
+      if (melhor >= 0) { registrar([aumentos[melhor], r], [], 'valor-par'); aumentos.splice(melhor, 1); }
+    }
+    // 2. Parte A com Parte B.
+    const ladoA = itens.A.filter(serve).sort((p, q) => p.ordem - q.ordem);
+    const ladoB = itens.B.filter(serve).sort(porData);
+    for (const a of ladoA) {
+      const j = ladoB.findIndex((b) => b.valor === a.valor);
+      if (j >= 0) { registrar([a], [ladoB[j]], 'valor'); ladoB.splice(j, 1); }
+    }
+    return novos;
+  }
+
   // Vencimento (dd/mm/aaaa) em número, para ordenar os títulos do mais antigo para o mais novo.
   function porData(p, q) {
     const n = (x) => { const d = Util.lerData(x.data); return d ? d.numero : 0; };
@@ -387,10 +443,11 @@
       return { grupo: g, itens: doGrupo, faltando: doGrupo.filter((x) => x.faltando).length, diferenca: (g.valorA || 0) - (g.valorB || 0) };
     });
     const manuais = porId.filter((x) => x.grupo.regra === 'manual');
-    const automaticas = porId.filter((x) => x.grupo.regra !== 'manual');
+    const porValor = porId.filter((x) => ehPorValor(x.grupo));
+    const automaticas = porId.filter((x) => x.grupo.regra !== 'manual' && !ehPorValor(x.grupo));
     const ab = emAbertoAB(itens, grupos);
     const porRegra = {};
-    for (const x of automaticas) {
+    for (const x of automaticas.concat(porValor)) {
       const k = x.grupo.regra;
       if (!porRegra[k]) porRegra[k] = { conciliacoes: 0, itens: 0 };
       porRegra[k].conciliacoes++;
@@ -398,13 +455,14 @@
     }
     const conta = (lista, pred) => lista.filter(pred).length;
     return {
-      manuais, automaticas, porRegra,
+      manuais, automaticas, porValor, porRegra,
       abertosA: ab.abertosA.slice().sort(compararPorDocumento), abertosB: ab.abertosB.slice().sort(compararPorDocumento),
       valorAbertoA: ab.valorA, valorAbertoB: ab.valorB,
       totais: {
-        conciliacoes: porId.length, automaticas: automaticas.length, manuais: manuais.length,
+        conciliacoes: porId.length, automaticas: automaticas.length, manuais: manuais.length, porValor: porValor.length,
         itensConciliados: porId.reduce((s, x) => s + x.itens.length - x.faltando, 0),
         itensAutomaticas: automaticas.reduce((s, x) => s + x.itens.length, 0), itensManuais: manuais.reduce((s, x) => s + x.itens.length, 0),
+        itensPorValor: porValor.reduce((s, x) => s + x.itens.length, 0),
         AxA: conta(porId, (x) => x.grupo.tipo === 'AxA'), AxB: conta(porId, (x) => x.grupo.tipo === 'AxB'), BxB: conta(porId, (x) => x.grupo.tipo === 'BxB'),
         manuaisComDiferenca: conta(manuais, (x) => Math.abs(x.diferenca) >= 1),
         paraConferir: porId.filter((x) => x.grupo.aviso === 'baixa-antes-da-nota').map((x) => x.grupo.id),
@@ -584,5 +642,6 @@
     calcular, fornecedorDoHistorico, documentoDoHistorico, chaveDoTitulo,
     normalizarDocumento, documentoDaLinha, itensAB, conciliarAutomatico, emAbertoAB, tipoAB, proximoIdAB, REGRAS_AB,
     compararPorDocumento, arrumarGruposAB, relatorioAB, pendenciasAB, saldoInicialAB, idsDeTitulos, COMO_AB, nomeComparavel, ladosDoRazao,
+    conciliarPorValor, valorRedondo, ehPorValor,
   };
 });

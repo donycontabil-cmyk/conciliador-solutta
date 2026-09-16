@@ -18,7 +18,7 @@
   const TIPO = { AxA: 'A×A', AxB: 'A×B', BxB: 'B×B' };
   const COMO = M.COMO_AB; // rótulo curto de cada regra (definido no motor)
   const CHAVE_OPCOES = 'conciliador-solutta.relatorio3';
-  const PADRAO = { manuais: true, automaticas: true, itens: true, abertos: true };
+  const PADRAO = { manuais: true, automaticas: true, valor: true, itens: true, abertos: true };
 
   function lerOpcoes() {
     try { return Object.assign({}, PADRAO, JSON.parse(app().lerLocal(CHAVE_OPCOES) || '{}')); } catch (e) { return Object.assign({}, PADRAO); }
@@ -50,13 +50,14 @@
       '<div class="barra-relatorio nao-imprimir">' +
       '<a class="voltar" style="margin:0" href="' + R.voltar + '">← Voltar para a conciliação</a>' +
       '<div class="linha-flex" style="gap:14px">' +
-      '<span class="suave pequeno">Mostrar:</span>' + marca('manuais', 'Manuais') + marca('automaticas', 'Automáticas') + marca('itens', 'Itens de cada ID') + marca('abertos', 'Em aberto') +
+      '<span class="suave pequeno">Mostrar:</span>' + marca('manuais', 'Manuais') + marca('automaticas', 'Automáticas') + marca('valor', 'Só pelo valor') + marca('itens', 'Itens de cada ID') + marca('abertos', 'Em aberto') +
       '<button type="button" class="botao" data-acao="excel" title="Baixar o relatório em planilha">⬇ Excel</button>' +
       '<button type="button" class="botao primario" data-acao="imprimir" title="Na janela de impressão, escolha a impressora ou “Salvar como PDF”">🖨 Imprimir / salvar PDF</button>' +
       '</div></div>' +
       '<article class="relatorio">' + capa() + resumo() +
       (o.manuais ? secaoConciliacoes('manuais') : '') +
       (o.automaticas ? secaoConciliacoes('automaticas') : '') +
+      (o.valor && R.rel.porValor.length ? secaoConciliacoes('valor') : '') +
       (o.abertos ? secaoAbertos() : '') +
       assinaturas() + '</article>';
     R.el.querySelector('.barra-relatorio').addEventListener('change', (ev) => {
@@ -138,11 +139,12 @@
       numero('Conciliações com ID', t.conciliacoes.toLocaleString('pt-BR'), t.AxA + ' A×A · ' + t.AxB + ' A×B' + (t.BxB ? ' · ' + t.BxB + ' B×B' : '') + ' · ' + t.itensConciliados.toLocaleString('pt-BR') + ' itens') +
       numero('Automáticas (⚡ Conciliar)', t.automaticas.toLocaleString('pt-BR'), t.itensAutomaticas.toLocaleString('pt-BR') + ' itens · pelo documento', 'azul') +
       numero('Manuais (à mão)', t.manuais.toLocaleString('pt-BR'), t.itensManuais.toLocaleString('pt-BR') + ' itens · ' + t.manuaisComDiferenca + ' com diferença', 'ambar') +
+      (t.porValor ? numero('Só pelo valor (≈)', t.porValor.toLocaleString('pt-BR'), t.itensPorValor.toLocaleString('pt-BR') + ' itens · sem documento e fornecedor · conferir', 'roxo') : '') +
       numero('Em aberto · Parte A', dinheiro(rel.valorAbertoA), rel.abertosA.length + ' item(ns) na contabilidade') +
       numero('Em aberto · Parte B', dinheiro(rel.valorAbertoB), rel.abertosB.length + ' item(ns) no financeiro') +
       numero('Diferença a investigar', dinheiro(difAB), 'em aberto A − em aberto B', 'destaque') +
       '</div>' +
-      (regras.length ? '<table class="rel-tab rel-regras"><thead><tr><th>Como o ⚡ Conciliar achou</th><th class="num">Conciliações</th><th class="num">Itens</th></tr></thead><tbody>' +
+      (regras.length ? '<table class="rel-tab rel-regras"><thead><tr><th>Como foi achado</th><th class="num">Conciliações</th><th class="num">Itens</th></tr></thead><tbody>' +
         regras.map((k) => '<tr><td><b>' + T.esc(COMO[k]) + '</b> <span class="suave">— ' + T.esc(M.REGRAS_AB[k] || '') + '</span></td><td class="num">' + rel.porRegra[k].conciliacoes + '</td><td class="num">' + rel.porRegra[k].itens + '</td></tr>').join('') +
         '</tbody></table>' : '') +
       (t.paraConferir.length ? '<p class="rel-alerta">⚠ Para conferir — ' + R.cfg.avisoAntes + ': ' + t.paraConferir.map((id) => '<b>#' + id + '</b>').join(', ') + '</p>' : '') +
@@ -150,39 +152,45 @@
       '</section>';
   }
 
+  const SECOES = {
+    manuais: { lista: () => R.rel.manuais, titulo: 'Conciliações manuais', vazio: 'manual', total: 'das manuais', marcador: 'ambar',
+      explica: 'Feitas à mão: quem marcou os itens, quando, e a observação quando concilia com diferença.' },
+    automaticas: { lista: () => R.rel.automaticas, titulo: 'Conciliações automáticas', vazio: 'automática', total: 'das automáticas', marcador: 'azul',
+      explica: 'Achadas pelo ⚡ Conciliar, pelo número do documento: primeiro com o mesmo fornecedor, depois com o mesmo nome de fornecedor, depois só pelo documento.' },
+    valor: { lista: () => R.rel.porValor, titulo: 'Conciliações só pelo valor', vazio: 'só pelo valor', total: 'das só pelo valor', marcador: 'roxo',
+      explica: 'Achadas pelo ≈ Conciliar só pelo valor: mesmo valor quebrado, SEM olhar documento e fornecedor (valor inteiro terminado em zero fica de fora). Confira cada uma.' },
+  };
   function secaoConciliacoes(qual) {
+    const s = SECOES[qual];
     const manuais = qual === 'manuais';
-    const lista = manuais ? R.rel.manuais : R.rel.automaticas;
-    const titulo = manuais ? 'Conciliações manuais' : 'Conciliações automáticas';
-    const explica = manuais
-      ? 'Feitas à mão: quem marcou os itens, quando, e a observação quando concilia com diferença.'
-      : 'Achadas pelo ⚡ Conciliar, pelo número do documento: primeiro com o mesmo fornecedor, depois com o mesmo nome de fornecedor, depois só pelo documento.';
+    const lista = s.lista();
     let corpo;
-    if (!lista.length) corpo = '<p class="rel-vazio">Nenhuma conciliação ' + (manuais ? 'manual' : 'automática') + ' neste mês.</p>';
-    else if (R.opcoes.itens) corpo = lista.map((x) => blocoDoId(x, manuais)).join('');
+    if (!lista.length) corpo = '<p class="rel-vazio">Nenhuma conciliação ' + s.vazio + ' neste mês.</p>';
+    else if (R.opcoes.itens) corpo = lista.map((x) => blocoDoId(x, qual)).join('');
     else corpo = tabelaCompacta(lista, manuais);
-    const somaA = lista.reduce((s, x) => s + (x.grupo.valorA || 0), 0), somaB = lista.reduce((s, x) => s + (x.grupo.valorB || 0), 0);
+    const somaA = lista.reduce((s2, x) => s2 + (x.grupo.valorA || 0), 0), somaB = lista.reduce((s2, x) => s2 + (x.grupo.valorB || 0), 0);
     return '<section class="rel-secao ' + qual + '">' +
-      '<h2><span class="rel-marcador ' + (manuais ? 'ambar' : 'azul') + '"></span>' + titulo + ' <small>(' + lista.length.toLocaleString('pt-BR') + ')</small></h2>' +
-      '<p class="rel-explica">' + explica + '</p>' + corpo +
-      (lista.length ? '<p class="rel-total-secao">Total ' + (manuais ? 'das manuais' : 'das automáticas') + ': Parte A <b>' + dinheiro(somaA) + '</b> · Parte B <b>' + dinheiro(somaB) + '</b>' +
+      '<h2><span class="rel-marcador ' + s.marcador + '"></span>' + s.titulo + ' <small>(' + lista.length.toLocaleString('pt-BR') + ')</small></h2>' +
+      '<p class="rel-explica">' + s.explica + '</p>' + corpo +
+      (lista.length ? '<p class="rel-total-secao">Total ' + s.total + ': Parte A <b>' + dinheiro(somaA) + '</b> · Parte B <b>' + dinheiro(somaB) + '</b>' +
         (Math.abs(somaA - somaB) >= 1 ? ' · diferença <b class="negativo">' + dinheiro(somaA - somaB) + '</b>' : '') + '</p>' : '') +
       '</section>';
   }
 
-  function blocoDoId(x, manual) {
+  function blocoDoId(x, qual) {
     const g = x.grupo;
+    const manual = qual === 'manuais';
     const sub = [];
-    sub.push((manual ? 'Conciliado à mão por ' : 'Conciliado pelo ⚡ Conciliar · ') + quemQuando(g));
+    sub.push((manual ? 'Conciliado à mão por ' : qual === 'valor' ? 'Conciliado pelo ≈ Conciliar só pelo valor · ' : 'Conciliado pelo ⚡ Conciliar · ') + quemQuando(g));
     if (!manual && M.REGRAS_AB[g.regra]) sub.push(T.esc(M.REGRAS_AB[g.regra]));
     if (g.obs) sub.push('✎ ' + T.esc(g.obs));
     if (g.aviso === 'baixa-antes-da-nota') sub.push('<span class="rel-aviso">⚠ ' + R.cfg.avisoAntes + '</span>');
     if (Math.abs(x.diferenca) >= 1) sub.push('<span class="negativo">diferença ' + dinheiro(x.diferenca) + '</span>');
     if (x.faltando) sub.push('<span class="negativo">' + x.faltando + ' item(ns) não estão mais nos arquivos</span>');
-    return '<div class="rel-grupo' + (manual ? ' manual' : '') + '">' +
+    return '<div class="rel-grupo' + (manual ? ' manual' : qual === 'valor' ? ' valor' : '') + '">' +
       '<div class="rel-grupo-cab"><span class="rel-id">#' + g.id + '</span>' +
       '<span class="pilula ' + (g.tipo === 'AxB' ? 'azul' : 'cinza') + '">' + (TIPO[g.tipo] || g.tipo) + '</span>' +
-      '<span class="selo ' + (manual ? 'mao' : 'opcional') + '">' + T.esc(COMO[g.regra] || g.regra) + '</span>' +
+      '<span class="selo ' + (manual ? 'mao' : qual === 'valor' ? 'valor' : 'opcional') + '">' + T.esc(COMO[g.regra] || g.regra) + '</span>' +
       (g.documento ? '<span class="rel-doc">Doc ' + T.esc(g.documento) + '</span>' : '') +
       '<span class="rel-nome">' + T.esc(g.nome || '') + '</span>' +
       '<span class="rel-valores">A <b>' + dinheiro(g.valorA || 0) + '</b> · B <b>' + dinheiro(g.valorB || 0) + '</b></span></div>' +
@@ -283,6 +291,7 @@
       ['  A×A', t.AxA], ['  A×B', t.AxB],
       ['Automáticas (⚡ Conciliar)', t.automaticas],
       ['Manuais (à mão)', t.manuais],
+      ['Só pelo valor (≈)', t.porValor],
       ['Manuais com diferença', t.manuaisComDiferenca],
       ['Em aberto · Parte A (itens)', rel.abertosA.length], ['Em aberto · Parte A (valor)', reais(rel.valorAbertoA)],
       ['Em aberto · Parte B (itens)', rel.abertosB.length], ['Em aberto · Parte B (valor)', reais(rel.valorAbertoB)],
@@ -307,6 +316,7 @@
     const larguras = [6, 6, 20, 14, 30, 13, 13, 16, 16, 30, 18, 5, 12, 18, 11, 30, 50, 13];
     X.utils.book_append_sheet(wb, folha(linhasDe(rel.manuais), larguras, [5, 6, 17], 1), 'Manuais');
     X.utils.book_append_sheet(wb, folha(linhasDe(rel.automaticas), larguras, [5, 6, 17], 1), 'Automáticas');
+    if (rel.porValor.length) X.utils.book_append_sheet(wb, folha(linhasDe(rel.porValor), larguras, [5, 6, 17], 1), 'Só pelo valor');
 
     const abertos = (lista) => [['Documento', 'Origem', 'Data', 'Fornecedor', 'Histórico', 'Valor']].concat(lista.map((i) => [i.doc, fonte(i), i.data || '', i.nome || '', i.historico || '', reais(i.valor)]));
     X.utils.book_append_sheet(wb, folha(abertos(rel.abertosA), [12, 18, 11, 34, 60, 13], [5], 1), 'Em aberto A');
