@@ -18,7 +18,7 @@
   const TIPO = { AxA: 'A×A', AxB: 'A×B', BxB: 'B×B' };
   const COMO = M.COMO_AB; // rótulo curto de cada regra (definido no motor)
   const CHAVE_OPCOES = 'conciliador-solutta.relatorio3';
-  const PADRAO = { manuais: true, automaticas: true, valor: true, itens: true, abertos: true };
+  const PADRAO = { manuais: true, automaticas: true, valor: true, margem: true, itens: true, abertos: true, versoes: true };
 
   function lerOpcoes() {
     try { return Object.assign({}, PADRAO, JSON.parse(app().lerLocal(CHAVE_OPCOES) || '{}')); } catch (e) { return Object.assign({}, PADRAO); }
@@ -50,7 +50,8 @@
       '<div class="barra-relatorio nao-imprimir">' +
       '<a class="voltar" style="margin:0" href="' + R.voltar + '">← Voltar para a conciliação</a>' +
       '<div class="linha-flex" style="gap:14px">' +
-      '<span class="suave pequeno">Mostrar:</span>' + marca('manuais', 'Manuais') + marca('automaticas', 'Automáticas') + marca('valor', 'Só pelo valor') + marca('itens', 'Itens de cada ID') + marca('abertos', 'Em aberto') +
+      '<span class="suave pequeno">Mostrar:</span>' + marca('manuais', 'Manuais') + marca('automaticas', 'Automáticas') + marca('valor', 'Só pelo valor') + marca('margem', 'Com margem') +
+      marca('itens', 'Itens de cada ID') + marca('abertos', 'Em aberto') + marca('versoes', 'Versões dos arquivos') +
       '<button type="button" class="botao" data-acao="excel" title="Baixar o relatório em planilha">⬇ Excel</button>' +
       '<button type="button" class="botao primario" data-acao="imprimir" title="Na janela de impressão, escolha a impressora ou “Salvar como PDF”">🖨 Imprimir / salvar PDF</button>' +
       '</div></div>' +
@@ -58,7 +59,9 @@
       (o.manuais ? secaoConciliacoes('manuais') : '') +
       (o.automaticas ? secaoConciliacoes('automaticas') : '') +
       (o.valor && R.rel.porValor.length ? secaoConciliacoes('valor') : '') +
+      (o.margem && R.rel.comMargem.length ? secaoConciliacoes('margem') : '') +
       (o.abertos ? secaoAbertos() : '') +
+      (o.versoes ? secaoVersoes() : '') +
       assinaturas() + '</article>';
     R.el.querySelector('.barra-relatorio').addEventListener('change', (ev) => {
       const c = ev.target.closest('[data-opcao]');
@@ -142,6 +145,7 @@
       numero('Automáticas (⚡ Conciliar)', t.automaticas.toLocaleString('pt-BR'), t.itensAutomaticas.toLocaleString('pt-BR') + ' itens · pelo documento', 'azul') +
       numero('Manuais (à mão)', t.manuais.toLocaleString('pt-BR'), t.itensManuais.toLocaleString('pt-BR') + ' itens · ' + t.manuaisComDiferenca + ' com diferença', 'ambar') +
       (t.porValor ? numero('Só pelo valor (≈)', t.porValor.toLocaleString('pt-BR'), t.itensPorValor.toLocaleString('pt-BR') + ' itens · sem documento e fornecedor · conferir', 'roxo') : '') +
+      (t.comMargem ? numero('Com margem (±)', t.comMargem.toLocaleString('pt-BR'), t.itensComMargem.toLocaleString('pt-BR') + ' itens · diferença somada ' + dinheiro(t.diferencaComMargem), 'verde') : '') +
       numero('Em aberto · Parte A', dinheiro(rel.valorAbertoA), rel.abertosA.length + ' item(ns) na contabilidade') +
       numero('Em aberto · Parte B', dinheiro(rel.valorAbertoB), rel.abertosB.length + ' item(ns) no financeiro') +
       numero('Diferença a investigar', dinheiro(difAB), 'em aberto A − em aberto B', 'destaque') +
@@ -150,7 +154,66 @@
         regras.map((k) => '<tr><td><b>' + T.esc(COMO[k]) + '</b> <span class="suave">— ' + T.esc(M.REGRAS_AB[k] || '') + '</span></td><td class="num">' + rel.porRegra[k].conciliacoes + '</td><td class="num">' + rel.porRegra[k].itens + '</td></tr>').join('') +
         '</tbody></table>' : '') +
       (t.paraConferir.length ? '<p class="rel-alerta">⚠ Para conferir — ' + R.cfg.avisoAntes + ': ' + t.paraConferir.map((id) => '<b>#' + id + '</b>').join(', ') + '</p>' : '') +
-      (t.comItemFaltando ? '<p class="rel-alerta">⚠ ' + t.comItemFaltando + ' conciliação(ões) com item que não está mais nos arquivos (arquivo trocado depois de conciliar).</p>' : '') +
+      (t.comItemFaltando ? '<p class="rel-alerta">⚠ ' + t.comItemFaltando + ' conciliação(ões) com item que não está mais nos arquivos (o arquivo foi atualizado depois de conciliar): ' +
+        porId().filter((x) => x.faltando).slice(0, 30).map((x) => '<b>#' + x.grupo.id + '</b>').join(', ') + '. Elas continuam conciliadas até alguém decidir.</p>' : '') +
+      (atualizacoes().length ? '<p class="rel-explica">🔄 ' + atualizacoes().length + ' atualização(ões) de arquivo depois de conciliar — ver “Versões dos arquivos e atualizações”.</p>' : '') +
+      '</section>';
+  }
+
+  function porId() { return R.rel.manuais.concat(R.rel.automaticas, R.rel.porValor, R.rel.comMargem); }
+  function atualizacoes() { return (R.dados.decisoes && R.dados.decisoes.atualizacoes) || []; }
+
+  // O que se sabe de um item que saiu dos arquivos (guardado nas atualizações).
+  function itemQueSaiu(id) {
+    for (const a of atualizacoes().slice().reverse()) {
+      for (const f of a.faltando || []) { const s = (f.sairam || []).find((x) => x.id === id && x.valor !== undefined); if (s) return s; }
+      const s = (a.sairam || []).find((x) => x.id === id && x.valor !== undefined);
+      if (s) return s;
+    }
+    return null;
+  }
+
+  // ------------------------------------------------------------------
+  // VERSÕES dos arquivos e ATUALIZAÇÕES depois de conciliar (Dony, 16/09/2026: "fica registrado quantos
+  // razões subiram; o aging também — dá para provar que o financeiro estava errado").
+  // ------------------------------------------------------------------
+  function versoesDosArquivos() {
+    const d = R.dados, metas = (d.arqs && d.arqs.metas) || [];
+    const lugares = [
+      ['Razão · ' + (d.entrada.nomeRazao || d.entrada.mesAtual), d.arquivos.raz.meta],
+      ['Aging ' + d.entrada.mesAnterior + ' · Parte A', d.arquivos.aAnt.meta],
+      ['Aging ' + d.entrada.mesAtual + ' · Parte B', d.arquivos.aAtu.meta],
+    ];
+    return lugares.map(([nome, m]) => ({ nome, emUso: m, versoes: raiz.TelaSubir.versoesDoArquivo(metas, m, { varias: false }) }));
+  }
+  function textoComparacao(c) {
+    if (!c || c.iguais === undefined) return '—';
+    return raiz.TelaSubir.contagensDaComparacao(c, false);
+  }
+  function secaoVersoes() {
+    const lugares = versoesDosArquivos();
+    const ats = atualizacoes();
+    const tab = (l) => '<h3 class="rel-sub">' + T.esc(l.nome) + ' <small>(' + l.versoes.length + (l.versoes.length === 1 ? ' versão' : ' versões') + ')</small></h3>' +
+      '<table class="rel-tab"><thead><tr><th style="width:62px">Versão</th><th>Arquivo</th><th style="width:150px">Carregado</th><th class="num" style="width:90px">Itens</th><th>Em relação à versão anterior</th></tr></thead><tbody>' +
+      l.versoes.map((m, i) => '<tr><td><b>' + (l.versoes.length - i) + '</b>' + (m.id === l.emUso.id ? ' <span class="selo opcional">em uso</span>' : '') + '</td>' +
+        '<td>' + T.esc(m.arquivo || '') + '</td><td>' + T.esc(m.enviadoPor || '') + (m.enviadoEm ? ' · ' + U.dataHoraLocal(m.enviadoEm) : '') + '</td>' +
+        '<td class="num">' + (m.tipo === 'razao' ? (m.lancamentos || 0) + ' lanç.' : (m.titulos || 0) + ' tít. · ' + T.moeda(m.total || 0)) + '</td>' +
+        '<td>' + T.esc(i < l.versoes.length - 1 || (m.comparacao && m.comparacao.com) ? textoComparacao(m.comparacao) : 'primeira versão') + '</td></tr>').join('') +
+      '</tbody></table>';
+    const linhaAt = (a) => {
+      const mud = (a.mudaram || []).length;
+      return '<tr><td>' + U.dataHoraLocal(a.quando) + '<br><span class="suave">' + T.esc(a.quem || '') + '</span></td><td>' + T.esc((a.nomes || []).join(' e ') || 'arquivo') + '</td>' +
+        '<td class="num">' + a.continuam + '</td><td class="num">' + (a.trocadas || []).length + '</td><td class="num">' + (a.faltando || []).filter((f) => !f.jaFaltava).length + '</td>' +
+        '<td class="num">' + (a.novas || []).length + '</td>' +
+        '<td>' + (a.semComparacao ? 'sem comparação' : 'entraram ' + Math.max(0, (a.qtdEntraram || 0) - mud) + ' · saíram ' + Math.max(0, (a.qtdSairam || 0) - mud) + ' · mudaram ' + mud) + '</td></tr>';
+    };
+    return '<section class="rel-secao versoes">' +
+      '<h2><span class="rel-marcador primaria"></span>Versões dos arquivos e atualizações</h2>' +
+      '<p class="rel-explica">Cada arquivo novo carregado no mesmo lugar vira uma versão; o programa usa a mais nova e guarda as anteriores, com a comparação entre elas.</p>' +
+      lugares.map(tab).join('') +
+      (ats.length ? '<h3 class="rel-sub">Atualizações depois de conciliar <small>(' + ats.length + ')</small></h3>' +
+        '<table class="rel-tab"><thead><tr><th style="width:120px">Quando</th><th>Arquivo</th><th class="num">Continuaram</th><th class="num">Item trocado</th><th class="num">Ficaram com item faltando</th><th class="num">Novas (⚡)</th><th>Itens</th></tr></thead><tbody>' +
+        ats.map(linhaAt).join('') + '</tbody></table>' : '<p class="rel-vazio">Nenhum arquivo foi atualizado depois de conciliar.</p>') +
       '</section>';
   }
 
@@ -161,6 +224,8 @@
       explica: 'Achadas pelo ⚡ Conciliar, pelo número do documento: primeiro com o mesmo fornecedor, depois com o mesmo nome de fornecedor, depois só pelo documento.' },
     valor: { lista: () => R.rel.porValor, titulo: 'Conciliações só pelo valor', vazio: 'só pelo valor', total: 'das só pelo valor', marcador: 'roxo',
       explica: 'Achadas pelo ≈ Conciliar só pelo valor: mesmo valor quebrado, SEM olhar documento e fornecedor (valor inteiro terminado em zero fica de fora). Confira cada uma.' },
+    margem: { lista: () => R.rel.comMargem, titulo: 'Conciliações com margem', vazio: 'com margem', total: 'das com margem', marcador: 'verde',
+      explica: 'Achadas pelo ± Conciliar com margem: mesmo documento e mesmo fornecedor, aceitando diferença de até ' + T.moeda(M.MARGEM_AB) + ' entre as partes (a diferença de cada uma aparece no cabeçalho).' },
   };
   function secaoConciliacoes(qual) {
     const s = SECOES[qual];
@@ -183,26 +248,36 @@
     const g = x.grupo;
     const manual = qual === 'manuais';
     const sub = [];
-    sub.push((manual ? 'Conciliado à mão por ' : qual === 'valor' ? 'Conciliado pelo ≈ Conciliar só pelo valor · ' : 'Conciliado pelo ⚡ Conciliar · ') + quemQuando(g));
+    sub.push((manual ? 'Conciliado à mão por ' : qual === 'valor' ? 'Conciliado pelo ≈ Conciliar só pelo valor · ' : qual === 'margem' ? 'Conciliado pelo ± Conciliar com margem · ' : 'Conciliado pelo ⚡ Conciliar · ') + quemQuando(g));
     if (!manual && M.REGRAS_AB[g.regra]) sub.push(T.esc(M.REGRAS_AB[g.regra]));
     if (g.obs) sub.push('✎ ' + T.esc(g.obs));
     if (g.aviso === 'baixa-antes-da-nota') sub.push('<span class="rel-aviso">⚠ ' + R.cfg.avisoAntes + '</span>');
     if (Math.abs(x.diferenca) >= 1) sub.push('<span class="negativo">diferença ' + dinheiro(x.diferenca) + '</span>');
-    if (x.faltando) sub.push('<span class="negativo">' + x.faltando + ' item(ns) não estão mais nos arquivos</span>');
-    return '<div class="rel-grupo' + (manual ? ' manual' : qual === 'valor' ? ' valor' : '') + '">' +
+    if (x.faltando) sub.push('<span class="negativo">⚠ ' + x.faltando + ' item(ns) não estão mais nos arquivos</span>');
+    if (g.trocas && g.trocas.length) sub.push('✎ item trocado pelo corrigido (' + g.trocas.map((t) => U.dataHoraLocal(t.quando)).join(', ') + ')');
+    const classe = manual ? 'mao' : qual === 'valor' ? 'valor' : qual === 'margem' ? 'margem' : 'opcional';
+    return '<div class="rel-grupo' + (manual ? ' manual' : qual === 'valor' ? ' valor' : qual === 'margem' ? ' margem' : '') + '">' +
       '<div class="rel-grupo-cab"><span class="rel-id">#' + g.id + '</span>' +
       '<span class="pilula ' + (g.tipo === 'AxB' ? 'azul' : 'cinza') + '">' + (TIPO[g.tipo] || g.tipo) + '</span>' +
-      '<span class="selo ' + (manual ? 'mao' : qual === 'valor' ? 'valor' : 'opcional') + '">' + T.esc(COMO[g.regra] || g.regra) + '</span>' +
+      '<span class="selo ' + classe + '">' + T.esc(COMO[g.regra] || g.regra) + '</span>' +
       (g.documento ? '<span class="rel-doc">Doc ' + T.esc(g.documento) + '</span>' : '') +
       '<span class="rel-nome">' + T.esc(g.nome || '') + '</span>' +
       '<span class="rel-valores">A <b>' + dinheiro(g.valorA || 0) + '</b> · B <b>' + dinheiro(g.valorB || 0) + '</b></span></div>' +
       '<div class="rel-grupo-sub">' + sub.join(' · ') + '</div>' +
       '<table class="rel-tab"><thead><tr><th style="width:34px">Lado</th><th style="width:78px">Documento</th><th style="width:118px">Origem</th><th style="width:74px">Data</th><th>Fornecedor · histórico</th><th class="num" style="width:104px">Valor · D/C</th></tr></thead><tbody>' +
       x.itens.map((i) => i.faltando
-        ? '<tr><td colspan="6" class="negativo">Item que não está mais nos arquivos (' + T.esc(i.id) + ')</td></tr>'
+        ? linhaQueSaiu(i.id)
         : '<tr><td><b>' + i.lado + '</b></td><td class="doc">' + T.nome(i.doc) + '</td><td>' + T.esc(fonte(i)) + '</td><td>' + T.esc(i.data || '—') + '</td>' +
           '<td>' + T.esc(i.nome || '') + (i.historico ? '<br><span class="suave">' + T.esc(i.historico) + '</span>' : '') + '</td>' + tdDinheiro(i.valor) + '</tr>').join('') +
       '</tbody></table></div>';
+  }
+
+  // Item de uma conciliação que saiu dos arquivos: com o detalhe guardado na atualização, quando houver.
+  function linhaQueSaiu(id) {
+    const s = itemQueSaiu(id);
+    if (!s) return '<tr><td colspan="6" class="negativo">⚠ Item que não está mais nos arquivos (' + T.esc(id) + ')</td></tr>';
+    return '<tr class="negativo"><td><b>' + T.esc(s.lado || '') + '</b></td><td class="doc">' + T.nome(s.doc) + '</td><td>⚠ saiu do arquivo</td><td>' + T.esc(s.data || '—') + '</td>' +
+      '<td>' + T.esc(s.nome || '') + (s.historico ? '<br><span class="suave">' + T.esc(s.historico) + '</span>' : '') + '</td>' + tdDinheiro(s.valor) + '</tr>';
   }
 
   function tabelaCompacta(lista, manuais) {
@@ -294,7 +369,10 @@
       ['Automáticas (⚡ Conciliar)', t.automaticas],
       ['Manuais (à mão)', t.manuais],
       ['Só pelo valor (≈)', t.porValor],
+      ['Com margem (±)', t.comMargem], ['Com margem · diferença somada', reais(t.diferencaComMargem), dc(t.diferencaComMargem)],
       ['Manuais com diferença', t.manuaisComDiferenca],
+      ['Com item que não está mais nos arquivos', t.comItemFaltando],
+      ['Atualizações de arquivo depois de conciliar', atualizacoes().length],
       ['Em aberto · Parte A (itens)', rel.abertosA.length], ['Em aberto · Parte A (valor)', reais(rel.valorAbertoA), dc(rel.valorAbertoA)],
       ['Em aberto · Parte B (itens)', rel.abertosB.length], ['Em aberto · Parte B (valor)', reais(rel.valorAbertoB), dc(rel.valorAbertoB)],
       ['Diferença a investigar', reais(rel.valorAbertoA - rel.valorAbertoB), dc(rel.valorAbertoA - rel.valorAbertoB)],
@@ -309,20 +387,46 @@
         for (const i of x.itens) {
           linhas.push([g.id, TIPO[g.tipo] || g.tipo, COMO[g.regra] || g.regra, g.documento || '', g.nome || '', reais(g.valorA), reais(g.valorB), g.quem || '',
             g.quando ? U.dataHoraLocal(g.quando) : '', g.obs || '', g.aviso === 'baixa-antes-da-nota' ? R.cfg.avisoCurto : '',
-            i.faltando ? '' : i.lado, i.faltando ? '' : i.doc, i.faltando ? 'item não está mais nos arquivos' : fonte(i), i.faltando ? '' : (i.data || ''),
-            i.faltando ? '' : (i.nome || ''), i.faltando ? i.id : (i.historico || ''), i.faltando ? '' : reais(i.valor), i.faltando ? '' : dc(i.valor)]);
+            ...(i.faltando ? itemQueSaiuNoExcel(i.id) : [i.lado, i.doc, fonte(i), i.data || '', i.nome || '', i.historico || '', reais(i.valor), dc(i.valor)])]);
         }
       }
       return linhas;
     };
+    function itemQueSaiuNoExcel(id) {
+      const s = itemQueSaiu(id);
+      return s ? [s.lado || '', s.doc || '', 'SAIU DO ARQUIVO', s.data || '', s.nome || '', s.historico || '', reais(s.valor), dc(s.valor)]
+        : ['', '', 'item não está mais nos arquivos', '', '', id, '', ''];
+    }
     const larguras = [6, 6, 20, 14, 30, 13, 13, 16, 16, 30, 18, 5, 12, 18, 11, 30, 50, 13, 5];
     X.utils.book_append_sheet(wb, folha(linhasDe(rel.manuais), larguras, [5, 6, 17], 1), 'Manuais');
     X.utils.book_append_sheet(wb, folha(linhasDe(rel.automaticas), larguras, [5, 6, 17], 1), 'Automáticas');
     if (rel.porValor.length) X.utils.book_append_sheet(wb, folha(linhasDe(rel.porValor), larguras, [5, 6, 17], 1), 'Só pelo valor');
+    if (rel.comMargem.length) X.utils.book_append_sheet(wb, folha(linhasDe(rel.comMargem), larguras, [5, 6, 17], 1), 'Com margem');
 
     const abertos = (lista) => [['Documento', 'Origem', 'Data', 'Fornecedor', 'Histórico', 'Valor', 'D/C']].concat(lista.map((i) => [i.doc, fonte(i), i.data || '', i.nome || '', i.historico || '', reais(i.valor), dc(i.valor)]));
     X.utils.book_append_sheet(wb, folha(abertos(rel.abertosA), [12, 18, 11, 34, 60, 13, 5], [5], 1), 'Em aberto A');
     X.utils.book_append_sheet(wb, folha(abertos(rel.abertosB), [12, 18, 11, 34, 60, 13, 5], [5], 1), 'Em aberto B');
+
+    // Versões dos arquivos e atualizações depois de conciliar (a prova do que mudou).
+    const versoes = [['Arquivo', 'Versão', 'Em uso', 'Nome do arquivo', 'Carregado por', 'Carregado em', 'Itens', 'Iguais à anterior', 'Entraram', 'Saíram', 'Mudaram', 'Total (aging)']];
+    for (const l of versoesDosArquivos()) {
+      l.versoes.forEach((m, i) => {
+        const c = m.comparacao || {};
+        const tem = c.iguais !== undefined;
+        versoes.push([l.nome, l.versoes.length - i, m.id === l.emUso.id ? 'sim' : '', m.arquivo || '', m.enviadoPor || '', m.enviadoEm ? U.dataHoraLocal(m.enviadoEm) : '',
+          m.tipo === 'razao' ? (m.lancamentos || 0) : (m.titulos || 0),
+          tem ? c.iguais : '', tem ? c.entraram : '', tem ? c.sairam : '', tem ? c.mudaram : '', m.tipo === 'razao' ? '' : reais(m.total || 0)]);
+      });
+    }
+    versoes.push([]);
+    versoes.push(['Atualizações depois de conciliar', 'Quando', 'Quem', 'Arquivo', 'Continuaram', 'Item trocado', 'Ficaram com item faltando', 'Novas (⚡)', 'Entraram', 'Saíram', 'Mudaram']);
+    for (const a of atualizacoes()) {
+      const mud = (a.mudaram || []).length;
+      versoes.push(['', U.dataHoraLocal(a.quando), a.quem || '', (a.nomes || []).join(' e '), a.continuam, (a.trocadas || []).length,
+        (a.faltando || []).filter((f) => !f.jaFaltava).length, (a.novas || []).length,
+        Math.max(0, (a.qtdEntraram || 0) - mud), Math.max(0, (a.qtdSairam || 0) - mud), mud]);
+    }
+    X.utils.book_append_sheet(wb, folha(versoes, [30, 18, 8, 40, 18, 16, 12, 16, 12, 10, 10, 14], [11], 1), 'Versões');
 
     const bytes = X.write(wb, { bookType: 'xlsx', type: 'array' });
     T.baixar(new Uint8Array(bytes), nomeDoArquivo('.xlsx'), 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');

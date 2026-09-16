@@ -133,7 +133,7 @@
   // fixo = sempre à vista, sem "Fechar" (tela de falta de arquivo ou do checklist).
   function painelDoPasso1(codigo, comp, arqs, fixo) {
     return raiz.TelaSubir.painel({
-      chave: chaveDoPainel1(codigo, comp), titulo: 'Arquivos do passo', resumo: U.nomeCompetencia(comp), fixo, lugares: lugaresDoPasso1(comp, arqs),
+      chave: chaveDoPainel1(codigo, comp), titulo: 'Arquivos do passo', resumo: U.nomeCompetencia(comp), fixo, lugares: lugaresDoPasso1(comp, arqs), metas: arqs.metas,
       depois: eDemonstracao(codigo)
         ? '<div class="linha-flex" style="margin-top:10px"><button type="button" class="botao" data-exemplo>🧪 Usar os razões de exemplo</button>' +
           '<span class="suave pequeno">Os razões de fornecedores e de adiantamento da empresa de demonstração (janeiro a julho/2026), com fornecedores, CNPJs e valores inventados.</span></div>'

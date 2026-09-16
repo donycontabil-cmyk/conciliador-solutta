@@ -114,15 +114,32 @@
     // Só pelo valor (botão próprio, ver conciliarPorValor): sem olhar documento nem fornecedor.
     'valor-par': 'só pelo valor, sem documento e sem fornecedor: dentro da Parte A, quem aumenta com quem diminui o saldo, de mesmo valor quebrado',
     'valor': 'só pelo valor, sem documento e sem fornecedor: um item da Parte A e um da Parte B de mesmo valor quebrado',
+    // Com margem (botão próprio, ver MARGEM_AB): mesmo documento e fornecedor, diferença de até R$ 1,00.
+    'margem-fornecedor-par': 'com margem: mesmo documento e fornecedor, a baixa (ou compensação) mata a nota (ou adiantamento) com diferença de centavos',
+    'margem-fornecedor': 'com margem: mesmo documento e fornecedor, a soma dos dois lados difere só nos centavos',
+    'margem-fornecedor-valor': 'com margem: mesmo documento e fornecedor, um lançamento e um título com diferença de centavos',
+    'margem-nome-par': 'com margem: mesmo documento e mesmo nome de fornecedor, a baixa (ou compensação) mata a nota (ou adiantamento) com diferença de centavos',
+    'margem-nome': 'com margem: mesmo documento e mesmo nome de fornecedor, a soma dos dois lados difere só nos centavos',
+    'margem-nome-valor': 'com margem: mesmo documento e mesmo nome de fornecedor, um lançamento e um título com diferença de centavos',
+    'margem-palavra-par': 'com margem: mesmo documento e fornecedor com a mesma primeira palavra no nome (a filial num lado, a empresa no outro), a baixa (ou compensação) mata a nota (ou adiantamento) com diferença de centavos',
+    'margem-palavra': 'com margem: mesmo documento e fornecedor com a mesma primeira palavra no nome, a soma dos dois lados difere só nos centavos',
+    'margem-palavra-valor': 'com margem: mesmo documento e fornecedor com a mesma primeira palavra no nome, um lançamento e um título com diferença de centavos',
     'manual': 'marcado à mão',
   };
   function ehPorValor(g) { return !!g && (g.regra === 'valor' || g.regra === 'valor-par'); }
+  function ehComMargem(g) { return !!g && /^margem-/.test(String(g.regra || '')); }
   // Rótulo curto de cada regra na tela e no relatório.
   const COMO_AB = {
     'doc-fornecedor-par': 'doc + fornecedor · par', 'doc-fornecedor': 'doc + fornecedor', 'doc-fornecedor-valor': 'doc + fornecedor · valor',
     'doc-nome-par': 'doc + nome · par', 'doc-nome': 'doc + nome', 'doc-nome-valor': 'doc + nome · valor',
-    'doc-par': 'só doc · par', 'doc': 'só doc', 'valor-par': 'só valor · par', 'valor': 'só valor', 'manual': 'à mão',
+    'doc-par': 'só doc · par', 'doc': 'só doc', 'valor-par': 'só valor · par', 'valor': 'só valor',
+    'margem-fornecedor-par': '± doc + fornecedor · par', 'margem-fornecedor': '± doc + fornecedor', 'margem-fornecedor-valor': '± doc + fornecedor · valor',
+    'margem-nome-par': '± doc + nome · par', 'margem-nome': '± doc + nome', 'margem-nome-valor': '± doc + nome · valor',
+    'margem-palavra-par': '± doc + 1ª palavra · par', 'margem-palavra': '± doc + 1ª palavra', 'margem-palavra-valor': '± doc + 1ª palavra · valor',
+    'manual': 'à mão',
   };
+  // Margem do botão "± Conciliar com margem" (Dony, 16/09/2026: "até um real de margem"), em centavos.
+  const MARGEM_AB = 100;
 
   // Nome do fornecedor comparável dos dois lados ("AGUA VIVA" = "Agua Viva"): as palavras próprias
   // do nome que aparece na tela (o do aging na Parte B; o que a régua deu, na Parte A).
@@ -271,17 +288,40 @@
    * @param itens     resultado de itensAB
    * @param existentes conciliações já feitas [{ id, a:[ids], b:[ids] }] (os itens delas não entram)
    * @param quem, quando  gravados em cada conciliação nova
+   * @param opcoes {
+   *   margem: centavos — "± Conciliar com margem" (Dony, 16/09/2026: "fechar documento + fornecedor com
+   *           margem de diferença, até um real, só quando eu apertar"): as camadas de documento +
+   *           fornecedor, documento + nome e documento + primeira palavra do nome aceitam diferença de
+   *           até `margem` (a mais perta primeiro); as de só documento não rodam;
+   *   exigir: (item) => bool — só registra conciliação que tenha ao menos um item assim (a atualização
+   *           de arquivo concilia só o que entrou ou voltou para em aberto; ver atualizarAB);
+   *   primeiroId: o primeiro ID a usar (se for maior que o próximo livre) }
    * @returns lista de conciliações novas, com IDs a partir do próximo livre
    */
-  function conciliarAutomatico(itens, existentes, quem, quando) {
+  function conciliarAutomatico(itens, existentes, quem, quando, opcoes) {
+    const op = opcoes || {};
+    const margem = Math.max(0, Math.round(Number(op.margem) || 0));
+    const exigir = typeof op.exigir === 'function' ? op.exigir : null;
+    const serve = (xs) => !exigir || xs.some(exigir);
+    // Diferença que ainda "bate": zero, ou até a margem (mas não zero: o exato é do ⚡).
+    const bate = (dif) => (margem ? dif !== 0 && Math.abs(dif) <= margem : dif === 0);
     const usados = new Set();
     (existentes || []).forEach((g) => (g.a || []).concat(g.b || []).forEach((id) => usados.add(id)));
-    let proximo = proximoIdAB(existentes);
+    let proximo = Math.max(proximoIdAB(existentes), Math.floor(Number(op.primeiroId) || 0));
     const candidatos = itens.A.concat(itens.B).filter((x) => x.doc && !usados.has(x.id));
     const livre = new Set(candidatos.map((x) => x.id));
     const novos = [];
     const soma = (xs) => xs.reduce((s, x) => s + x.valor, 0);
     const porOrdem = (p, q) => p.ordem - q.ordem;
+    // O candidato que bate, o mais perto no valor (com margem) e, empatado, o primeiro da lista.
+    const melhor = (lista, dif, pode) => {
+      let k = -1;
+      lista.forEach((c, j) => {
+        if (!pode(c) || !bate(dif(c))) return;
+        if (k < 0 || Math.abs(dif(c)) < Math.abs(dif(lista[k]))) k = j;
+      });
+      return k;
+    };
 
     function registrar(xs, regra) {
       const a = xs.filter((x) => x.lado === 'A'), b = xs.filter((x) => x.lado === 'B');
@@ -311,6 +351,7 @@
         let k = x.doc;
         if (por === 'fornecedor') k += '|' + x.chave;
         else if (por === 'nome') { const n = nomeComparavel(x); if (!n) continue; k += '|' + n; }
+        else if (por === 'palavra') { const p = nomeComparavel(x).split(' ')[0]; if (!p) continue; k += '|' + p; }
         if (!m.has(k)) m.set(k, []);
         m.get(k).push(x);
       }
@@ -321,15 +362,15 @@
         const notas = xs.filter((x) => x.lado === 'A' && x.valor > 0).sort(porOrdem);
         const baixas = xs.filter((x) => x.lado === 'A' && x.valor < 0).sort(porOrdem);
         for (const bx of baixas) {
-          const j = notas.findIndex((n) => n.valor === -bx.valor && n.ordem <= bx.ordem);
+          const j = melhor(notas, (n) => n.valor + bx.valor, (n) => n.ordem <= bx.ordem && serve([n, bx]));
           if (j >= 0) { registrar([notas[j], bx], regra); notas.splice(j, 1); }
         }
       }
     }
     function grupos(regra, por) {
       for (const xs of agrupar(por)) {
-        if (xs.length < 2) continue;
-        if (soma(xs.filter((x) => x.lado === 'A')) === soma(xs.filter((x) => x.lado === 'B'))) registrar(xs, regra);
+        if (xs.length < 2 || !serve(xs)) continue;
+        if (bate(soma(xs.filter((x) => x.lado === 'A')) - soma(xs.filter((x) => x.lado === 'B')))) registrar(xs, regra);
       }
     }
     // Documento e fornecedor iguais, mas a soma do grupo não bate (sobrou outro título do mesmo
@@ -343,10 +384,25 @@
         const ladoB = xs.filter((x) => x.lado === 'B').sort(porData);
         if (!ladoA.length || !ladoB.length) continue;
         for (const a of ladoA) {
-          const j = ladoB.findIndex((b) => b.valor === a.valor && a.valor !== 0);
+          if (a.valor === 0) continue;
+          const j = melhor(ladoB, (b) => a.valor - b.valor, (b) => serve([a, b]));
           if (j >= 0) { registrar([a, ladoB[j]], regra); ladoB.splice(j, 1); }
         }
       }
+    }
+    if (margem) {
+      pares('margem-fornecedor-par', 'fornecedor');
+      grupos('margem-fornecedor', 'fornecedor');
+      valores('margem-fornecedor-valor', 'fornecedor');
+      pares('margem-nome-par', 'nome');
+      grupos('margem-nome', 'nome');
+      valores('margem-nome-valor', 'nome');
+      // O mesmo fornecedor escrito diferente nos dois lados (caso real, 16/09/2026: a filial no aging e
+      // a empresa na compensação, mesmo documento, 2 centavos de diferença): a primeira palavra do nome.
+      pares('margem-palavra-par', 'palavra');
+      grupos('margem-palavra', 'palavra');
+      valores('margem-palavra-valor', 'palavra');
+      return novos;
     }
     pares('doc-fornecedor-par', 'fornecedor');
     grupos('doc-fornecedor', 'fornecedor');
@@ -411,6 +467,192 @@
     return novos;
   }
 
+  // ------------------------------------------------------------------
+  // ATUALIZAR um arquivo da conciliação (Dony, 16/09/2026): "atualizei o razão; se eu subir o novo, tudo
+  // aquilo que ele já tinha feito, ele vai manter? ... tudo aquilo que já existia antes não muda, ele só
+  // altera aquilo que mudou: se tinha algum valor conciliado e no novo razão sumiu, ele detecta e fala;
+  // se existia alguma pendência e entrou um novo razão, se der ele já amarra um com o outro pelas regras,
+  // ou então fica em aberto para conciliar manualmente." Vale para o razão e para os agings.
+  // E o medo dele (mesmo dia): "que as conciliações feitas de forma manual sumam; e que uma conciliação
+  // feita antes, manual ou automática, perca um lançamento no razão novo sem o sistema identificar".
+  // Por isso NENHUMA conciliação sai sozinha. Cada item tem a identidade do seu conteúdo (itensAB): o que
+  // não mudou continua com o mesmo ID de item. Comparando os itens de antes com os de agora:
+  //   - continua: a conciliação com todos os itens no arquivo novo (nada muda, nem o ID);
+  //   - trocada: o item dela mudou só no texto ou na data — mesmo lado, mesmo valor, mesmo documento e
+  //     (mesma data ou mesmo fornecedor), sem outro candidato igual: ela continua, com o mesmo ID, com o
+  //     item novo no lugar do antigo (fica anotado o que mudou);
+  //   - com item faltando: o item dela saiu (ou mudou de valor) — ela CONTINUA na lista, marcada, até ele
+  //     decidir (Desfazer, ou carregar de novo a versão com o item: aí ela volta a ficar completa sozinha);
+  //   - nova: o ⚡ (as regras do documento) só com o que ENTROU; o que já estava em aberto antes e não
+  //     casa com nada novo fica como estava. O ≈ só pelo valor e o ± com margem não rodam sozinhos.
+  // "Mudou" (para mostrar antes × agora) é mais largo que a troca: saiu um item e entrou outro do mesmo
+  // lado e do mesmo arquivo com a mesma data e o mesmo histórico (valor corrigido), a mesma data e o
+  // mesmo valor, a mesma data e o mesmo documento, ou o mesmo documento e o mesmo valor.
+  // ------------------------------------------------------------------
+  const CAMPOS_RESUMO = ['id', 'lado', 'fonte', 'fonteOriginal', 'origem', 'doc', 'nome', 'data', 'historico', 'valor'];
+  function resumoDoItem(x) {
+    const o = {};
+    CAMPOS_RESUMO.forEach((k) => {
+      if (x[k] === undefined || x[k] === null || x[k] === '') return;
+      o[k] = k === 'historico' ? String(x[k]).slice(0, 160) : x[k];
+    });
+    return o;
+  }
+  const arquivoDoId = (id) => String(id).split(':')[0];
+  // Pares "saiu × entrou" que são o mesmo item mudado (do critério mais forte para o mais fraco).
+  function pareadosComoMudados(sairam, entraram, mesmoGrupo) {
+    const tem = (x, k) => x[k] !== undefined && x[k] !== null && x[k] !== '';
+    const igual = (a, b, k) => tem(a, k) && a[k] === b[k];
+    const criterios = [
+      (a, b) => igual(a, b, 'data') && a.valor === b.valor && igual(a, b, 'doc'),
+      (a, b) => igual(a, b, 'data') && igual(a, b, 'historico'), // o mesmo lançamento com o valor corrigido
+      (a, b) => igual(a, b, 'data') && a.valor === b.valor,
+      (a, b) => igual(a, b, 'data') && igual(a, b, 'doc'),
+      (a, b) => igual(a, b, 'doc') && a.valor === b.valor,
+    ];
+    const usadosS = new Set(), usadosE = new Set();
+    const pares = [];
+    for (const crit of criterios) {
+      for (const s of sairam) {
+        if (usadosS.has(s)) continue;
+        const e = entraram.find((x) => !usadosE.has(x) && mesmoGrupo(s, x) && crit(s, x));
+        if (e) { usadosS.add(s); usadosE.add(e); pares.push({ antes: s, depois: e }); }
+      }
+    }
+    return pares;
+  }
+  // O que mudou entre dois itens (para a tela: "mudou: histórico e valor").
+  function camposMudados(a, b) {
+    const nomes = { data: 'data', doc: 'documento', valor: 'valor', nome: 'fornecedor', historico: 'histórico' };
+    return Object.keys(nomes).filter((k) => String(a[k] === undefined ? '' : a[k]) !== String(b[k] === undefined ? '' : b[k])).map((k) => nomes[k]);
+  }
+
+  // Conciliação com item que não está nos itens de agora (o arquivo mudou depois de conciliar).
+  function faltandoNoGrupo(g, porId) { return (g.a || []).concat(g.b || []).filter((id) => !porId.has(id)); }
+
+  // Troca segura: para cada item que saiu, o item novo que é ele mesmo corrigido — mesmo lado e arquivo,
+  // mesmo valor, mesmo documento (não vazio) e mesma data ou mesmo fornecedor — quando só existe UM
+  // candidato assim (dos dois lados da comparação). Devolve Map(id que saiu → item novo).
+  function trocasSeguras(sairam, entraram) {
+    const mesmoFornecedor = (a, b) => (a.chave && a.chave !== SEM && a.chave === b.chave) || (!!nomeComparavel(a) && nomeComparavel(a) === nomeComparavel(b));
+    const base = (x) => [x.lado, arquivoDoId(x.id), x.valor, x.doc].join('|');
+    const criterios = [
+      (s, e) => !!s.data && s.data === e.data,
+      (s, e) => mesmoFornecedor(s, e),
+    ];
+    const trocas = new Map();
+    const pegos = new Set();
+    for (const crit of criterios) {
+      for (const s of sairam) {
+        if (trocas.has(s.id) || !s.doc) continue;
+        const cand = entraram.filter((e) => !pegos.has(e.id) && base(e) === base(s) && crit(s, e));
+        if (cand.length !== 1) continue;
+        const rivais = sairam.filter((o) => o !== s && !trocas.has(o.id) && o.doc && base(o) === base(s) && crit(o, cand[0]));
+        if (rivais.length) continue;
+        trocas.set(s.id, cand[0]);
+        pegos.add(cand[0].id);
+      }
+    }
+    return trocas;
+  }
+
+  /**
+   * @param antes   { ids: Set, porId: Map } — os itens da última gravação (sem o arquivo antigo, porId só
+   *                tem os que estavam em aberto); null = sem comparação (só confere as conciliações)
+   * @param itens   itensAB de agora
+   * @param grupos  conciliações gravadas
+   * @returns { grupos (todas as de antes, com as trocas, + as novas), continuam, trocadas: [{ grupo, trocas }],
+   *            faltando: [{ grupo, sairam }], completas: [ids], novas, entraram, sairam, mudaram, semComparacao }
+   */
+  function atualizarAB(antes, itens, grupos, quem, quando) {
+    const agora = itens.porId;
+    const semComparacao = !antes;
+    const lista = grupos || [];
+    const idsDe = (g) => (g.a || []).concat(g.b || []);
+    const entraram = semComparacao ? [] : itens.A.concat(itens.B).filter((x) => !antes.ids.has(x.id));
+    const detalhe = (id) => (antes && antes.porId && antes.porId.get(id)) || null;
+    const sairamIds = semComparacao ? [] : Array.from(antes.ids).filter((id) => !agora.has(id));
+    const sairamDet = sairamIds.map(detalhe).filter(Boolean);
+    const trocaDe = trocasSeguras(sairamDet, entraram);
+    const continuam = [], trocadas = [], faltando = [], completas = [];
+    const novaLista = lista.map((g) => {
+      const ids = idsDe(g);
+      if (!semComparacao && ids.some((id) => !antes.ids.has(id)) && ids.every((id) => agora.has(id))) completas.push(g.id); // o item voltou
+      if (ids.every((id) => agora.has(id))) { continuam.push(g); return g; }
+      const trocas = [];
+      const trocar = (id) => {
+        if (agora.has(id) || !trocaDe.has(id)) return id;
+        const velho = detalhe(id), novo = trocaDe.get(id);
+        trocaDe.delete(id); // cada item novo entra numa conciliação só
+        trocas.push({ antes: resumoDoItem(velho), depois: resumoDoItem(novo), campos: camposMudados(velho, novo) });
+        return novo.id;
+      };
+      const n = Object.assign({}, g, { a: (g.a || []).map(trocar), b: (g.b || []).map(trocar) });
+      if (trocas.length) {
+        n.trocas = (g.trocas || []).concat(trocas.map((t) => ({ quando, quem, antes: t.antes.id, depois: t.depois.id, campos: t.campos }))).slice(-20);
+        trocadas.push({ grupo: n, trocas });
+      }
+      const aindaFaltam = faltandoNoGrupo(n, agora);
+      if (aindaFaltam.length) {
+        faltando.push({ grupo: n, sairam: aindaFaltam.map((id) => resumoDoItem(detalhe(id) || { id })),
+          jaFaltava: !semComparacao && ids.some((id) => !antes.ids.has(id)) }); // já estava marcada antes desta atualização
+      }
+      return n;
+    });
+    // ⚡ só com o que entrou (os itens das conciliações, inclusive as marcadas com item faltando, não entram).
+    const idsEntraram = new Set(entraram.map((x) => x.id));
+    const maior = lista.reduce((m, g) => Math.max(m, Number(g.id) || 0), 0);
+    const novas = conciliarAutomatico(itens, novaLista, quem, quando, { exigir: (x) => idsEntraram.has(x.id), primeiroId: maior + 1 });
+    const mudaram = pareadosComoMudados(sairamDet, entraram, (s, e) => s.lado === e.lado && arquivoDoId(s.id) === arquivoDoId(e.id))
+      .map((p) => ({ antes: resumoDoItem(p.antes), depois: resumoDoItem(p.depois), campos: camposMudados(p.antes, p.depois) }));
+    return {
+      grupos: novaLista.concat(novas), continuam: continuam.length, trocadas, faltando, completas, novas,
+      entraram: entraram.map(resumoDoItem), sairam: sairamIds.map((id) => resumoDoItem(detalhe(id) || { id })), mudaram, semComparacao,
+    };
+  }
+
+  // ------------------------------------------------------------------
+  // VERSÕES de um arquivo (Dony, 16/09/2026: "coloco um novo razão e esse novo é a base, mas ele faz uma
+  // comparação de um com o outro, para ficar registrado quantos razões subiram; o aging também — você
+  // pode provar que o financeiro está errado e que vai vir um novo aging"). Compara o arquivo inteiro:
+  // razão = lançamentos (data, histórico, débito, crédito); aging = títulos (documento, parcela, CNPJ,
+  // valor, vencimento, nome). Devolve os que ficaram iguais, entraram, saíram e mudaram.
+  // ------------------------------------------------------------------
+  function linhasDaVersao(tipo, conteudo) {
+    const c = conteudo || {};
+    const vezes = new Map();
+    const chave = (base) => { const n = vezes.get(base) || 0; vezes.set(base, n + 1); return base + '|' + n; };
+    if (tipo === 'razao') {
+      return ((c.conta && c.conta.lancamentos) || c.lancamentos || []).map((l) => ({
+        chave: chave([l.data, String(l.historico || '').slice(0, 120), l.debito || 0, l.credito || 0].join('|')),
+        data: l.data || '', doc: documentoDaLinha(l), historico: l.historico || '', nome: l.fornecedor !== undefined ? l.fornecedor : fornecedorDoHistorico(l.historico),
+        valor: (l.credito || 0) - (l.debito || 0), debito: l.debito || 0, credito: l.credito || 0,
+      }));
+    }
+    return (c.titulos || []).map((t) => ({
+      chave: chave([normalizarDocumento(t.documento), t.parcela || '', Util.soDigitos(t.cnpj), t.valor, t.vencimento || '', Util.normalizarNome(t.nome)].join('|')),
+      data: t.vencimento || '', doc: normalizarDocumento(t.documento), parcela: t.parcela || '', nome: t.nome || '', cnpj: t.cnpj || '', valor: t.valor || 0,
+    }));
+  }
+  function compararVersoes(tipo, antes, depois) {
+    const la = linhasDaVersao(tipo, antes), ld = linhasDaVersao(tipo, depois);
+    const chavesA = new Set(la.map((x) => x.chave)), chavesD = new Set(ld.map((x) => x.chave));
+    const sairam = la.filter((x) => !chavesD.has(x.chave));
+    const entraram = ld.filter((x) => !chavesA.has(x.chave));
+    const mudaram = pareadosComoMudados(sairam, entraram, () => true).map((p) => ({ antes: p.antes, depois: p.depois, campos: camposMudados(p.antes, p.depois) }));
+    const somar = (xs, k) => xs.reduce((s, x) => s + (x[k] || 0), 0);
+    const totais = (xs) => (tipo === 'razao' ? { debitos: somar(xs, 'debito'), creditos: somar(xs, 'credito') } : { total: somar(xs, 'valor') });
+    return {
+      tipo, iguais: la.length - sairam.length, entraram, sairam, mudaram,
+      qtdAntes: la.length, qtdDepois: ld.length, antes: totais(la), depois: totais(ld),
+    };
+  }
+  // O resumo que fica guardado no arquivo novo (só números).
+  function resumoDaComparacao(c) {
+    return { iguais: c.iguais, entraram: c.entraram.length - c.mudaram.length, sairam: c.sairam.length - c.mudaram.length, mudaram: c.mudaram.length,
+      qtdAntes: c.qtdAntes, qtdDepois: c.qtdDepois, antes: c.antes, depois: c.depois };
+  }
+
   // Vencimento (dd/mm/aaaa) em número, para ordenar os títulos do mais antigo para o mais novo.
   function porData(p, q) {
     const n = (x) => { const d = Util.lerData(x.data); return d ? d.numero : 0; };
@@ -454,10 +696,11 @@
     });
     const manuais = porId.filter((x) => x.grupo.regra === 'manual');
     const porValor = porId.filter((x) => ehPorValor(x.grupo));
-    const automaticas = porId.filter((x) => x.grupo.regra !== 'manual' && !ehPorValor(x.grupo));
+    const comMargem = porId.filter((x) => ehComMargem(x.grupo));
+    const automaticas = porId.filter((x) => x.grupo.regra !== 'manual' && !ehPorValor(x.grupo) && !ehComMargem(x.grupo));
     const ab = emAbertoAB(itens, grupos);
     const porRegra = {};
-    for (const x of automaticas.concat(porValor)) {
+    for (const x of automaticas.concat(porValor, comMargem)) {
       const k = x.grupo.regra;
       if (!porRegra[k]) porRegra[k] = { conciliacoes: 0, itens: 0 };
       porRegra[k].conciliacoes++;
@@ -465,14 +708,16 @@
     }
     const conta = (lista, pred) => lista.filter(pred).length;
     return {
-      manuais, automaticas, porValor, porRegra,
+      manuais, automaticas, porValor, comMargem, porRegra,
       abertosA: ab.abertosA.slice().sort(compararPorDocumento), abertosB: ab.abertosB.slice().sort(compararPorDocumento),
       valorAbertoA: ab.valorA, valorAbertoB: ab.valorB,
       totais: {
-        conciliacoes: porId.length, automaticas: automaticas.length, manuais: manuais.length, porValor: porValor.length,
+        conciliacoes: porId.length, automaticas: automaticas.length, manuais: manuais.length, porValor: porValor.length, comMargem: comMargem.length,
         itensConciliados: porId.reduce((s, x) => s + x.itens.length - x.faltando, 0),
         itensAutomaticas: automaticas.reduce((s, x) => s + x.itens.length, 0), itensManuais: manuais.reduce((s, x) => s + x.itens.length, 0),
         itensPorValor: porValor.reduce((s, x) => s + x.itens.length, 0),
+        itensComMargem: comMargem.reduce((s, x) => s + x.itens.length, 0),
+        diferencaComMargem: comMargem.reduce((s, x) => s + x.diferenca, 0),
         AxA: conta(porId, (x) => x.grupo.tipo === 'AxA'), AxB: conta(porId, (x) => x.grupo.tipo === 'AxB'), BxB: conta(porId, (x) => x.grupo.tipo === 'BxB'),
         manuaisComDiferenca: conta(manuais, (x) => Math.abs(x.diferenca) >= 1),
         paraConferir: porId.filter((x) => x.grupo.aviso === 'baixa-antes-da-nota').map((x) => x.grupo.id),
@@ -653,5 +898,6 @@
     normalizarDocumento, documentoDaLinha, itensAB, conciliarAutomatico, emAbertoAB, tipoAB, proximoIdAB, REGRAS_AB,
     compararPorDocumento, arrumarGruposAB, relatorioAB, pendenciasAB, saldoInicialAB, idsDeTitulos, COMO_AB, nomeComparavel, ladosDoRazao,
     conciliarPorValor, valorRedondo, ehPorValor, ladoDC,
+    ehComMargem, MARGEM_AB, atualizarAB, faltandoNoGrupo, resumoDoItem, compararVersoes, resumoDaComparacao,
   };
 });

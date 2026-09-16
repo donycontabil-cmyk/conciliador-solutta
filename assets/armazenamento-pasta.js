@@ -512,7 +512,10 @@
       if (!anoMes) throw erro('Validacao', 'Competência inválida: ' + meta.competencia);
       const hashDoConteudo = meta.hashDoConteudo || (bytes ? Util.hashBytes(bytes) : Util.hash8(JSON.stringify(conteudo)));
       const contaCodigo = meta.conta && meta.conta.codigo ? String(meta.conta.codigo) : '';
-      const id = 'A-' + c + '-' + anoMes + '-' + Util.hash8(hashDoConteudo + '|' + meta.tipo + '|' + contaCodigo);
+      // meta.recarga: o mesmo conteúdo carregado de novo como VERSÃO NOVA do lugar (voltar para uma
+      // versão antiga, Dony 16/09/2026) — ganha outro id e fica como a mais nova.
+      const recarga = meta.recarga ? '|recarga ' + meta.recarga : '';
+      const id = 'A-' + c + '-' + anoMes + '-' + Util.hash8(hashDoConteudo + '|' + meta.tipo + '|' + contaCodigo + recarga);
 
       const dirEmpresa = await pastaDaEmpresa(c, true);
       const { dirArq, indice } = await lerIndice(dirEmpresa);
@@ -556,6 +559,26 @@
 
     async function lixeira() {
       return pasta(raiz, ['_apagados', carimboDePasta()], true);
+    }
+
+    // Um arquivo que a tela apagou (pasta _apagados), a cópia mais recente: { meta, conteudo, apagadoEm }
+    // ou null. Serve para comparar a versão antiga com a nova quando um arquivo foi trocado.
+    async function arquivoApagado(id) {
+      exigirConexao();
+      const p = partesDoId(id);
+      if (!p || p.prefixo !== 'A') return null;
+      const dirEmpresa = await pastaDaEmpresa(p.codigo, false);
+      const dirApagados = await pasta(raiz, ['_apagados'], false);
+      if (!dirEmpresa || !dirApagados) return null;
+      const carimbos = (await listar(dirApagados)).filter((x) => x.tipo === 'directory').map((x) => x.nome).sort().reverse();
+      for (const c of carimbos) {
+        try {
+          const dir = await pasta(dirApagados, [c, 'empresas', dirEmpresa.name, 'arquivos', p.anoMes], false);
+          const doc = dir && await lerJson(dir, id + '.json');
+          if (doc && doc.conteudo) return { meta: doc.meta || null, conteudo: doc.conteudo, apagadoEm: c };
+        } catch (e) { /* cópia estragada: tenta a próxima */ }
+      }
+      return null;
     }
 
     async function apagarArquivo(id) {
@@ -793,7 +816,7 @@
       // contrato
       conectar, estaConectado, descricao, quemSou,
       empresas, salvarEmpresa, apagarEmpresa,
-      arquivos, conteudoDoArquivo, guardarArquivo, apagarArquivo,
+      arquivos, conteudoDoArquivo, guardarArquivo, apagarArquivo, arquivoApagado,
       conciliacoes, salvarConciliacao, apagarConciliacao, versoes,
       congelar, congelado,
       registrarNoLog,

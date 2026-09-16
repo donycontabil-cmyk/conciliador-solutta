@@ -38,6 +38,7 @@
       F: porConta(principal),
       A: porConta(adiant),
       pagar: maisNovo(doMes.filter((m) => m.tipo === 'financeiro_pagar')),
+      metas, // todos os arquivos (as versões anteriores de cada lugar)
     };
   }
 

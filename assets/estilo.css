@@ -196,6 +196,13 @@ details.inativos .numero {
 .selo.mao { color: var(--cinza); border-color: var(--borda-forte); background: var(--cinza-fundo); }
 /* Conciliado só pelo valor (sem documento e fornecedor): roxo, para conferir. */
 .selo.valor { color: #6b3fa0; border-color: #d7c4ec; background: #f3edfa; }
+/* Conciliado com margem (mesmo documento e fornecedor, diferença de centavos): verde-azulado. */
+.selo.margem { color: #0f6b6b; border-color: #a9d8d6; background: #e3f4f3; }
+/* Conciliação com item que não está mais nos arquivos: vermelho, para decidir. */
+.selo.perigo { color: var(--vermelho); border-color: #f1c3be; background: var(--vermelho-fundo); }
+/* Item que entrou na última atualização de arquivo, e a versão de um arquivo. */
+.selo.novo { color: var(--verde); border-color: #bfe2cd; background: var(--verde-fundo); }
+.selo.versao { color: var(--primaria-escura); border-color: #c5d3e0; background: var(--primaria-clara); }
 .ok { color: var(--verde); }
 .falta { color: var(--vermelho); }
 
@@ -357,6 +364,17 @@ table.tabela tr.fixo td:first-child { box-shadow: inset 3px 0 0 var(--ambar); }
 .linha-inicio { margin: 0 0 10px; padding: 8px 12px; border-radius: 8px; background: var(--primaria-clara); color: var(--primaria-escura); font-size: 13px; }
 @media (max-width: 980px) { .opcoes-inicio { grid-template-columns: 1fr; } }
 
+/* ---------- Arquivo atualizado depois de conciliar (② e ③) ---------- */
+.cartao-atualizacao { margin-bottom: 12px; border-left: 4px solid var(--azul); }
+.cartao-atualizacao h3 { font-size: 16px; }
+.lista-atualizacao { margin: 6px 0 0; padding-left: 20px; line-height: 1.6; font-size: 13px; }
+.lista-atualizacao li { margin: 1px 0; }
+.titulo-comparacao { font-size: 14px; margin: 16px 0 4px; }
+.titulo-comparacao small { color: var(--texto-suave); font-weight: 500; }
+.resumo-versao { margin: 4px 0 6px; font-size: 14px; }
+.fichas-versao { display: grid; gap: 2px; margin-bottom: 6px; color: var(--texto-suave); }
+tr.item-faltando td { background: var(--vermelho-fundo); }
+
 /* ---------- Período e arquivos dentro do passo A × B (② e ③) ---------- */
 .arquivos-passo { margin: 12px 0; padding: 14px 16px; border-left: 4px solid var(--primaria); }
 .arquivos-passo[hidden] { display: none !important; }
@@ -373,6 +391,11 @@ table.tabela tr.fixo td:first-child { box-shadow: inset 3px 0 0 var(--ambar); }
 .arquivo-lugar { display: flex; gap: 6px; align-items: flex-start; justify-content: space-between; }
 .arquivo-lugar + .arquivo-lugar { margin-top: 6px; padding-top: 6px; border-top: 1px solid #cfe7d8; }
 .arquivo-lugar .botao { flex: none; background: #fff; }
+/* Versões anteriores de um lugar (a mais nova é a usada). */
+.versoes-lugar { margin: 6px 0 0; font-size: 12px; }
+.versoes-lugar summary { cursor: pointer; color: var(--primaria-escura); font-weight: 600; }
+.versao-antiga { display: flex; gap: 6px; align-items: flex-start; justify-content: space-between; margin-top: 6px; padding: 6px 8px; border-radius: 6px; background: rgba(255,255,255,0.7); border: 1px solid #cfe7d8; }
+.versao-antiga .botao { flex: none; background: #fff; }
 .lugar.ok { border-style: solid; border-color: #bfe2cd; background: var(--verde-fundo); }
 .lugar.ok h4 { color: var(--verde); }
 .lugar.por-cima { border-color: var(--primaria); background: var(--primaria-clara); }
@@ -408,6 +431,7 @@ table.tabela tr.fixo td:first-child { box-shadow: inset 3px 0 0 var(--ambar); }
 .rel-marcador.azul { background: var(--azul); }
 .rel-marcador.vermelho { background: var(--vermelho); }
 .rel-marcador.roxo { background: #6b3fa0; }
+.rel-marcador.verde { background: #0f6b6b; }
 .rel-explica { color: var(--texto-suave); margin: -2px 0 10px; }
 .rel-vazio { color: var(--texto-suave); font-style: italic; margin: 6px 0; }
 .rel-ponte { display: flex; flex-wrap: wrap; gap: 6px; align-items: stretch; margin-bottom: 12px; }
@@ -421,6 +445,7 @@ table.tabela tr.fixo td:first-child { box-shadow: inset 3px 0 0 var(--ambar); }
 .rel-numero.azul { border-left-color: var(--azul); }
 .rel-numero.ambar { border-left-color: #d69a1f; }
 .rel-numero.roxo { border-left-color: #6b3fa0; }
+.rel-numero.verde { border-left-color: #0f6b6b; }
 .rel-numero .rotulo { font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--texto-suave); font-weight: 600; }
 .rel-numero .valor { font-size: 19px; font-weight: 700; font-variant-numeric: tabular-nums; margin-top: 1px; }
 .rel-numero .det { font-size: 11px; color: var(--texto-suave); }
@@ -432,6 +457,7 @@ table.tabela tr.fixo td:first-child { box-shadow: inset 3px 0 0 var(--ambar); }
 .rel-grupo-cab { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 6px 10px; background: #f2f5f8; border-bottom: 1px solid var(--borda); }
 .rel-grupo.manual .rel-grupo-cab { background: #fff6df; }
 .rel-grupo.valor .rel-grupo-cab { background: #f3edfa; }
+.rel-grupo.margem .rel-grupo-cab { background: #e3f4f3; }
 .rel-id { font-weight: 800; background: var(--primaria); color: #fff; border-radius: 6px; padding: 1px 8px; font-variant-numeric: tabular-nums; }
 .rel-doc { font-variant-numeric: tabular-nums; color: var(--texto-suave); white-space: nowrap; }
 .rel-nome { font-weight: 600; flex: 1; min-width: 160px; }

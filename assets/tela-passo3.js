@@ -93,13 +93,14 @@
     const [aAnt, aAtu, raz] = await Promise.all([carregar(arqs.agingAnterior), carregar(arqs.agingAtual), carregar(arqs.razao)]);
     if (conferir && !conferir()) return null;
 
-    const decisoes = { donos: d.donos || {}, conciliadas: d.conciliadas || [], observacoes: d.observacoes || {}, conciliacoesAB: d.conciliacoesAB || [], historico: d.historico || [], inicio: d.inicio || null };
+    const decisoes = { donos: d.donos || {}, conciliadas: d.conciliadas || [], observacoes: d.observacoes || {}, conciliacoesAB: d.conciliacoesAB || [], historico: d.historico || [], inicio: d.inicio || null,
+      atualizacoes: d.atualizacoes || [] };
     if (periodoDe) decisoes.periodoDe = periodoDe;
     // Lançamentos da Parte A: os do PERÍODO escolhido (do começo do período ao fim do mês). Sem
     // período, só os do mês (vale também para um razão de vários meses usado num mês do meio).
     const todosLancamentos = raz.conteudo.conta.lancamentos || [];
-    const deNum = U.inicioDaCompetencia(arqs.periodo ? arqs.periodo.de : comp).numero, ateNum = U.fimDaCompetencia(comp).numero;
-    const lancamentosDoMes = todosLancamentos.filter((l) => { const n = U.montarData(l.dia, l.mes, l.ano); return !!n && n.numero >= deNum && n.numero <= ateNum; });
+    const deComp = arqs.periodo ? arqs.periodo.de : comp;
+    const lancamentosDoMes = lancamentosDoPeriodo(todosLancamentos, deComp, comp);
     const razaoDoMes = { total: todosLancamentos.length, doMes: lancamentosDoMes.length, periodo: raz.conteudo.periodo || raz.meta.periodo || null, dePeriodo: !!arqs.periodo };
     // Mês anterior (o do aging anterior): o que ficou em aberto nele, para o saldo inicial conforme o razão.
     const anterior = (opcoes && opcoes.semAnterior) ? null : await pendenciasDoMesAnterior(codigo, arqs.compAnterior, cfg);
@@ -116,7 +117,143 @@
     const itens = M.itensAB(entrada, r);
     const arrumado = M.arrumarGruposAB(decisoes.conciliacoesAB, itens.legado);
     decisoes.conciliacoesAB = arrumado.grupos;
-    return { emp, comp, arquivos: { aAnt, aAtu, raz }, registro, entrada, decisoes, r, itens, arrumou: arrumado.mudou, anterior, cfg, razaoDoMes, arqs, periodoDe };
+    // Arquivo atualizado depois da última gravação: confere o que mudou (o que não mudou continua).
+    const atualizou = await conferirAtualizacao({ arm, registro, metas, atuais: { aAnt, aAtu, raz }, entrada, itens, decisoes, comp, deComp, cfg });
+    if (conferir && !conferir()) return null;
+    return { emp, comp, arquivos: { aAnt, aAtu, raz }, registro, entrada, decisoes, r, itens, arrumou: arrumado.mudou, atualizou, anterior, cfg, razaoDoMes, arqs, periodoDe };
+  }
+
+  // Os lançamentos do começo do período (ou do mês) ao fim do mês.
+  function lancamentosDoPeriodo(lancs, deComp, comp) {
+    const deNum = U.inicioDaCompetencia(deComp || comp).numero, ateNum = U.fimDaCompetencia(comp).numero;
+    return (lancs || []).filter((l) => { const n = U.montarData(l.dia, l.mes, l.ano); return !!n && n.numero >= deNum && n.numero <= ateNum; });
+  }
+
+  // ------------------------------------------------------------------
+  // ARQUIVO ATUALIZADO depois da última gravação (Dony, 16/09/2026: "atualizei o razão; se eu subir o
+  // novo, tudo aquilo que ele já tinha feito, ele vai manter?" e "o meu medo é que as conciliações
+  // manuais sumam, e que uma conciliação perca um lançamento no razão novo sem o sistema identificar").
+  // O registro guarda os arquivos que a conciliação usou; se agora é outro (versão nova, ou excluiu e
+  // carregou de novo), compara os itens de antes com os de agora (MotorTerceiro.atualizarAB): nenhuma
+  // conciliação sai sozinha; a que perdeu item fica marcada ("⚠ item faltando") para ele decidir; o item
+  // só corrigido (mesmo valor e documento) é trocado dentro dela; o ⚡ tenta o que entrou; e fica
+  // registrado o que aconteceu (decisoes.atualizacoes) — o cartão da aba Conciliar A × B.
+  // ------------------------------------------------------------------
+  const LUGARES_DO_REGISTRO = [['anterior', 'aAnt'], ['atual', 'aAtu'], ['razao', 'raz']];
+  const ATUALIZACOES_GUARDADAS = 12;   // as últimas atualizações
+  const ATUALIZACOES_COM_LISTAS = 3;   // as últimas com a lista do que entrou, saiu e mudou
+  const LIMITE_LISTA = 400;
+
+  // O conteúdo de um arquivo da última gravação: ainda guardado (versão anterior) ou na pasta _apagados.
+  async function conteudoAntigo(arm, id, metas) {
+    const meta = metas.find((m) => m.id === id) || null;
+    if (meta) { try { return { meta, conteudo: await arm.conteudoDoArquivo(id) }; } catch (e) { /* segue */ } }
+    try {
+      const ap = typeof arm.arquivoApagado === 'function' ? await arm.arquivoApagado(id) : null;
+      if (ap) return { meta: ap.meta || { id }, conteudo: ap.conteudo, excluido: true };
+    } catch (e) { /* sem cópia */ }
+    return null;
+  }
+
+  function nomeDoLugarAtualizado(lugar, entrada, cfg) {
+    if (lugar === 'razao') return cfg.nomeRazao;
+    return cfg.nomeAging + ' de ' + (lugar === 'anterior' ? entrada.mesAnterior : entrada.mesAtual);
+  }
+
+  // Resultado da atualização em números (o cartão, o aviso e o histórico usam).
+  function contasDaAtualizacao(a) {
+    const mud = (a.mudaram || []).length;
+    const faltando = a.faltando || [];
+    return {
+      entraram: Math.max(0, (a.qtdEntraram || 0) - mud), sairam: Math.max(0, (a.qtdSairam || 0) - mud), mudaram: mud,
+      trocadas: (a.trocadas || []).length, faltando: faltando.length, faltandoNovas: faltando.filter((f) => !f.jaFaltava).length,
+      faltandoManuais: faltando.filter((f) => f.grupo.regra === 'manual').length, completas: (a.completas || []).length, novas: (a.novas || []).length,
+    };
+  }
+
+  // "razão de fornecedores atualizado: 640 conciliações continuam · 1 trocada · 2 com item faltando · 5 novas pelo ⚡ · entraram 9, saíram 2, mudaram 1"
+  function fraseDaAtualizacao(a) {
+    const n = contasDaAtualizacao(a);
+    const partes = [a.continuam + ' conciliação(ões) continuam'];
+    if (n.trocadas) partes.push(n.trocadas + ' com item trocado pelo corrigido');
+    if (n.faltando) partes.push(n.faltando + ' com item faltando (para conferir)');
+    if (n.completas) partes.push(n.completas + ' completas de novo');
+    if (n.novas) partes.push(n.novas + ' nova(s) pelo ⚡');
+    if (!a.semComparacao) partes.push('entraram ' + n.entraram + ', saíram ' + n.sairam + ', mudaram ' + n.mudaram);
+    return (a.nomes && a.nomes.length ? a.nomes.join(' e ') + ' atualizado: ' : 'Arquivo atualizado: ') + partes.join(' · ');
+  }
+
+  // Só as últimas atualizações guardam as listas inteiras.
+  function compactarAtualizacoes(lista) {
+    const xs = lista.slice(-ATUALIZACOES_GUARDADAS);
+    return xs.map((a, i) => (i >= xs.length - ATUALIZACOES_COM_LISTAS ? a
+      : Object.assign({}, a, { entraram: [], sairam: [], mudaram: [], listasCompactadas: true })));
+  }
+
+  // O que fica guardado de uma conciliação na atualização (sem a lista de itens).
+  function resumoDoGrupo(g) {
+    const o = { id: g.id, tipo: g.tipo, regra: g.regra, documento: g.documento || '', nome: g.nome || '', valorA: g.valorA || 0, valorB: g.valorB || 0 };
+    if (g.obs) o.obs = g.obs;
+    if (g.quem) o.quem = g.quem;
+    return o;
+  }
+
+  async function conferirAtualizacao(ctx) {
+    const { arm, registro, metas, atuais, entrada, itens, decisoes, comp, deComp, cfg } = ctx;
+    const grupos = decisoes.conciliacoesAB;
+    if (!registro.atualizadoEm || !grupos.length) return null;
+    const usados = Array.isArray(registro.arquivos) && registro.arquivos.length === 3 ? registro.arquivos : null;
+    const trocados = usados
+      ? LUGARES_DO_REGISTRO.map(([lugar, k], i) => ({ lugar, idAntes: usados[i], atual: atuais[k] })).filter((t) => t.idAntes && t.idAntes !== t.atual.meta.id)
+      : [];
+    if (!trocados.length) return null;
+    // Os itens de antes: refeitos com os arquivos da última gravação; sem eles, os das conciliações e das pendências.
+    const antigos = {};
+    for (const t of trocados) antigos[t.lugar] = await conteudoAntigo(arm, t.idAntes, metas);
+    let antes = null, semArquivoAntigo = false;
+    if (trocados.every((t) => antigos[t.lugar])) {
+      const e = Object.assign({}, entrada);
+      if (antigos.anterior) e.agingAnterior = antigos.anterior.conteudo;
+      if (antigos.atual) e.agingAtual = antigos.atual.conteudo;
+      if (antigos.razao) e.contaRazao = { conta: antigos.razao.conteudo.conta, lancamentos: lancamentosDoPeriodo(antigos.razao.conteudo.conta.lancamentos, deComp, comp) };
+      const itensAntes = M.itensAB(e, M.calcular(e));
+      antes = { ids: new Set(itensAntes.porId.keys()), porId: itensAntes.porId };
+    } else if (registro.pendencias) {
+      semArquivoAntigo = true;
+      const porId = new Map();
+      (registro.pendencias.A || []).concat(registro.pendencias.B || []).forEach((x) => porId.set(x.id, x));
+      const ids = new Set(porId.keys());
+      grupos.forEach((g) => (g.a || []).concat(g.b || []).forEach((id) => ids.add(id)));
+      antes = { ids, porId };
+    }
+    const quem = app().usuario.nome, quando = U.agoraISO();
+    const res = M.atualizarAB(antes, itens, grupos, quem, quando);
+    const nomes = trocados.map((t) => nomeDoLugarAtualizado(t.lugar, entrada, cfg));
+    const novasFaltando = res.faltando.filter((f) => !f.jaFaltava).length;
+    if (!res.trocadas.length && !novasFaltando && !res.completas.length && !res.novas.length && !res.entraram.length && !res.sairam.length) {
+      return { vazio: true, nomes };
+    }
+    decisoes.conciliacoesAB = res.grupos;
+    const arquivoDe = (x) => (x && x.meta ? { id: x.meta.id, arquivo: x.meta.arquivo || '', enviadoEm: x.meta.enviadoEm || '', enviadoPor: x.meta.enviadoPor || '',
+      qtd: x.meta.tipo === 'razao' ? x.meta.lancamentos : x.meta.titulos, excluido: !!x.excluido } : null);
+    const a = {
+      quando, quem, nomes,
+      arquivos: trocados.map((t) => ({ lugar: t.lugar, antes: arquivoDe(antigos[t.lugar]) || { id: t.idAntes }, depois: arquivoDe(t.atual) })),
+      continuam: res.continuam,
+      qtdEntraram: res.entraram.length, qtdSairam: res.sairam.length,
+      entraram: res.entraram.slice(0, LIMITE_LISTA), sairam: res.sairam.slice(0, LIMITE_LISTA), mudaram: res.mudaram.slice(0, LIMITE_LISTA),
+      trocadas: res.trocadas.map((x) => ({ grupo: resumoDoGrupo(x.grupo), trocas: x.trocas })),
+      faltando: res.faltando.map((x) => ({ grupo: resumoDoGrupo(x.grupo), sairam: x.sairam, jaFaltava: !!x.jaFaltava })),
+      completas: res.completas,
+      novas: res.novas.map((g) => g.id),
+    };
+    if (res.semComparacao) a.semComparacao = true;
+    if (semArquivoAntigo) a.semArquivoAntigo = true;
+    decisoes.atualizacoes = compactarAtualizacoes((decisoes.atualizacoes || []).concat([a]));
+    const marcadas = a.faltando.filter((f) => !f.jaFaltava);
+    decisoes.historico = (decisoes.historico || []).concat([{ quando, quem, texto: '🔄 ' + fraseDaAtualizacao(a) +
+      (marcadas.length ? ' — com item faltando: ' + marcadas.slice(0, 20).map((x) => '#' + x.grupo.id).join(', ') + (marcadas.length > 20 ? '…' : '') : '') }]).slice(-200);
+    return a;
   }
 
   function idDoRegistro(codigo, anoMes, cfg) { return 'F-' + codigo + '-' + cfg.tipo + '-' + anoMes; }
@@ -180,11 +317,19 @@
       anterior: dados.anterior, razaoDoMes: dados.razaoDoMes, arqs: dados.arqs, periodoDe: dados.periodoDe,
     };
     if (E.aba !== 'ab' && abasOcultas().has(E.aba)) E.aba = 'ab';
+    const at = dados.atualizou;
     desenharTudo();
+    if (at && !at.vazio) {
+      // Arquivo atualizado: grava o resultado (conciliações que continuam, desfeitas e novas).
+      gravar('conciliacao-atualizada', fraseDaAtualizacao(at));
+      T.avisoRapido('🔄 ' + fraseDaAtualizacao(at), 'ok', 10000);
+      return;
+    }
+    if (at && at.vazio) T.avisoRapido('🔄 ' + (at.nomes.join(' e ') || 'Arquivo') + ': versão nova com os mesmos itens — a conciliação continua igual.', 'ok', 7000);
     // Pendências gravadas desatualizadas (registro de antes desta versão, troca do início,
     // arquivo trocado): regrava para o mês seguinte continuar do jeito certo.
     const pendenciasDeAgora = JSON.stringify(M.pendenciasAB(E.itens, E.decisoes.conciliacoesAB, E.comp));
-    if (dados.arrumou || (dados.registro.atualizadoEm && JSON.stringify(dados.registro.pendencias || null) !== pendenciasDeAgora)) gravar(null);
+    if (at || dados.arrumou || (dados.registro.atualizadoEm && JSON.stringify(dados.registro.pendencias || null) !== pendenciasDeAgora)) gravar(null);
   }
 
   // Escolhe os arquivos de um passo A × B para o período escolhido (opcoes.de = começo do
@@ -212,7 +357,7 @@
     const inicioRazao = razao && razao.periodo && U.lerData(razao.periodo.de);
     const sugestaoDe = exato && inicioRazao && U.competenciaDe(inicioRazao) < (de || comp) ? U.competenciaDe(inicioRazao) : null;
     return { agingAnterior: maisNovo(agings(compAnterior)), agingAtual: maisNovo(agings(comp)), razao, compAnterior,
-      periodo: de ? { de, ate: comp } : null, sugestaoDe };
+      periodo: de ? { de, ate: comp } : null, sugestaoDe, metas };
   }
   function arquivosDoTerceiro(metas, comp) { return arquivosDoPasso(metas, comp, 'passo3'); }
 
@@ -230,14 +375,63 @@
   function lugaresDoPasso(ctx) {
     const { cfg, comp, arqs, periodoDe } = ctx;
     const periodo = nomeDoPeriodo(periodoDe, comp);
+    const aberta = E && E.registro && E.registro.id === ctx.registro.id && E.el && E.el.isConnected;
+    const qtd = aberta ? E.decisoes.conciliacoesAB.length : ((ctx.registro.decisoes && ctx.registro.decisoes.conciliacoesAB) || []).length;
+    const avisoExcluir = qtd ? 'As <b>' + qtd.toLocaleString('pt-BR') + '</b> conciliações deste passo continuam guardadas: com a troca de arquivo, ' +
+      'o que não mudou continua conciliado, nenhuma conciliação some e o programa mostra o que entrou, saiu ou mudou. (Para trocar direto, use <b>🔄 Carregar nova versão</b>.)' : '';
+    const comuns = (id) => ({ conferirTroca: conferirTrocaDo(ctx, id), avisoExcluir });
     return [
-      { id: 'razao', parte: 'Parte A · contabilidade', titulo: primeiraMaiuscula(cfg.nomeRazao), sub: periodo, nome: cfg.nomeRazao + ' de ' + periodo, log: cfg.id + '/razao',
-        tipo: 'razao', papel: cfg.papelRazao, competencia: comp, periodo: { de: periodoDe || comp, ate: comp }, nomePeriodo: periodo, arquivos: arqs.razao ? [arqs.razao] : [] },
-      { id: 'anterior', parte: 'Parte A · saldo inicial', titulo: primeiraMaiuscula(cfg.nomeAging), sub: U.nomeCompetencia(arqs.compAnterior) + (periodoDe ? ' (mês antes do período)' : ' (mês anterior)'),
-        nome: cfg.nomeAging + ' de ' + U.nomeCompetencia(arqs.compAnterior), log: cfg.id + '/anterior', tipo: cfg.tipoFinanceiro, competencia: arqs.compAnterior, arquivos: arqs.agingAnterior ? [arqs.agingAnterior] : [] },
-      { id: 'atual', parte: 'Parte B · financeiro', titulo: primeiraMaiuscula(cfg.nomeAging), sub: U.nomeCompetencia(comp),
-        nome: cfg.nomeAging + ' de ' + U.nomeCompetencia(comp), log: cfg.id + '/atual', tipo: cfg.tipoFinanceiro, competencia: comp, arquivos: arqs.agingAtual ? [arqs.agingAtual] : [] },
+      Object.assign({ id: 'razao', parte: 'Parte A · contabilidade', titulo: primeiraMaiuscula(cfg.nomeRazao), sub: periodo, nome: cfg.nomeRazao + ' de ' + periodo, log: cfg.id + '/razao',
+        tipo: 'razao', papel: cfg.papelRazao, competencia: comp, periodo: { de: periodoDe || comp, ate: comp }, nomePeriodo: periodo, arquivos: arqs.razao ? [arqs.razao] : [] }, comuns('razao')),
+      Object.assign({ id: 'anterior', parte: 'Parte A · saldo inicial', titulo: primeiraMaiuscula(cfg.nomeAging), sub: U.nomeCompetencia(arqs.compAnterior) + (periodoDe ? ' (mês antes do período)' : ' (mês anterior)'),
+        nome: cfg.nomeAging + ' de ' + U.nomeCompetencia(arqs.compAnterior), log: cfg.id + '/anterior', tipo: cfg.tipoFinanceiro, competencia: arqs.compAnterior, arquivos: arqs.agingAnterior ? [arqs.agingAnterior] : [] }, comuns('anterior')),
+      Object.assign({ id: 'atual', parte: 'Parte B · financeiro', titulo: primeiraMaiuscula(cfg.nomeAging), sub: U.nomeCompetencia(comp),
+        nome: cfg.nomeAging + ' de ' + U.nomeCompetencia(comp), log: cfg.id + '/atual', tipo: cfg.tipoFinanceiro, competencia: comp, arquivos: arqs.agingAtual ? [arqs.agingAtual] : [] }, comuns('atual')),
     ];
+  }
+
+  // Antes de guardar a versão nova de um arquivo que a conciliação aberta usa: mostra o que vai
+  // acontecer com as conciliações (o mesmo cálculo que roda ao abrir, MotorTerceiro.atualizarAB) e pergunta.
+  function conferirTrocaDo(ctx, lugarId) {
+    return async (novo, comparacao) => {
+      if (!E || !E.registro || E.registro.id !== ctx.registro.id || !E.el || !E.el.isConnected) return true;
+      await E.fila; // o que estava para gravar grava antes
+      const grupos = E.decisoes.conciliacoesAB;
+      if (!grupos.length) return true;
+      const entrada = Object.assign({}, E.entrada, { decisoes: E.decisoes });
+      if (lugarId === 'razao') entrada.contaRazao = { conta: novo.conta, lancamentos: lancamentosDoPeriodo(novo.conta.lancamentos, E.arqs.periodo ? E.arqs.periodo.de : E.comp, E.comp) };
+      else if (lugarId === 'anterior') entrada.agingAnterior = novo.financeiro;
+      else entrada.agingAtual = novo.financeiro;
+      let res;
+      try {
+        const itens = M.itensAB(entrada, M.calcular(entrada));
+        res = M.atualizarAB({ ids: new Set(E.itens.porId.keys()), porId: E.itens.porId }, itens, grupos, '', '');
+      } catch (e) { return true; }
+      const novasFaltando = res.faltando.filter((f) => !f.jaFaltava);
+      if (!res.trocadas.length && !novasFaltando.length && !res.completas.length && !res.novas.length && !res.entraram.length && !res.sairam.length) return true;
+      const nomeLugar = nomeDoLugarAtualizado(lugarId, E.entrada, E.cfg);
+      const coisas = lugarId === 'razao' ? 'lançamentos' : 'títulos';
+      const mud = res.mudaram.length;
+      const ids = (gs) => gs.slice(0, 12).map((g) => '#' + g.id).join(', ') + (gs.length > 12 ? '…' : '');
+      const manuais = novasFaltando.filter((f) => f.grupo.regra === 'manual').length;
+      const muito = novasFaltando.length >= 10 && novasFaltando.length > grupos.length * 0.3;
+      const noArquivo = comparacao && comparacao.iguais !== undefined
+        ? 'No arquivo: ' + raiz.TelaSubir.contagensDaComparacao(comparacao, true) + '.<br>' : '';
+      return T.confirmar({
+        titulo: 'Carregar a versão nova do ' + nomeLugar + '?',
+        texto: noArquivo + 'Na conciliação de ' + T.esc(E.entrada.nomeRazao || E.entrada.mesAtual) + ':<br>' +
+          '✓ <b>' + res.continuam.toLocaleString('pt-BR') + '</b> conciliação(ões) continuam como estão (nenhuma é desfeita sozinha).<br>' +
+          '➕ Entram <b>' + Math.max(0, res.entraram.length - mud) + '</b> · ➖ saem <b>' + Math.max(0, res.sairam.length - mud) + '</b> · ✎ mudam <b>' + mud + '</b> ' + coisas + ' nas Partes A e B.<br>' +
+          (res.trocadas.length ? '✎ <b>' + res.trocadas.length + '</b> conciliação(ões) continuam com o item corrigido no lugar do antigo (mesmo valor e documento): ' + ids(res.trocadas.map((x) => x.grupo)) + '.<br>' : '') +
+          (novasFaltando.length ? '<span class="falta">⚠ <b>' + novasFaltando.length + '</b> conciliação(ões) vão ficar com item faltando' + (manuais ? ' (' + manuais + ' feita(s) à mão)' : '') + ': ' + ids(novasFaltando.map((x) => x.grupo)) +
+            '. Elas <b>não somem</b>: ficam marcadas para você conferir e decidir.</span><br>' : '') +
+          (res.completas.length ? '↩ <b>' + res.completas.length + '</b> conciliação(ões) com item faltando ficam completas de novo: ' + ids(res.completas.map((id) => ({ id }))) + '.<br>' : '') +
+          '⚡ ' + (res.novas.length ? '<b>' + res.novas.length + '</b> conciliação(ões) novas com o que entrou, pelas regras do documento' : 'Nada do que entrou casa pelas regras do documento') +
+          '; o resto fica em aberto para conciliar à mão.<br><br><span class="suave">A versão de agora continua guardada: dá para voltar excluindo a nova.</span>' +
+          (muito ? '<br><br><span class="falta">⚠ Muita conciliação perde item com esta versão. Confira se é o arquivo certo (mesma conta e mesmo mês).</span>' : ''),
+        botao: '🔄 Carregar a versão nova', perigo: muito,
+      });
+    };
   }
 
   function chaveDoPainel(ctx) { return ctx.codigo + '|' + ctx.cfg.id + '|' + ctx.comp; }
@@ -251,7 +445,7 @@
       ? '<div class="aviso info" style="margin:0 0 10px"><span class="icone-aviso">📅</span><div>O razão guardado vai de <b>' + T.esc(arqs.razao.periodo.de) + ' a ' + T.esc(arqs.razao.periodo.ate) + '</b>. ' +
         '<button type="button" class="botao pequeno" data-usar-periodo="' + arqs.sugestaoDe + '">Conciliar o período ' + T.esc(nomeDoPeriodo(arqs.sugestaoDe, comp)) + '</button></div></div>' : '';
     return raiz.TelaSubir.painel({
-      chave: chaveDoPainel(ctx), titulo: 'Período e arquivos desta conciliação', resumo: nomeDoPeriodo(periodoDe, comp), aberto, fixo, lugares: lugaresDoPasso(ctx),
+      chave: chaveDoPainel(ctx), titulo: 'Período e arquivos desta conciliação', resumo: nomeDoPeriodo(periodoDe, comp), aberto, fixo, lugares: lugaresDoPasso(ctx), metas: arqs.metas,
       antes: '<div class="linha-flex periodo-passo"><label class="pequeno" for="periodo-de"><b>Período da conciliação</b></label>' +
         '<select class="filtro" id="periodo-de" data-periodo-de>' + opcoes.map((o) => '<option value="' + o[0] + '"' + ((periodoDe || '') === o[0] ? ' selected' : '') + '>' + T.esc(o[1]) + '</option>').join('') + '</select>' +
         '<span class="suave pequeno">Parte A = ' + T.esc(cfg.nomeAging) + ' de ' + T.esc(U.nomeCompetencia(arqs.compAnterior)) + ' + razão de ' + T.esc(nomeDoPeriodo(periodoDe, comp)) +
@@ -293,6 +487,7 @@
       const decisoes = Object.assign({}, guardado.decisoes || {});
       if (novo) decisoes.periodoDe = novo; else delete decisoes.periodoDe;
       if (qtd) decisoes.conciliacoesAB = [];
+      delete decisoes.atualizacoes; // os itens são outros: as atualizações de antes não valem mais
       decisoes.historico = (decisoes.historico || []).concat([{ quando: U.agoraISO(), quem: app().usuario.nome,
         texto: 'Período: ' + nomeDoPeriodo(novo, ctx.comp) + (qtd ? ' (desfez ' + qtd + ' conciliações)' : '') }]).slice(-200);
       await arm.salvarConciliacao(Object.assign({}, guardado, { decisoes, situacao: 'andamento' }));
@@ -603,6 +798,7 @@
       if (!ok) return;
       E.decisoes.conciliacoesAB = [];
     }
+    if (mudaItens) E.decisoes.atualizacoes = []; // os itens são outros: as atualizações de antes não valem mais
     E.decisoes.inicio = { modo, de: ant.competencia, quem: app().usuario.nome, quando: U.agoraISO() };
     historico('Saldo inicial ' + nomeModo + (mudaItens && qtd ? ' (desfez ' + qtd + ' conciliações)' : ''));
     await gravar('terceiro-saldo-inicial', nomeModo);
@@ -726,15 +922,26 @@
     grupos.forEach((g) => g.a.concat(g.b).forEach((id) => E.idDoItem.set(id, g)));
     E.selA.forEach((id) => { if (!it.porId.has(id) || E.idDoItem.has(id)) E.selA.delete(id); });
     E.selB.forEach((id) => { if (!it.porId.has(id) || E.idDoItem.has(id)) E.selB.delete(id); });
+    // Conciliações com item que não está mais nos arquivos (o arquivo mudou): continuam, marcadas, até ele decidir.
+    E.comFalta = new Set(grupos.filter((g) => M.faltandoNoGrupo(g, it.porId).length).map((g) => g.id));
 
     const ab = M.emAbertoAB(it, grupos);
     const busca = filtro('busca');
-    const mostrar = filtro('mostrar');            // '' = em aberto · 'conciliados' · 'valor' (só pelo valor) · 'todos'
+    const ultima = ultimaAtualizacao();
+    // '' = em aberto · 'conciliados' · 'valor' (só pelo valor) · 'margem' (com margem) · 'faltando' (com item
+    // faltando) · 'atualizacao' (da última atualização de arquivo) · 'todos'
+    let mostrar = filtro('mostrar');
+    if ((mostrar === 'atualizacao' && !ultima) || (mostrar === 'faltando' && !E.comFalta.size)) mostrar = '';
+    const daAtualizacao = idsDaAtualizacao(ultima);
     const b = buscaAB(busca);
+    const grupoDe = (x) => E.idDoItem.get(x.id);
     const naLista = (x) => (mostrar === 'todos' ? true
-      : mostrar === 'conciliados' ? E.idDoItem.has(x.id)
-      : mostrar === 'valor' ? M.ehPorValor(E.idDoItem.get(x.id))
-      : !E.idDoItem.has(x.id)) && b.item(x);
+      : mostrar === 'conciliados' ? !!grupoDe(x)
+      : mostrar === 'valor' ? M.ehPorValor(grupoDe(x))
+      : mostrar === 'margem' ? M.ehComMargem(grupoDe(x))
+      : mostrar === 'faltando' ? !!grupoDe(x) && E.comFalta.has(grupoDe(x).id)
+      : mostrar === 'atualizacao' ? daAtualizacao.itens.has(x.id) || (!!grupoDe(x) && daAtualizacao.grupos.has(grupoDe(x).id))
+      : !grupoDe(x)) && b.item(x);
     const doLadoA = filtroDoLado('A'), doLadoB = filtroDoLado('B');
     const passaA = (x) => (E.incluirAnterior || (x.fonte !== 'anterior' && x.fonte !== 'pendente')) && naLista(x) && doLadoA(x);
     const passaB = (x) => naLista(x) && doLadoB(x);
@@ -749,15 +956,21 @@
     E.listaA = listaA; E.listaB = listaB;
     E.fixos = new Set(fixosA.concat(fixosB).map((x) => x.id));
 
+    const opcoes = [['', 'Em aberto'], ['conciliados', 'Conciliados'], ['valor', 'Conciliados só pelo valor'], ['margem', 'Conciliados com margem']]
+      .concat(E.comFalta.size ? [['faltando', '⚠ Conciliados com item faltando (' + E.comFalta.size + ')']] : [])
+      .concat(ultima ? [['atualizacao', 'Da última atualização de arquivo']] : [])
+      .concat([['todos', 'Todos']]);
     E.el.querySelector('#filtros').innerHTML =
       '<input type="search" class="busca" data-filtro="busca" placeholder="Busca nos dois lados: documento, fornecedor, valor, data ou #ID" title="Vale para a Parte A, a Parte B e a lista de conciliações. Cada parte tem também os seus filtros." value="' + T.esc(busca) + '">' +
-      '<select class="filtro" data-filtro="mostrar">' + [['', 'Em aberto'], ['conciliados', 'Conciliados'], ['valor', 'Conciliados só pelo valor'], ['todos', 'Todos']].map((o) =>
-        '<option value="' + o[0] + '"' + (mostrar === o[0] ? ' selected' : '') + '>' + o[1] + '</option>').join('') + '</select>' +
+      '<select class="filtro" data-filtro="mostrar">' + opcoes.map((o) => '<option value="' + o[0] + '"' + (mostrar === o[0] ? ' selected' : '') + '>' + o[1] + '</option>').join('') + '</select>' +
       '<label class="linha-flex" style="gap:6px"><input type="checkbox" id="ab-anterior"' + (E.incluirAnterior ? ' checked' : '') + '> <span class="pequeno">Parte A = aging ' + T.esc(E.entrada.mesAnterior) + (E.itens.continuacao ? ' + pendências' : '') + ' + razão</span></label>' +
       '<span class="suave pequeno">(desmarque para <b>só o razão</b>)</span>';
 
-    const rot = mostrar === 'todos' ? 'item(ns)' : mostrar === 'conciliados' ? 'conciliado(s)' : mostrar === 'valor' ? 'conciliado(s) só pelo valor' : 'em aberto';
-    alvo.innerHTML = cartaoInicio() + resumoAB(ab, grupos) +
+    const ROTULOS = { todos: 'item(ns)', conciliados: 'conciliado(s)', valor: 'conciliado(s) só pelo valor', margem: 'conciliado(s) com margem',
+      faltando: 'nas conciliações com item faltando', atualizacao: 'da última atualização de arquivo' };
+    const rot = ROTULOS[mostrar] || 'em aberto';
+    E.daAtualizacao = ultima && !ultima.visto ? daAtualizacao : null; // selos "novo", "trocado" e "mudou" nas partes
+    alvo.innerHTML = cartaoAtualizacao(ultima) + cartaoFaltando(grupos) + cartaoInicio() + resumoAB(ab, grupos) +
       '<div class="grade-ab">' +
       colunaAB('A', 'Parte A · contabilidade', E.incluirAnterior ? 'aging ' + E.entrada.mesAnterior + ' + razão de ' + (E.entrada.nomeRazao || E.entrada.mesAtual) : 'só o razão de ' + (E.entrada.nomeRazao || E.entrada.mesAtual), filtradosA, fixosA, rot) +
       colunaAB('B', 'Parte B · financeiro', 'aging ' + E.entrada.mesAtual, filtradosB, fixosB, rot) +
@@ -767,17 +980,195 @@
     T.tabelaPaginada(alvo.querySelector('#colA'), tabelaItens('A', listaA));
     T.tabelaPaginada(alvo.querySelector('#colB'), tabelaItens('B', listaB));
     atualizarBarraAB();
-    desenharListaAB(alvo.querySelector('#lista-ab'), b, mostrar === 'valor');
+    desenharListaAB(alvo.querySelector('#lista-ab'), b, MODOS_LISTA[mostrar] ? mostrar : '', daAtualizacao);
   }
+
+  // ------------------------------------------------------------------
+  // Cartões da ATUALIZAÇÃO DE ARQUIVO (conferirAtualizacao) e das conciliações com item faltando.
+  // ------------------------------------------------------------------
+  function ultimaAtualizacao() { const xs = (E.decisoes && E.decisoes.atualizacoes) || []; return xs.length ? xs[xs.length - 1] : null; }
+
+  // Os itens (que entraram ou foram trocados) e as conciliações (novas, trocadas, com item faltando,
+  // completas de novo) da atualização.
+  function idsDaAtualizacao(a) {
+    const r = { itens: new Set(), grupos: new Set(), novos: new Set(), trocados: new Set(), mudados: new Set() };
+    if (!a) return r;
+    (a.entraram || []).forEach((x) => { r.itens.add(x.id); r.novos.add(x.id); });
+    (a.mudaram || []).forEach((p) => r.mudados.add(p.depois.id));
+    (a.trocadas || []).forEach((t) => { r.grupos.add(t.grupo.id); (t.trocas || []).forEach((x) => { r.itens.add(x.depois.id); r.trocados.add(x.depois.id); }); });
+    (a.faltando || []).forEach((f) => r.grupos.add(f.grupo.id));
+    (a.completas || []).concat(a.novas || []).forEach((id) => r.grupos.add(id));
+    return r;
+  }
+
+  function nomesDaAtualizacao(a) { return (a.nomes && a.nomes.length) ? a.nomes.join(' e ') : 'arquivo'; }
+  function botoesDeIds(ids, max) {
+    const n = max || 15;
+    return ids.slice(0, n).map((id) => '<button type="button" class="lapis" data-ver-id="' + id + '" title="Ver a conciliação #' + id + '"><b>#' + id + '</b></button>').join(' ') + (ids.length > n ? ' …' : '');
+  }
+
+  function cartaoAtualizacao(a) {
+    if (!a) return '';
+    const quando = U.dataHoraLocal(a.quando) + (a.quem ? ' · ' + a.quem : '');
+    const n = contasDaAtualizacao(a);
+    if (a.visto) {
+      const pl = (q, um, varios) => q + ' ' + (q === 1 ? um : varios);
+      return '<div class="linha-inicio">🔄 Última atualização de arquivo (' + T.esc(nomesDaAtualizacao(a)) + ', ' + T.esc(quando) + '): ' +
+        pl(a.continuam, 'conciliação continuou', 'conciliações continuaram') + (n.trocadas ? ' · ' + pl(n.trocadas, 'com item trocado', 'com item trocado') : '') +
+        (n.faltandoNovas ? ' · ' + pl(n.faltandoNovas, 'ficou com item faltando', 'ficaram com item faltando') : '') + (n.novas ? ' · ' + pl(n.novas, 'nova', 'novas') : '') +
+        '. <button type="button" class="botao pequeno leve" data-acao="ver-atualizacao">ver o que mudou</button></div>';
+    }
+    const novasFaltando = (a.faltando || []).filter((f) => !f.jaFaltava);
+    const manuais = novasFaltando.filter((f) => f.grupo.regra === 'manual').length;
+    const abertosAgora = (a.entraram || []).filter((x) => E.itens.porId.has(x.id) && !E.idDoItem.has(x.id)).length;
+    const arquivos = (a.arquivos || []).map((f) => '<li class="suave">' + T.esc(primeiraMaiuscula(nomeDoLugarAtualizado(f.lugar, E.entrada, E.cfg))) + ': ' +
+      (f.antes && f.antes.arquivo ? '<b>' + T.esc(f.antes.arquivo) + '</b>' + (f.antes.qtd !== undefined ? ' (' + f.antes.qtd + ')' : '') : 'a versão de antes') + ' → ' +
+      (f.depois ? '<b>' + T.esc(f.depois.arquivo) + '</b>' + (f.depois.qtd !== undefined ? ' (' + f.depois.qtd + ')' : '') : '?') +
+      (f.antes && f.antes.excluido ? ' <span class="pequeno">(a de antes tinha sido excluída; comparada pela cópia da pasta _apagados)</span>' : '') + '</li>').join('');
+    return '<div class="cartao corpo cartao-atualizacao">' +
+      '<h3>🔄 ' + T.esc(primeiraMaiuscula(nomesDaAtualizacao(a))) + ' atualizado <span class="suave pequeno" style="font-weight:400">· ' + T.esc(quando) + '</span></h3>' +
+      '<ul class="lista-atualizacao">' + arquivos +
+      '<li>✓ <b>' + a.continuam.toLocaleString('pt-BR') + '</b> conciliação(ões) continuam como estavam — nenhuma foi desfeita.</li>' +
+      (a.semComparacao
+        ? '<li class="suave">Não deu para comparar com o arquivo de antes (ele não está mais na pasta de dados): só as conciliações foram conferidas.</li>'
+        : '<li>➕ Entraram <b>' + n.entraram + '</b> · ➖ saíram <b>' + n.sairam + '</b> · ✎ mudaram <b>' + n.mudaram + '</b> item(ns) nas Partes A e B' +
+          (a.semArquivoAntigo ? ' <span class="suave pequeno">(o arquivo de antes não está mais guardado: comparado pelo que estava em aberto e conciliado)</span>' : '') + '.</li>') +
+      (n.trocadas ? '<li>✎ <b>' + n.trocadas + '</b> conciliação(ões) continuam com o item corrigido no lugar do antigo (mesmo valor e documento): ' + botoesDeIds(a.trocadas.map((t) => t.grupo.id)) + '.</li>' : '') +
+      (novasFaltando.length ? '<li class="falta">⚠ <b>' + novasFaltando.length + '</b> conciliação(ões) ficaram com item faltando' + (manuais ? ' (' + manuais + ' feita(s) à mão)' : '') + ': ' +
+        botoesDeIds(novasFaltando.map((f) => f.grupo.id)) + ' — <b>não foram desfeitas</b>: confira e decida (aviso logo abaixo).</li>' : '') +
+      (n.completas ? '<li>↩ <b>' + n.completas + '</b> conciliação(ões) com item faltando ficaram completas de novo (o item voltou): ' + botoesDeIds(a.completas) + '.</li>' : '') +
+      '<li>' + (n.novas ? '⚡ <b>' + n.novas + '</b> conciliação(ões) novas com o que entrou, pelas regras do documento: ' + botoesDeIds(a.novas) + '.'
+        : '⚡ Nada do que entrou casou pelas regras do documento.') + '</li>' +
+      (a.semComparacao ? '' : '<li>' + (abertosAgora ? '● <b>' + abertosAgora + '</b> item(ns) que entraram estão em aberto — para conciliar à mão (ou com os outros botões).' : '✓ Nada do que entrou ficou em aberto.') + '</li>') +
+      '</ul>' +
+      '<div class="linha-flex" style="margin-top:8px">' +
+      '<button type="button" class="botao pequeno primario" data-acao="ver-atualizacao">📋 Ver o que mudou</button>' +
+      '<button type="button" class="botao pequeno" data-acao="mostrar-atualizacao" title="Mostra nas partes e na lista só o que mexeu nesta atualização">Mostrar na lista</button>' +
+      '<button type="button" class="botao pequeno leve" data-acao="entendi-atualizacao" title="Guarda o aviso (continua em Ver o que mudou)">✓ Entendi</button>' +
+      '</div></div>';
+  }
+
+  // Aviso fixo enquanto houver conciliação com item faltando (Dony, 16/09/2026: "quero que o sistema identifique").
+  function cartaoFaltando(grupos) {
+    if (!E.comFalta.size) return '';
+    const lista = grupos.filter((g) => E.comFalta.has(g.id));
+    const manuais = lista.filter((g) => g.regra === 'manual').length;
+    return '<div class="aviso vermelho" style="margin-bottom:12px"><span class="icone-aviso">⚠</span><div>' +
+      '<b>' + lista.length + '</b> conciliação(ões) com item que não está mais nos arquivos' + (manuais ? ' (<b>' + manuais + '</b> feita(s) à mão)' : '') + ': ' + botoesDeIds(lista.map((g) => g.id), 20) + '.<br>' +
+      'Elas <b>continuam conciliadas</b> até você decidir: se o item saiu de verdade, clique em <b>Desfazer</b> (o resto dela volta para em aberto); ' +
+      'se foi engano no arquivo, carregue a versão certa — ela fica completa de novo sozinha. ' +
+      '<span class="linha-flex" style="margin-top:6px"><button type="button" class="botao pequeno" data-acao="mostrar-faltando">Mostrar essas</button>' +
+      '<button type="button" class="botao pequeno perigo" data-acao="desfazer-faltando">Desfazer as ' + lista.length + '</button></span></div></div>';
+  }
+
+  // Janela com o detalhe da última atualização.
+  async function verAtualizacao() {
+    const a = ultimaAtualizacao();
+    if (!a) return;
+    const tds = (x) => '<td><b>' + T.esc(x.lado || '') + '</b></td><td class="num">' + T.esc(x.data || '—') + '</td><td class="num">' + T.nome(x.doc) + '</td>' +
+      '<td class="pequeno suave">' + T.esc(x.fonte ? rotuloFonte(x) : '') + '</td><td class="historico">' + T.esc(x.nome || '') + (x.historico ? '<br><span class="suave pequeno">' + T.esc(x.historico) + '</span>' : '') + '</td>' +
+      (x.valor !== undefined ? tdDC(x.valor) : '<td class="suave pequeno">sem detalhe</td>');
+    const cab = '<th>Lado</th><th>Data</th><th>Documento</th><th>Origem</th><th class="historico">Fornecedor · histórico</th><th class="num">Valor · D/C</th>';
+    const verId = (id) => '<button type="button" class="lapis" data-fechar-e-ver="' + id + '"><b>#' + id + '</b></button>';
+    const situacao = (id) => { const g = E.idDoItem.get(id); return g ? verId(g.id) : (E.itens.porId.has(id) ? '<span class="falta">em aberto</span>' : '<span class="suave">saiu depois</span>'); };
+    const LIM = 300;
+    const tabela = (titulo, xs, comSituacao, explica) => '<h3 class="titulo-comparacao">' + titulo + ' <small>(' + xs.length + ')</small></h3>' +
+      (explica ? '<p class="suave pequeno" style="margin:0 0 6px">' + explica + '</p>' : '') +
+      (xs.length ? '<div class="tabela-caixa"><table class="tabela"><thead><tr>' + cab + (comSituacao ? '<th>Agora</th>' : '') + '</tr></thead><tbody>' +
+        xs.slice(0, LIM).map((x) => '<tr>' + tds(x) + (comSituacao ? '<td>' + situacao(x.id) + '</td>' : '') + '</tr>').join('') + '</tbody></table></div>' +
+        (xs.length > LIM ? '<p class="suave pequeno">… e mais ' + (xs.length - LIM) + '.</p>' : '') : '<p class="suave pequeno">Nenhum.</p>');
+    const mudA = new Set((a.mudaram || []).map((p) => p.antes.id)), mudD = new Set((a.mudaram || []).map((p) => p.depois.id));
+    const entraram = (a.entraram || []).filter((x) => !mudD.has(x.id)), sairam = (a.sairam || []).filter((x) => !mudA.has(x.id));
+    const cabGrupo = '<th>ID</th><th>Como</th><th>Documento</th><th>Fornecedor</th><th class="num">Parte A</th><th class="num">Parte B</th>';
+    const tdsGrupo = (g) => '<td class="num">' + verId(g.id) + '</td><td><span class="selo ' + seloDaRegra(g) + '">' + T.esc(COMO_AB[g.regra] || g.regra) + '</span></td>' +
+      '<td class="num">' + T.nome(g.documento) + '</td><td class="nome">' + T.nome(g.nome) + (g.obs ? '<br><span class="suave pequeno">✎ ' + T.esc(g.obs) + '</span>' : '') + '</td>' +
+      tdDC(g.valorA) + tdDC(g.valorB);
+    const agoraDoGrupo = (id) => {
+      const g = E.decisoes.conciliacoesAB.find((x) => x.id === id);
+      if (!g) return '<span class="suave">desfeita depois</span>';
+      return E.comFalta.has(id) ? '<span class="falta">ainda com item faltando</span>' : '<span class="ok">completa</span>';
+    };
+    const faltando = (a.faltando || []).length
+      ? '<div class="tabela-caixa"><table class="tabela"><thead><tr>' + cabGrupo + '<th class="historico">O item que saiu</th><th>Agora</th></tr></thead><tbody>' +
+        a.faltando.map((f) => '<tr>' + tdsGrupo(f.grupo) + '<td class="historico pequeno">' + (f.sairam || []).map((s) => {
+          const p = (a.mudaram || []).find((q) => q.antes.id === s.id);
+          return (s.valor !== undefined ? '<b>' + T.esc(s.lado || '') + '</b> · ' + T.esc(s.data || '') + ' · doc ' + T.esc(s.doc || '—') + ' · ' + T.esc((s.historico || s.nome || '').slice(0, 90)) + ' · ' + htmlDC(s.valor)
+            : '<span class="suave">item ' + T.esc(s.id) + ' (sem detalhe)</span>') +
+            (p ? ' <span class="selo suspeita">mudou: ' + T.esc((p.campos || []).join(', ')) + '</span>' : ' <span class="selo mao">saiu</span>');
+        }).join('<br>') + (f.jaFaltava ? '<br><span class="suave">(já estava faltando antes desta atualização)</span>' : '') + '</td><td class="pequeno">' + agoraDoGrupo(f.grupo.id) + '</td></tr>').join('') +
+        '</tbody></table></div>'
+      : '<p class="suave pequeno">Nenhuma.</p>';
+    const trocadas = (a.trocadas || []).length
+      ? '<div class="tabela-caixa"><table class="tabela"><thead><tr>' + cabGrupo + '<th class="historico">Antes → agora</th></tr></thead><tbody>' +
+        a.trocadas.map((t) => '<tr>' + tdsGrupo(t.grupo) + '<td class="historico pequeno">' + (t.trocas || []).map((x) =>
+          'antes: ' + T.esc(x.antes.data || '') + ' · ' + T.esc((x.antes.historico || x.antes.nome || '').slice(0, 80)) + '<br><b>agora</b>: ' + T.esc(x.depois.data || '') + ' · ' +
+          T.esc((x.depois.historico || x.depois.nome || '').slice(0, 80)) + ' <span class="selo suspeita">mudou: ' + T.esc((x.campos || []).join(', ') || '—') + '</span>').join('<br>') + '</td></tr>').join('') +
+        '</tbody></table></div>'
+      : '<p class="suave pequeno">Nenhuma.</p>';
+    const mudaram = (a.mudaram || []).length
+      ? '<div class="tabela-caixa"><table class="tabela"><thead><tr><th></th>' + cab + '<th>O que mudou</th></tr></thead><tbody>' +
+        a.mudaram.slice(0, LIM).map((p) => '<tr class="suave"><td class="pequeno">antes</td>' + tds(p.antes) + '<td rowspan="2"><b>' + T.esc((p.campos || []).join(', ') || '—') + '</b></td></tr>' +
+          '<tr><td class="pequeno"><b>agora</b></td>' + tds(p.depois) + '</tr>').join('') + '</tbody></table></div>'
+      : '<p class="suave pequeno">Nenhum.</p>';
+    const n = contasDaAtualizacao(a);
+    const compactada = a.listasCompactadas ? '<div class="aviso ambar pequeno" style="margin-bottom:8px">As listas do que entrou, saiu e mudou desta atualização não ficaram guardadas (só as das 3 últimas).</div>' : '';
+    const r = await T.janela({
+      titulo: '🔄 ' + primeiraMaiuscula(nomesDaAtualizacao(a)) + ' atualizado · ' + U.dataHoraLocal(a.quando), larga: true,
+      corpo: compactada + '<p class="resumo-versao">✓ <b>' + a.continuam + '</b> continuam · ✎ <b>' + n.trocadas + '</b> com item trocado · ⚠ <b>' + n.faltando + '</b> com item faltando · ↩ <b>' + n.completas +
+        '</b> completas de novo · ⚡ <b>' + n.novas + '</b> nova(s)' + (a.novas && a.novas.length ? ' (' + a.novas.slice(0, 8).map((id) => '#' + id).join(', ') + (a.novas.length > 8 ? '…' : '') + ')' : '') + '</p>' +
+        '<h3 class="titulo-comparacao">⚠ Conciliações com item faltando <small>(' + n.faltando + ')</small></h3>' +
+        '<p class="suave pequeno" style="margin:0 0 6px">Um item delas não está no arquivo novo. Elas <b>não foram desfeitas</b>: continuam conciliadas até você decidir (Desfazer, ou carregar a versão certa do arquivo).</p>' + faltando +
+        '<h3 class="titulo-comparacao">✎ Conciliações com item trocado <small>(' + n.trocadas + ')</small></h3>' +
+        '<p class="suave pequeno" style="margin:0 0 6px">O item delas foi corrigido no arquivo novo (mesmo lado, valor e documento; mudou o texto, a data ou o fornecedor): elas continuam, com o item novo.</p>' + trocadas +
+        (n.completas ? '<p class="pequeno" style="margin-top:10px">↩ Completas de novo (o item voltou): ' + a.completas.map(verId).join(' ') + '</p>' : '') +
+        tabela('➕ Entraram', entraram, true, 'Itens que não estavam antes. "Agora" diz se já estão conciliados.') +
+        tabela('➖ Saíram', sairam, false, 'Itens que estavam antes e não estão mais (os que estavam conciliados aparecem também lá em cima).') +
+        '<h3 class="titulo-comparacao">✎ Mudaram <small>(' + (a.mudaram || []).length + ')</small></h3>' + mudaram,
+      aoAbrir: (j, fechar) => {
+        j.addEventListener('click', (ev) => {
+          const bt = ev.target.closest('[data-fechar-e-ver]');
+          if (bt) fechar(Number(bt.getAttribute('data-fechar-e-ver')));
+        });
+      },
+    });
+    if (typeof r === 'number') verConciliacao(r);
+  }
+
+  function verConciliacao(id) {
+    E.filtros['ab.busca'] = '#' + id;
+    E.filtros['ab.mostrar'] = 'todos';
+    E.abertosAB.add(id);
+    desenharAba();
+  }
+
+  function mostrarNaLista(modo) {
+    E.filtros['ab.busca'] = '';
+    E.filtros['ab.mostrar'] = modo;
+    desenharAba();
+  }
+
+  async function entendiAtualizacao() {
+    const a = ultimaAtualizacao();
+    if (!a) return;
+    a.visto = { quem: app().usuario.nome, quando: U.agoraISO() };
+    if (filtro('mostrar') === 'atualizacao') E.filtros['ab.mostrar'] = '';
+    redesenhaMantendo();
+    gravar(null);
+  }
+
+  function seloDaRegra(g) { return g.regra === 'manual' ? 'mao' : M.ehPorValor(g) ? 'valor' : M.ehComMargem(g) ? 'margem' : 'opcional'; }
 
   function resumoAB(ab, grupos) {
     const conta = (tipo) => grupos.filter((g) => g.tipo === tipo).length;
     const aMao = grupos.filter((g) => g.regra === 'manual').length;
     const porValor = grupos.filter(M.ehPorValor).length;
-    const auto = grupos.length - aMao - porValor;
+    const comMargem = grupos.filter(M.ehComMargem).length;
+    const auto = grupos.length - aMao - porValor - comMargem;
     const dif = ab.valorA - ab.valorB;
-    // Conciliação à mão "assim mesmo" (sem bater) tira valores diferentes dos dois lados.
-    const forcado = grupos.reduce((s, g) => s + (g.valorA - g.valorB), 0);
+    // Conciliações que tiram valores diferentes dos dois lados: à mão "assim mesmo", com margem, ou com item
+    // faltando (o item que saiu não está mais nas partes). Com isso, em aberto A − B + estas = diferença da ponte.
+    const naoBatem = grupos.reduce((s, g) => s + (g.a || []).reduce((t, id) => t + ((E.itens.porId.get(id) || {}).valor || 0), 0)
+      - (g.b || []).reduce((t, id) => t + ((E.itens.porId.get(id) || {}).valor || 0), 0), 0);
     const conferir = grupos.filter((g) => g.aviso === 'baixa-antes-da-nota');
     return '<div class="cartao corpo" style="margin-bottom:12px">' +
       '<div class="linha-flex" style="justify-content:space-between;align-items:flex-start;gap:14px">' +
@@ -790,17 +1181,23 @@
       '<button type="button" class="botao primario" data-acao="conciliar-tudo" title="Acha tudo o que casa pelo documento e marca cada conciliação com um ID">⚡ Conciliar</button>' +
       // Dony, 16/09/2026: só roda quando ele aperta (valores quebrados, sem documento e sem fornecedor).
       '<button type="button" class="botao" data-acao="conciliar-valor" title="Depois do ⚡ pelo documento, casa o que sobrou por VALOR igual, sem olhar documento e fornecedor. Só valor quebrado: inteiro terminado em zero (10, 100, 200…) fica de fora.">≈ Conciliar só pelo valor</button>' +
+      // Dony, 16/09/2026: "fechar documento + fornecedor com margem de diferença, até um real; só quando eu apertar".
+      '<button type="button" class="botao" data-acao="conciliar-margem" title="Depois do ⚡ pelo documento, casa o que sobrou pelo MESMO documento e MESMO fornecedor aceitando diferença de até ' + T.moeda(M.MARGEM_AB) + ' (centavos de arredondamento, juros pequenos). Só roda quando você aperta.">± Conciliar doc + fornecedor com margem</button>' +
       (auto ? '<button type="button" class="botao pequeno perigo" data-acao="desfazer-automaticas">Desfazer as automáticas</button>' : '') +
       (porValor ? '<button type="button" class="botao pequeno perigo" data-acao="desfazer-valor">Desfazer as só pelo valor</button>' : '') +
+      (comMargem ? '<button type="button" class="botao pequeno perigo" data-acao="desfazer-margem">Desfazer as com margem</button>' : '') +
       (aMao ? '<button type="button" class="botao pequeno perigo" data-acao="desfazer-manuais">Desfazer as manuais</button>' : '') +
       '</div></div>' +
       '<p class="suave pequeno" style="margin:10px 0 0">' +
-      (grupos.length ? '<b>' + grupos.length.toLocaleString('pt-BR') + '</b> conciliação(ões) com ID: ' + conta('AxA') + ' A×A · ' + conta('AxB') + ' A×B' + (conta('BxB') ? ' · ' + conta('BxB') + ' B×B' : '') + ' · ' + aMao + ' à mão' + (porValor ? ' · <b>' + porValor + '</b> só pelo valor' : '') + ' · em aberto: <b>' + ab.abertosA.length + '</b> na A e <b>' + ab.abertosB.length + '</b> na B. ' : 'Nada conciliado ainda. ') +
+      (grupos.length ? '<b>' + grupos.length.toLocaleString('pt-BR') + '</b> conciliação(ões) com ID: ' + conta('AxA') + ' A×A · ' + conta('AxB') + ' A×B' + (conta('BxB') ? ' · ' + conta('BxB') + ' B×B' : '') + ' · ' + aMao + ' à mão' +
+        (porValor ? ' · <b>' + porValor + '</b> só pelo valor' : '') + (comMargem ? ' · <b>' + comMargem + '</b> com margem' : '') +
+        (E.comFalta.size ? ' · <span class="falta"><b>' + E.comFalta.size + '</b> com item faltando</span>' : '') +
+        ' · em aberto: <b>' + ab.abertosA.length + '</b> na A e <b>' + ab.abertosB.length + '</b> na B. ' : 'Nada conciliado ainda. ') +
       'O <b>⚡ Conciliar</b> casa pelo <b>documento</b> — primeiro com o mesmo fornecedor, depois com o mesmo nome de fornecedor, depois só pelo documento — e dá um ID para cada conciliação (1, 2, 3…). ' +
-      'O <b>≈ Conciliar só pelo valor</b> casa o que sobrou por valor igual, sem documento e sem fornecedor (só valor quebrado) — confira em <b>Conciliados só pelo valor</b>.' +
-      (Math.abs(forcado) >= 1 ? ' <span class="falta">Conciliações à mão sem bater: ' + textoDC(forcado) + '.</span>' : '') +
-      (conferir.length ? '<br><span style="color:var(--ambar)">⚠ Para conferir — ' + E.cfg.avisoAntes + ':</span> ' +
-        conferir.slice(0, 15).map((g) => '<button type="button" class="lapis" data-ver-id="' + g.id + '" title="Ver a conciliação #' + g.id + '"><b>#' + g.id + '</b></button>').join(' ') + (conferir.length > 15 ? ' …' : '') : '') +
+      'O <b>≈ Conciliar só pelo valor</b> casa o que sobrou por valor igual, sem documento e sem fornecedor (só valor quebrado); ' +
+      'o <b>± com margem</b> casa pelo mesmo documento e fornecedor com diferença de até ' + T.moeda(M.MARGEM_AB) + ' — confira cada um no <b>Mostrar</b>.' +
+      (Math.abs(naoBatem) >= 1 ? ' <span class="falta">Conciliações que não batem (à mão com diferença, com margem ou com item faltando): ' + textoDC(naoBatem) + '.</span>' : '') +
+      (conferir.length ? '<br><span style="color:var(--ambar)">⚠ Para conferir — ' + E.cfg.avisoAntes + ':</span> ' + botoesDeIds(conferir.map((g) => g.id)) : '') +
       '</p></div>';
   }
 
@@ -827,13 +1224,19 @@
         const g = E.idDoItem.get(x.id);
         const marcado = sel.has(x.id);
         const fixo = E.fixos && E.fixos.has(x.id);
+        // Da última atualização de arquivo (enquanto não clicou em "Entendi"): entrou, foi trocado ou mudou.
+        const at = E.daAtualizacao;
+        const seloAt = !at ? '' : at.trocados.has(x.id) ? '<span class="selo suspeita" title="Corrigido no arquivo novo: entrou no lugar do antigo, na mesma conciliação">trocado</span> '
+          : at.mudados.has(x.id) ? '<span class="selo suspeita" title="Mudou na última atualização de arquivo">mudou</span> '
+          : at.novos.has(x.id) ? '<span class="selo novo" title="Entrou na última atualização de arquivo">novo</span> ' : '';
+        const seloG = !g ? null : E.comFalta.has(g.id) ? ['perigo', '⚠ falta item'] : M.ehPorValor(g) ? ['valor', 'só valor'] : M.ehComMargem(g) ? ['margem', '± margem'] : ['opcional', TIPO_AB[g.tipo]];
         return '<tr class="' + (marcado ? 'destaque' : '') + (fixo ? ' fixo' : '') + '"><td class="caixa">' + (g ? '' : '<input type="checkbox" data-item="' + lado + '" data-id="' + T.esc(x.id) + '"' + (marcado ? ' checked' : '') + '>') + '</td>' +
           '<td class="num"><b>' + T.nome(x.doc) + '</b></td>' +
-          '<td class="nome">' + (fixo ? '<span class="selo suspeita" title="Marcado antes, com outro filtro">marcado</span> ' : '') +
+          '<td class="nome">' + (fixo ? '<span class="selo suspeita" title="Marcado antes, com outro filtro">marcado</span> ' : '') + seloAt +
           (x.chave === SEM ? '<span class="falta">sem fornecedor</span>' : T.esc(x.nome)) + (x.historico ? '<br><span class="suave pequeno">' + T.esc(x.historico.slice(0, 70)) + '</span>' : '') + '</td>' +
           '<td class="num" title="' + T.esc(rotuloFonte(x)) + '">' + T.esc(x.data || '—') + '<br><span class="pequeno suave">' + T.esc(rotuloCurto(x)) + '</span></td>' +
           tdDC(x.valor) + '' +
-          '<td style="white-space:nowrap">' + (g ? '<button type="button" class="lapis" data-ver-id="' + g.id + '" title="Ver a conciliação #' + g.id + ' (' + T.esc(M.REGRAS_AB[g.regra] || '') + ')"><b>#' + g.id + '</b></button><br><span class="selo ' + (M.ehPorValor(g) ? 'valor' : 'opcional') + '">' + (M.ehPorValor(g) ? 'só valor' : TIPO_AB[g.tipo]) + '</span>' : '') + '</td></tr>';
+          '<td style="white-space:nowrap">' + (g ? '<button type="button" class="lapis" data-ver-id="' + g.id + '" title="Ver a conciliação #' + g.id + ' (' + T.esc(M.REGRAS_AB[g.regra] || '') + ')"><b>#' + g.id + '</b></button><br><span class="selo ' + seloG[0] + '">' + seloG[1] + '</span>' : '') + '</td></tr>';
       },
     };
   }
@@ -868,12 +1271,26 @@
       '<button type="button" class="botao" data-acao="limpar-ab">Limpar</button></div>';
   }
 
-  function desenharListaAB(el, b, soValor) {
+  // modo: '' (todas) · 'valor' (só pelo valor) · 'margem' (com margem) · 'faltando' (com item faltando) ·
+  // 'atualizacao' (as que mexeram na última atualização de arquivo)
+  const MODOS_LISTA = {
+    valor: { titulo: 'Conciliações só pelo valor', de: M.ehPorValor,
+      aviso: '<div class="aviso ambar" style="margin:0 0 10px"><span class="icone-aviso">≈</span><div>Casadas <b>só pelo valor</b> (valor quebrado igual), sem olhar documento e fornecedor. Confira cada uma: abra no ▸ e, se não for, clique em <b>Desfazer</b>.</div></div>' },
+    margem: { titulo: 'Conciliações com margem', de: M.ehComMargem,
+      aviso: '<div class="aviso ambar" style="margin:0 0 10px"><span class="icone-aviso">±</span><div>Casadas pelo <b>mesmo documento e fornecedor</b> com diferença de até ' + T.moeda(M.MARGEM_AB) + ' entre as partes. A diferença de cada uma aparece na coluna Itens. Se não for, clique em <b>Desfazer</b>.</div></div>' },
+    faltando: { titulo: 'Conciliações com item faltando', de: (g) => E.comFalta.has(g.id),
+      aviso: '<div class="aviso vermelho" style="margin:0 0 10px"><span class="icone-aviso">⚠</span><div>Um item destas conciliações <b>não está mais nos arquivos</b>. Abra no ▸ para ver qual. Se ele saiu de verdade, clique em <b>Desfazer</b>; se foi engano no arquivo, carregue a versão certa.</div></div>' },
+    atualizacao: { titulo: 'Conciliações da última atualização de arquivo', de: null,
+      aviso: '<div class="aviso info" style="margin:0 0 10px"><span class="icone-aviso">🔄</span><div>As conciliações <b>novas</b> (o ⚡ com o que entrou), as <b>trocadas</b> (item corrigido) e as que ficaram <b>com item faltando</b> na última atualização de arquivo. O detalhe está em <b>Ver o que mudou</b>, no cartão lá em cima.</div></div>' },
+  };
+  function desenharListaAB(el, b, modo, daAtualizacao) {
     const grupos = E.decisoes.conciliacoesAB;
     if (!grupos.length) { el.innerHTML = ''; return; }
-    const lista = grupos.filter((g) => b.grupo(g) && (!soValor || M.ehPorValor(g))).sort((x, y) => x.id - y.id);
-    el.innerHTML = '<h3 style="margin:18px 0 8px">' + (soValor ? 'Conciliações só pelo valor' : 'Conciliações com ID') + ' (' + lista.length.toLocaleString('pt-BR') + (lista.length !== grupos.length ? ' de ' + grupos.length.toLocaleString('pt-BR') : '') + ')</h3>' +
-      (soValor ? '<div class="aviso ambar" style="margin:0 0 10px"><span class="icone-aviso">≈</span><div>Casadas <b>só pelo valor</b> (valor quebrado igual), sem olhar documento e fornecedor. Confira cada uma: abra no ▸ e, se não for, clique em <b>Desfazer</b>.</div></div>' : '') +
+    const m = MODOS_LISTA[modo] || null;
+    const doModo = !m ? () => true : modo === 'atualizacao' ? (g) => daAtualizacao.grupos.has(g.id) : m.de;
+    const lista = grupos.filter((g) => b.grupo(g) && doModo(g)).sort((x, y) => x.id - y.id);
+    el.innerHTML = '<h3 style="margin:18px 0 8px">' + (m ? m.titulo : 'Conciliações com ID') + ' (' + lista.length.toLocaleString('pt-BR') + (lista.length !== grupos.length ? ' de ' + grupos.length.toLocaleString('pt-BR') : '') + ')</h3>' +
+      (m ? m.aviso : '') +
       '<div id="tab-ab"></div>';
     T.tabelaPaginada(el.querySelector('#tab-ab'), {
       alta: false, porPagina: 100,
@@ -888,11 +1305,12 @@
         return '<tr class="' + (aberto ? 'destaque' : '') + '"><td><button type="button" class="lapis" data-abrir-ab="' + g.id + '" title="Ver os itens">' + (aberto ? '▾' : '▸') + '</button></td>' +
           '<td class="num"><b>#' + g.id + '</b></td>' +
           '<td><span class="pilula ' + (g.tipo === 'AxB' ? 'azul' : 'cinza') + '">' + TIPO_AB[g.tipo] + '</span></td>' +
-          '<td><span class="selo ' + (g.regra === 'manual' ? 'mao' : M.ehPorValor(g) ? 'valor' : 'opcional') + '" title="' + T.esc(M.REGRAS_AB[g.regra] || '') + '">' + T.esc(COMO_AB[g.regra] || g.regra) + '</span>' +
+          '<td><span class="selo ' + seloDaRegra(g) + '" title="' + T.esc(M.REGRAS_AB[g.regra] || '') + '">' + T.esc(COMO_AB[g.regra] || g.regra) + '</span>' +
           (g.aviso === 'baixa-antes-da-nota' ? '<br><span class="selo suspeita" title="' + primeiraMaiuscula(E.cfg.avisoAntes) + ' (7.11): confira">' + E.cfg.avisoCurto + '</span>' : '') + '</td>' +
           '<td class="num">' + T.nome(g.documento) + '</td>' +
           '<td class="nome">' + T.nome(g.nome) + (g.obs ? '<br><span class="suave pequeno">✎ ' + T.esc(g.obs) + '</span>' : '') +
-          (faltam ? '<br><span class="falta pequeno">' + faltam + ' item(ns) não estão mais nos arquivos</span>' : '') + '</td>' +
+          (faltam ? '<br><span class="selo perigo" title="Um item desta conciliação não está mais nos arquivos: abra no ▸ para ver qual">⚠ ' + faltam + ' item(ns) faltando</span>' : '') +
+          (g.trocas && g.trocas.length ? '<br><span class="selo suspeita" title="Item corrigido no arquivo novo, trocado dentro da conciliação">✎ item trocado</span>' : '') + '</td>' +
           '<td class="num">' + T.esc(dataDoGrupo(g) || '—') + '</td>' +
           tdDC(g.valorA) + tdDC(g.valorB) +
           '<td class="pequeno" style="white-space:nowrap">' + g.a.length + ' de A · ' + g.b.length + ' de B' + (Math.abs(dif) >= 1 ? '<br><span class="falta">diferença ' + textoDC(dif) + '</span>' : '') + '</td>' +
@@ -910,14 +1328,33 @@
     return menor ? menor.texto : '';
   }
 
+  // O que se sabe de um item que saiu dos arquivos (guardado nas atualizações, a mais nova primeiro).
+  function itemQueSaiu(id) {
+    const xs = (E.decisoes.atualizacoes || []).slice().reverse();
+    for (const a of xs) {
+      for (const f of a.faltando || []) { const s = (f.sairam || []).find((x) => x.id === id && x.valor !== undefined); if (s) return { item: s, quando: a.quando }; }
+      const s = (a.sairam || []).find((x) => x.id === id && x.valor !== undefined);
+      if (s) return { item: s, quando: a.quando };
+    }
+    return null;
+  }
+
   function linhaDetalheAB(g) {
     const itens = g.a.concat(g.b).map((id) => E.itens.porId.get(id) || { id, faltando: true });
+    const faltou = (x) => {
+      const s = itemQueSaiu(x.id);
+      if (!s) return '<tr><td colspan="6" class="falta pequeno">⚠ Item que não está mais nos arquivos (' + T.esc(x.id) + ')</td></tr>';
+      const i = s.item;
+      return '<tr class="item-faltando"><td><b>' + T.esc(i.lado || '') + '</b></td><td class="num">' + T.nome(i.doc) + '</td><td class="pequeno"><span class="selo perigo">⚠ saiu em ' + T.esc(U.dataHoraLocal(s.quando)) + '</span></td>' +
+        '<td class="num">' + T.esc(i.data || '—') + '</td><td class="historico">' + T.esc(i.nome || '') + (i.historico ? '<br><span class="suave pequeno">' + T.esc(i.historico) + '</span>' : '') + '</td>' + tdDC(i.valor) + '</tr>';
+    };
+    const trocas = (g.trocas || []).length ? '<p class="pequeno suave" style="margin:6px 0 0">✎ Item trocado pelo corrigido: ' + g.trocas.map((t) => U.dataHoraLocal(t.quando) + ' (mudou: ' + T.esc((t.campos || []).join(', ') || '—') + ')').join(' · ') + '</p>' : '';
     return '<tr class="sub"><td></td><td colspan="11"><div class="tabela-caixa"><table class="tabela"><thead><tr><th>Lado</th><th>Documento</th><th>Origem</th><th>Data</th><th class="historico">Fornecedor · histórico</th><th class="num">Valor · D/C</th></tr></thead><tbody>' +
-      itens.map((x) => x.faltando ? '<tr><td colspan="6" class="falta pequeno">Item que não está mais nos arquivos (' + T.esc(x.id) + ')</td></tr>' :
+      itens.map((x) => x.faltando ? faltou(x) :
         '<tr><td><b>' + x.lado + '</b></td><td class="num">' + T.nome(x.doc) + '</td><td class="pequeno suave">' + T.esc(rotuloFonte(x)) + '</td><td class="num">' + T.esc(x.data || '—') + '</td>' +
         '<td class="historico">' + (x.chave === SEM ? '<span class="falta">sem fornecedor</span>' : T.esc(x.nome)) + (x.historico ? '<br><span class="suave pequeno">' + T.esc(x.historico) + '</span>' : '') + '</td>' +
         tdDC(x.valor) + '</tr>').join('') +
-      '</tbody></table></div></td></tr>';
+      '</tbody></table></div>' + trocas + '</td></tr>';
   }
 
   // Abre/fecha os itens de uma conciliação sem redesenhar a lista (não perde o "mostrar mais").
@@ -987,6 +1424,42 @@
     gravar('terceiro-ab-valor', texto);
   }
 
+  // ± Conciliar com margem (Dony, 16/09/2026: "um botão chamado fechar documento + fornecedor com margem de
+  // diferença; até um real de margem; só concilia se eu apertar esse botão"). Antes, o que casa exato pelo
+  // documento (o ⚡) — a margem é só para o que sobrou.
+  async function conciliarComMargem() {
+    const quem = app().usuario.nome, quando = U.agoraISO();
+    const margem = M.MARGEM_AB;
+    const pelosDocs = M.conciliarAutomatico(E.itens, E.decisoes.conciliacoesAB, quem, quando);
+    const comMargem = M.conciliarAutomatico(E.itens, E.decisoes.conciliacoesAB.concat(pelosDocs), quem, quando, { margem });
+    if (!comMargem.length) {
+      T.avisoRapido('Nada casa pelo mesmo documento e fornecedor com diferença de até ' + T.moeda(margem) +
+        (pelosDocs.length ? '. O ⚡ pelo documento achou ' + pelosDocs.length + ' e elas NÃO foram gravadas: aperte ⚡ Conciliar.' : '.'), 'ok', 8000);
+      return;
+    }
+    const soma = comMargem.reduce((s, g) => s + (g.valorA - g.valorB), 0);
+    const maior = comMargem.reduce((m, g) => Math.max(m, Math.abs(g.valorA - g.valorB)), 0);
+    const ok = await T.confirmar({
+      titulo: 'Conciliar com margem de até ' + T.moeda(margem) + '?',
+      texto: (pelosDocs.length ? 'Antes, o <b>⚡ pelo documento</b> acha <b>' + pelosDocs.length + '</b> conciliação(ões) novas (exatas).<br>' : '') +
+        'Com margem (mesmo documento e mesmo fornecedor, diferença de até ' + T.moeda(margem) + '): <b>' + comMargem.length + '</b> conciliação(ões), ' +
+        'com diferença somada de <b>' + textoDC(soma) + '</b> (a maior: ' + T.moeda(maior) + ').<br><br>' +
+        'Depois, confira em <b>Mostrar → Conciliados com margem</b>; o que não for, é só desfazer.',
+      botao: '± Conciliar com margem',
+    });
+    if (!ok) return;
+    E.decisoes.conciliacoesAB = E.decisoes.conciliacoesAB.concat(pelosDocs, comMargem);
+    const faixa = (xs) => xs.length === 1 ? 'ID #' + xs[0].id : 'IDs #' + xs[0].id + ' a #' + xs[xs.length - 1].id;
+    const texto = (pelosDocs.length ? pelosDocs.length + ' pelo documento (' + faixa(pelosDocs) + ') e ' : '') +
+      comMargem.length + ' com margem (' + faixa(comMargem) + '), diferença somada ' + textoDC(soma);
+    historico('± Conciliar com margem: ' + texto);
+    E.filtros[E.aba + '.mostrar'] = 'margem'; // já mostra as novas para conferir
+    redesenharAB();
+    const ab = M.emAbertoAB(E.itens, E.decisoes.conciliacoesAB);
+    T.avisoRapido('± ' + texto + '. Em aberto: ' + ab.abertosA.length + ' na A e ' + ab.abertosB.length + ' na B.', 'ok', 9000);
+    gravar('terceiro-ab-margem', texto);
+  }
+
   // Limpar a conciliação de um mês (Dony, 14/09/2026: "escolho o mês da conciliação e limpo ela
   // todinha"). Apaga o registro deste passo nesse mês: conciliações com ID (automáticas e à mão),
   // observações e fornecedores ajustados à mão. Os arquivos continuam guardados; o registro vai
@@ -1042,14 +1515,20 @@
 
   // Desfazer em lote (Dony, 14/09/2026: "desfazer as automáticas e desfazer as manuais também").
   // Uma por uma continua no botão Desfazer de cada ID, na lista.
-  // tipo: 'manuais' (à mão) · 'automaticas' (⚡ pelo documento) · 'valor' (≈ só pelo valor).
+  // tipo: 'manuais' (à mão) · 'automaticas' (⚡ pelo documento) · 'valor' (≈ só pelo valor) · 'margem' (± com
+  // margem) · 'faltando' (com item que não está mais nos arquivos).
   const LOTES = {
     manuais: { de: (g) => g.regra === 'manual', nome: 'manuais', titulo: 'Desfazer as conciliações manuais',
       texto: (n) => 'As <b>' + n + '</b> conciliações feitas à mão voltam para <b>em aberto</b> (as observações delas também saem). As outras continuam.' },
-    automaticas: { de: (g) => g.regra !== 'manual' && !M.ehPorValor(g), nome: 'automáticas', titulo: 'Desfazer as conciliações automáticas',
-      texto: (n) => 'As <b>' + n + '</b> conciliações feitas pelo ⚡ Conciliar (pelo documento) voltam para <b>em aberto</b>. As feitas à mão e as só pelo valor continuam.' },
+    automaticas: { de: (g) => g.regra !== 'manual' && !M.ehPorValor(g) && !M.ehComMargem(g), nome: 'automáticas', titulo: 'Desfazer as conciliações automáticas',
+      texto: (n) => 'As <b>' + n + '</b> conciliações feitas pelo ⚡ Conciliar (pelo documento) voltam para <b>em aberto</b>. As feitas à mão, as só pelo valor e as com margem continuam.' },
     valor: { de: M.ehPorValor, nome: 'só pelo valor', titulo: 'Desfazer as conciliações só pelo valor',
       texto: (n) => 'As <b>' + n + '</b> conciliações feitas pelo ≈ Conciliar só pelo valor voltam para <b>em aberto</b>. As outras continuam.' },
+    margem: { de: M.ehComMargem, nome: 'com margem', titulo: 'Desfazer as conciliações com margem',
+      texto: (n) => 'As <b>' + n + '</b> conciliações feitas pelo ± Conciliar com margem voltam para <b>em aberto</b>. As outras continuam.' },
+    faltando: { de: (g) => E.comFalta.has(g.id), nome: 'com item faltando', titulo: 'Desfazer as conciliações com item faltando',
+      texto: (n) => 'As <b>' + n + '</b> conciliações com item que não está mais nos arquivos são desfeitas: o que sobrou delas volta para <b>em aberto</b>' +
+        ' (as feitas à mão também — confira antes em <b>Mostrar → Conciliados com item faltando</b>). As outras continuam.' },
   };
   async function desfazerEmLote(tipo) {
     const lote = LOTES[tipo];
@@ -1256,9 +1735,16 @@
       else if (a === 'limpar-conciliacao') await limparConciliacao();
       else if (a === 'conciliar-tudo') conciliarTudo();
       else if (a === 'conciliar-valor') await conciliarSoPeloValor();
+      else if (a === 'conciliar-margem') await conciliarComMargem();
       else if (a === 'desfazer-automaticas') await desfazerEmLote('automaticas');
       else if (a === 'desfazer-valor') await desfazerEmLote('valor');
+      else if (a === 'desfazer-margem') await desfazerEmLote('margem');
+      else if (a === 'desfazer-faltando') await desfazerEmLote('faltando');
       else if (a === 'desfazer-manuais') await desfazerEmLote('manuais');
+      else if (a === 'ver-atualizacao') await verAtualizacao();
+      else if (a === 'mostrar-atualizacao') mostrarNaLista('atualizacao');
+      else if (a === 'mostrar-faltando') mostrarNaLista('faltando');
+      else if (a === 'entendi-atualizacao') await entendiAtualizacao();
       else if (a === 'conciliar-ab') await conciliarAB();
       else if (a === 'limpar-ab') { E.selA = new Set(); E.selB = new Set(); redesenhaMantendo(); }
       return;

@@ -5,7 +5,8 @@
  *
  *   conectar(), estaConectado(), descricao(), quemSou()
  *   empresas(), salvarEmpresa(empresa), apagarEmpresa(codigo)
- *   arquivos(codigo), conteudoDoArquivo(id), guardarArquivo(codigo, meta, conteudo, bytesOriginais), apagarArquivo(id)
+ *   arquivos(codigo), conteudoDoArquivo(id), guardarArquivo(codigo, meta, conteudo, bytesOriginais), apagarArquivo(id),
+ *   arquivoApagado(id) (a cópia do que foi apagado: { meta, conteudo } ou null)
  *   conciliacoes(codigo, competencia), salvarConciliacao(registro), apagarConciliacao(id), versoes(id)
  *   congelar(codigo, meta, conteudo), congelado(id)
  *   registrarNoLog(acao)
@@ -26,7 +27,7 @@
   const METODOS = [
     'conectar', 'estaConectado', 'descricao', 'quemSou',
     'empresas', 'salvarEmpresa', 'apagarEmpresa',
-    'arquivos', 'conteudoDoArquivo', 'guardarArquivo', 'apagarArquivo',
+    'arquivos', 'conteudoDoArquivo', 'guardarArquivo', 'apagarArquivo', 'arquivoApagado',
     'conciliacoes', 'salvarConciliacao', 'apagarConciliacao', 'versoes',
     'congelar', 'congelado',
     'registrarNoLog',
