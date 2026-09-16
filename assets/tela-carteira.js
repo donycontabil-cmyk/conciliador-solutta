@@ -40,6 +40,8 @@
       }
       T.tabelaPaginada(lista, {
         alta: false,
+        ordem: { id: 'carteira', colunas: ['codigo', 'nome', 'cnpj', 'regime', 'atividade', 'grupo'].map((k) => ({ tipo: 'texto', de: (e) => e[k] }))
+          .concat([{ tipo: 'numero', de: (e) => contagem[e.codigo] || 0 }, null]) },
         cabecalho: '<th>Código</th><th>Empresa</th><th>CNPJ</th><th>Regime</th><th>Atividade</th><th>Grupo</th><th class="num">Arquivos</th><th></th>',
         linhas: filtradas,
         vazio: 'Nenhuma empresa encontrada para esta busca.',

@@ -181,8 +181,58 @@
   }
 
   // Tabela com "mostrar mais": desenha as primeiras N linhas e acrescenta sob demanda.
+  // ------------------------------------------------------------------
+  // Ordenar clicando no título da coluna (Dony, 16/09/2026: "clicar ali em valor e ele organizar
+  // por valor, independente se positivo ou negativo — um pagamento −200 e a compensação +200 ficam
+  // juntos —, ou por data, fornecedor, documento; para todas"). Cada tabela diz, em op.ordem, quais
+  // colunas ordenam: { id, colunas: [por <th>: null ou { tipo, de: (linha) => … }], fixo: (linha) => bool }.
+  //   tipo 'valor'  = pelo valor SEM o sinal (−200 logo antes do +200);
+  //   tipo 'data'   = dd/mm/aaaa; 'numero'; 'texto' (sem acento, "45" antes de "123").
+  // Clique: crescente → decrescente → como veio. Vazio fica sempre no fim; as linhas "fixas" (marcadas
+  // fora do filtro) continuam no topo. A escolha fica lembrada por tabela (op.ordem.id).
+  // ------------------------------------------------------------------
+  const ordensLembradas = new Map();
+  function ordemLembrada(id) {
+    if (!id) return null;
+    if (ordensLembradas.has(id)) return ordensLembradas.get(id);
+    try {
+      const e = JSON.parse((raiz.App && raiz.App.lerLocal && raiz.App.lerLocal('conciliador-solutta.ordem.' + id)) || 'null');
+      return e && typeof e.col === 'number' && (e.sentido === 1 || e.sentido === -1) ? e : null;
+    } catch (e) { return null; }
+  }
+  function lembrarOrdem(id, estado) {
+    if (!id) return;
+    ordensLembradas.set(id, estado);
+    try { if (raiz.App && raiz.App.gravarLocal) raiz.App.gravarLocal('conciliador-solutta.ordem.' + id, JSON.stringify(estado)); } catch (e) { /* só a lembrança */ }
+  }
+  function chaveDeOrdem(coluna, linha) {
+    const v = coluna.de(linha);
+    if (v === null || v === undefined || v === '') return null;
+    if (coluna.tipo === 'valor') { const n = Number(v); return isFinite(n) ? Math.abs(n) * 2 + (n < 0 ? 0 : 1) : null; }
+    if (coluna.tipo === 'numero') { const n = Number(v); return isFinite(n) ? n : null; }
+    if (coluna.tipo === 'data') { const d = U.lerData(v); return d ? d.numero : null; }
+    return U.semAcento(String(v)).trim().toLowerCase() || null;
+  }
+  function ordenarLinhas(linhas, ordem, estado) {
+    const coluna = estado && ordem.colunas[estado.col];
+    if (!coluna) return linhas;
+    const s = estado.sentido;
+    return linhas.map((x, i) => ({ x, i, k: chaveDeOrdem(coluna, x), f: ordem.fixo && ordem.fixo(x) ? 1 : 0 }))
+      .sort((a, b) => {
+        if (a.f !== b.f) return b.f - a.f;
+        if (a.k === null || b.k === null) return a.k === b.k ? a.i - b.i : (a.k === null ? 1 : -1);
+        const c = typeof a.k === 'number' && typeof b.k === 'number' ? a.k - b.k : String(a.k).localeCompare(String(b.k), 'pt-BR', { numeric: true });
+        return c * s || a.i - b.i;
+      })
+      .map((o) => o.x);
+  }
+
   function tabelaPaginada(el, op) {
     const porPagina = op.porPagina || 300;
+    const ordem = op.ordem && op.ordem.colunas ? op.ordem : null;
+    let estado = ordem ? ordemLembrada(ordem.id) : null;
+    if (estado && !ordem.colunas[estado.col]) estado = null;
+    let linhas = ordem ? ordenarLinhas(op.linhas, ordem, estado) : op.linhas;
     let mostradas = 0;
     const total = op.linhas.length;
     el.innerHTML = '<div class="tabela-caixa' + (op.alta === false ? '' : ' alta') + '"><table class="tabela"><thead><tr>' + op.cabecalho + '</tr></thead><tbody></tbody>' +
@@ -191,10 +241,42 @@
       '<div class="mais-linhas escondido"></div></div>';
     const corpo = el.querySelector('tbody');
     const mais = el.querySelector('.mais-linhas');
-    function desenharMais() {
-      const ate = Math.min(total, mostradas + porPagina);
+    if (ordem) {
+      const titulos = Array.from(el.querySelector('thead tr').children);
+      const setas = () => titulos.forEach((th, i) => {
+        if (!ordem.colunas[i]) return;
+        const ativo = estado && estado.col === i;
+        th.classList.toggle('ordenado', !!ativo);
+        th.setAttribute('aria-sort', ativo ? (estado.sentido === 1 ? 'ascending' : 'descending') : 'none');
+        th.querySelector('.seta-ordem').textContent = ativo ? (estado.sentido === 1 ? '▲' : '▼') : '↕';
+      });
+      titulos.forEach((th, i) => {
+        const c = ordem.colunas[i];
+        if (!c) return;
+        th.classList.add('ordenavel');
+        th.setAttribute('data-ordem-col', i);
+        th.title = (th.title ? th.title + ' · ' : '') + (c.tipo === 'valor' ? 'Clique para ordenar pelo valor (sem olhar o sinal)' : 'Clique para ordenar');
+        th.insertAdjacentHTML('beforeend', '<span class="seta-ordem" aria-hidden="true"></span>');
+      });
+      setas();
+      el.querySelector('thead').addEventListener('click', (ev) => {
+        const th = ev.target.closest('th[data-ordem-col]');
+        if (!th || ev.target.closest('input, button, a, select, label')) return;
+        const col = Number(th.getAttribute('data-ordem-col'));
+        estado = !estado || estado.col !== col ? { col, sentido: 1 } : (estado.sentido === 1 ? { col, sentido: -1 } : null);
+        lembrarOrdem(ordem.id, estado);
+        linhas = ordenarLinhas(op.linhas, ordem, estado);
+        const jaMostradas = mostradas;
+        corpo.innerHTML = '';
+        mostradas = 0;
+        desenharMais(Math.max(jaMostradas, porPagina));
+        setas();
+      });
+    }
+    function desenharMais(quantas) {
+      const ate = Math.min(total, mostradas + (quantas || porPagina));
       const partes = [];
-      for (let i = mostradas; i < ate; i++) partes.push(op.linha(op.linhas[i], i));
+      for (let i = mostradas; i < ate; i++) partes.push(op.linha(linhas[i], i));
       corpo.insertAdjacentHTML('beforeend', partes.join(''));
       mostradas = ate;
       if (mostradas < total) {
@@ -221,6 +303,6 @@
 
   raiz.Tela = {
     esc, valor, tdValor, moeda, nome, avisoRapido, mensagemDeErro, janela, confirmar, pilula, seloComo, COMO, SITUACOES,
-    baixar, lerArquivoComoBytes, debounce, tabelaPaginada, carregando,
+    baixar, lerArquivoComoBytes, debounce, tabelaPaginada, ordenarLinhas, carregando,
   };
 })(self);

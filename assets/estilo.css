@@ -225,6 +225,12 @@ table.tabela tr.destaque td { background: #fffbea; }
 table.tabela tr.sub td { background: #fbfcfd; font-size: 13px; }
 table.tabela tr.total td { font-weight: 600; background: #f7f8fa; }
 table.tabela .caixa { width: 32px; text-align: center; }
+/* Título que ordena ao clicar (▲ crescente · ▼ decrescente · ↕ como veio). */
+table.tabela th.ordenavel { cursor: pointer; user-select: none; }
+table.tabela th.ordenavel:hover { color: var(--primaria); background: #eef2f6; }
+table.tabela th.ordenavel .seta-ordem { display: inline-block; margin-left: 4px; font-size: 10px; color: var(--texto-fraco); }
+table.tabela th.ordenado { color: var(--primaria-escura); }
+table.tabela th.ordenado .seta-ordem { color: var(--primaria); }
 .mais-linhas { padding: 10px; text-align: center; border-top: 1px solid var(--borda); background: #fafbfc; }
 .vazio { padding: 28px; text-align: center; color: var(--texto-suave); }
 

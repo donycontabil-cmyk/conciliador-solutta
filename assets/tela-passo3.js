@@ -811,6 +811,8 @@
     const sel = lado === 'A' ? E.selA : E.selB;
     return {
       alta: true, porPagina: 200,
+      ordem: { id: 'ab-itens-' + lado, fixo: (x) => !!(E.fixos && E.fixos.has(x.id)), colunas: [null, TXT((x) => x.doc), TXT((x) => (x.chave === SEM ? '' : x.nome)),
+        DATA((x) => x.data), VALOR((x) => x.valor), NUM((x) => { const g = E.idDoItem.get(x.id); return g ? g.id : null; })] },
       cabecalho: '<th class="caixa"><input type="checkbox" data-marca-todos="' + lado + '" title="Marcar todos os em aberto desta lista (com os filtros de agora)"></th><th>Documento</th><th>Fornecedor</th><th>Data · origem</th><th class="num">Valor</th><th>ID</th>',
       linhas: itens, vazio: 'Nada nesta lista.',
       linha: (x) => {
@@ -827,6 +829,14 @@
       },
     };
   }
+
+  // Colunas que ordenam ao clicar no título (T.tabelaPaginada, op.ordem).
+  const TXT = (de) => ({ tipo: 'texto', de });
+  const VALOR = (de) => ({ tipo: 'valor', de });
+  const DATA = (de) => ({ tipo: 'data', de });
+  const NUM = (de) => ({ tipo: 'numero', de });
+  // Linha do razão: aumento e redução ordenam pelo valor do lançamento (um débito de 200 fica junto de um crédito de 200).
+  const valorDaLinha = (lc) => (lc.debito || 0) - (lc.credito || 0);
 
   function somaSel(sel) { let s = 0; sel.forEach((id) => { const x = E.itens.porId.get(id); if (x) s += x.valor; }); return s; }
 
@@ -859,7 +869,9 @@
       '<div id="tab-ab"></div>';
     T.tabelaPaginada(el.querySelector('#tab-ab'), {
       alta: false, porPagina: 100,
-      cabecalho: '<th style="width:24px"></th><th>ID</th><th>Tipo</th><th>Como</th><th>Documento</th><th>Fornecedor</th><th class="num">Parte A</th><th class="num">Parte B</th><th>Itens</th><th>Quem</th><th></th>',
+      ordem: { id: 'ab-lista', colunas: [null, NUM((g) => g.id), TXT((g) => TIPO_AB[g.tipo]), TXT((g) => COMO_AB[g.regra] || g.regra), TXT((g) => g.documento), TXT((g) => g.nome),
+        DATA(dataDoGrupo), VALOR((g) => g.valorA), VALOR((g) => g.valorB), NUM((g) => g.a.length + g.b.length), NUM((g) => U.paraMs(g.quando) || null), null] },
+      cabecalho: '<th style="width:24px"></th><th>ID</th><th>Tipo</th><th>Como</th><th>Documento</th><th>Fornecedor</th><th title="A data mais antiga dos itens da conciliação">Data</th><th class="num">Parte A</th><th class="num">Parte B</th><th>Itens</th><th>Quem · quando</th><th></th>',
       linhas: lista, vazio: 'Nenhuma conciliação com este filtro.',
       linha: (g) => {
         const aberto = E.abertosAB.has(g.id);
@@ -873,6 +885,7 @@
           '<td class="num">' + T.nome(g.documento) + '</td>' +
           '<td class="nome">' + T.nome(g.nome) + (g.obs ? '<br><span class="suave pequeno">✎ ' + T.esc(g.obs) + '</span>' : '') +
           (faltam ? '<br><span class="falta pequeno">' + faltam + ' item(ns) não estão mais nos arquivos</span>' : '') + '</td>' +
+          '<td class="num">' + T.esc(dataDoGrupo(g) || '—') + '</td>' +
           T.tdValor(g.valorA) + T.tdValor(g.valorB) +
           '<td class="pequeno" style="white-space:nowrap">' + g.a.length + ' de A · ' + g.b.length + ' de B' + (Math.abs(dif) >= 1 ? '<br><span class="falta">diferença ' + U.formatarCentavos(dif) + '</span>' : '') + '</td>' +
           '<td class="pequeno suave">' + T.esc(g.quem || '') + (g.quando ? '<br>' + U.dataHoraLocal(g.quando) : '') + '</td>' +
@@ -882,9 +895,16 @@
     });
   }
 
+  // Data de uma conciliação: a mais antiga dos itens (razão: data do lançamento; aging: vencimento).
+  function dataDoGrupo(g) {
+    let menor = null;
+    g.a.concat(g.b).forEach((id) => { const x = E.itens.porId.get(id); const d = x && U.lerData(x.data); if (d && (!menor || d.numero < menor.numero)) menor = d; });
+    return menor ? menor.texto : '';
+  }
+
   function linhaDetalheAB(g) {
     const itens = g.a.concat(g.b).map((id) => E.itens.porId.get(id) || { id, faltando: true });
-    return '<tr class="sub"><td></td><td colspan="10"><div class="tabela-caixa"><table class="tabela"><thead><tr><th>Lado</th><th>Documento</th><th>Origem</th><th>Data</th><th class="historico">Fornecedor · histórico</th><th class="num">Valor</th></tr></thead><tbody>' +
+    return '<tr class="sub"><td></td><td colspan="11"><div class="tabela-caixa"><table class="tabela"><thead><tr><th>Lado</th><th>Documento</th><th>Origem</th><th>Data</th><th class="historico">Fornecedor · histórico</th><th class="num">Valor</th></tr></thead><tbody>' +
       itens.map((x) => x.faltando ? '<tr><td colspan="6" class="falta pequeno">Item que não está mais nos arquivos (' + T.esc(x.id) + ')</td></tr>' :
         '<tr><td><b>' + x.lado + '</b></td><td class="num">' + T.nome(x.doc) + '</td><td class="pequeno suave">' + T.esc(rotuloFonte(x)) + '</td><td class="num">' + T.esc(x.data || '—') + '</td>' +
         '<td class="historico">' + (x.chave === SEM ? '<span class="falta">sem fornecedor</span>' : T.esc(x.nome)) + (x.historico ? '<br><span class="suave pequeno">' + T.esc(x.historico) + '</span>' : '') + '</td>' +
@@ -1088,6 +1108,8 @@
       : '<p class="suave pequeno" style="margin:0 0 10px">Todos os fornecedores. <b>Aging ' + T.esc(E.entrada.mesAnterior) + ' + movimento = esperado</b>; a diferença é contra o aging ' + T.esc(E.entrada.mesAtual) + '.</p>';
     alvo.innerHTML = explica + '<div id="tab"></div>';
     T.tabelaPaginada(alvo.querySelector('#tab'), {
+      ordem: { id: 'ab-fornecedores', colunas: [null, TXT((f) => f.nome), TXT((f) => f.cnpj), VALOR((f) => f.anterior), VALOR((f) => f.notas), VALOR((f) => f.baixas),
+        VALOR((f) => f.movimento), VALOR((f) => f.esperado), VALOR((f) => f.atual), VALOR((f) => f.diferenca), TXT((f) => (SIT[f.situacao] || [0, f.situacao])[1]), null] },
       cabecalho: '<th style="width:24px"></th><th>Fornecedor</th><th>CNPJ</th><th class="num">' + T.esc(E.entrada.mesAnterior) + '</th><th class="num">' + primeiraMaiuscula(E.cfg.aumentos) + '</th><th class="num">' + primeiraMaiuscula(E.cfg.reducoes) + '</th><th class="num">Movim.</th><th class="num">Esperado</th><th class="num">' + T.esc(E.entrada.mesAtual) + '</th><th class="num">Diferença</th><th>Situação</th><th></th>',
       linhas: lista, porPagina: 200,
       vazio: soDiferencas ? 'Tudo batendo — nenhuma diferença. 🎉' : 'Nenhum fornecedor com estes filtros.',
@@ -1136,7 +1158,10 @@
   function abaSem(alvo) {
     const linhas = E.r.semFornecedor.linhas.map((i) => E.r.linhas[i]);
     alvo.innerHTML = '<p class="suave pequeno" style="margin:0 0 8px">' + linhas.length + ' linha(s) do razão que o programa não conseguiu dizer de quem são. Clique no ✎ para dar o fornecedor.</p><div id="tab"></div>';
+    const lancsSem = E.arquivos.raz.conteudo.conta.lancamentos;
     T.tabelaPaginada(alvo.querySelector('#tab'), {
+      ordem: { id: 'ab-sem', colunas: [DATA((l) => lancsSem[l.i].data), TXT((l) => M.documentoDaLinha(lancsSem[l.i])), TXT((l) => lancsSem[l.i].historico),
+        VALOR((l) => valorDaLinha(lancsSem[l.i])), VALOR((l) => valorDaLinha(lancsSem[l.i])), null] },
       cabecalho: '<th>Data</th><th>NF/Doc</th><th class="historico">Histórico</th>' + cabecalhoRazao(false) + '<th></th>',
       linhas, vazio: 'Nenhuma linha sem fornecedor. 👍',
       linha: (l) => { const lc = E.arquivos.raz.conteudo.conta.lancamentos[l.i]; return '<tr><td class="num">' + T.esc(lc.data) + '</td><td>' + T.nome(M.documentoDaLinha(lc)) + '</td>' +
@@ -1152,6 +1177,8 @@
     const lista = E.r.linhas.filter((l) => { const d = E.r.porLinha.get(l.digital); return combina(busca, d.nome, l.historico) || (busca && M.documentoDaLinha(lancs[l.i]).indexOf(M.normalizarDocumento(busca) || busca) >= 0); });
     alvo.innerHTML = '<div id="tab"></div>';
     T.tabelaPaginada(alvo.querySelector('#tab'), {
+      ordem: { id: 'ab-razao', colunas: [DATA((l) => lancs[l.i].data), TXT((l) => M.documentoDaLinha(lancs[l.i])), TXT((l) => lancs[l.i].historico),
+        TXT((l) => { const d = E.r.porLinha.get(l.digital); return d.chave === SEM ? '' : d.nome; }), VALOR((l) => valorDaLinha(lancs[l.i])), VALOR((l) => valorDaLinha(lancs[l.i])), null] },
       cabecalho: '<th>Data</th><th>NF/Doc</th><th class="historico">Histórico</th><th>Fornecedor</th>' + cabecalhoRazao(false) + '<th></th>',
       linhas: lista, porPagina: 300, vazio: 'Nenhuma linha.',
       linha: (l) => { const d = E.r.porLinha.get(l.digital); const lc = lancs[l.i]; return '<tr><td class="num">' + T.esc(lc.data) + '</td><td>' + T.nome(M.documentoDaLinha(lc)) + '</td>' +
@@ -1167,6 +1194,7 @@
     const total = lista.reduce((s, t) => s + t.valor, 0);
     alvo.innerHTML = '<p class="suave pequeno" style="margin:0 0 8px">Aging de ' + T.esc(mes) + ': ' + lista.length + ' título(s) em aberto · ' + T.moeda(total) + '.</p><div id="tab"></div>';
     T.tabelaPaginada(alvo.querySelector('#tab'), {
+      ordem: { id: 'ab-aging', colunas: [TXT((x) => x.nome), TXT((x) => x.cnpj), DATA((x) => x.vencimento), TXT((x) => x.documento), VALOR((x) => x.valor)] },
       cabecalho: '<th>Fornecedor</th><th>CNPJ</th><th>Vencimento</th><th>Documento</th><th class="num">Valor</th>',
       linhas: lista, porPagina: 300, vazio: 'Nenhum título.',
       linha: (t) => '<tr><td class="nome">' + T.esc(t.nome) + '</td><td class="num">' + (t.cnpj ? U.formatarCnpj(t.cnpj) : '—') + '</td>' +

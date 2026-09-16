@@ -353,6 +353,15 @@
     }
   }
 
+  // Colunas que ordenam ao clicar no título (T.tabelaPaginada, op.ordem).
+  const TXT = (de) => ({ tipo: 'texto', de });
+  const VALOR = (de) => ({ tipo: 'valor', de });
+  const DATA = (de) => ({ tipo: 'data', de });
+  const NUM = (de) => ({ tipo: 'numero', de });
+  // Débito e crédito ordenam pelo valor do lançamento: um débito de 200 fica junto de um crédito de 200.
+  const valorDaLinha = (l) => (l.debito || 0) - (l.credito || 0);
+  const nomeDoDono = (l) => (l.dono.chave === SEM ? '' : l.dono.nome);
+
   // ---------- 1 · Bateu no razão ----------
   function abaBatidas(alvo, lado) {
     desenharFiltros([
@@ -369,7 +378,10 @@
       desfeitas.map((d) => '<li>' + T.esc(d.id) + ' · ' + d.marcas.length + ' linhas · por ' + T.esc(d.quem) + ' em ' + U.dataHoraLocal(d.quando) +
         ' <button type="button" class="botao pequeno" data-voltar-bater="' + T.esc(d.id) + '">Voltar a bater</button></li>').join('') + '</ul></div></div>' : '';
     alvo.innerHTML = topo + '<div id="tabela-aba"></div>';
+    const primeiraDa = (b) => b.linhas.map((i) => r.linhas[i]).sort((x, y) => x.dia - y.dia || x.i - y.i)[0];
     T.tabelaPaginada(alvo.querySelector('#tabela-aba'), {
+      ordem: { id: 'p1-batidas', colunas: [null, TXT((b) => b.como), TXT((b) => nomeDoDono(primeiraDa(b))), NUM((b) => b.linhas.length), VALOR((b) => b.valor),
+        DATA((b) => primeiraDa(b).data), TXT((b) => b.id), null] },
       cabecalho: '<th style="width:28px"></th><th>Como</th><th>Fornecedor</th><th class="num">Linhas</th><th class="num">Valor</th><th>Datas</th><th>Batida</th><th></th>',
       linhas: lista,
       porPagina: 200,
@@ -410,6 +422,8 @@
       'Desmarcar tira a reclassificação do arquivo; a decisão fica gravada.</p>';
     alvo.innerHTML = explica + '<div id="tabela-aba"></div>' + (manuais.length || (!origem || origem === 'mao') ? '<h3 style="margin:18px 0 8px">Reclassificações à mão</h3><div id="tabela-mao"></div>' : '');
     T.tabelaPaginada(alvo.querySelector('#tabela-aba'), {
+      ordem: { id: 'p1-reclass', colunas: [null, TXT((s) => s.sentido), TXT((s) => s.nome), VALOR((s) => s.aPagar), VALOR((s) => s.adiantado), VALOR((s) => s.valor),
+        NUM((s) => s.lancamentos.length), null] },
       cabecalho: '<th class="caixa">Marcada</th><th>Sentido</th><th>Fornecedor</th><th class="num">A pagar (sobras)</th><th class="num">Adiantado (sobras)</th><th class="num">Valor</th><th>Lançamentos</th><th></th>',
       linhas: sugs,
       porPagina: 200,
@@ -431,6 +445,7 @@
     if (caixaMao) {
       T.tabelaPaginada(caixaMao, {
         alta: false,
+        ordem: { id: 'p1-manuais', colunas: [TXT((m) => m.sentido), TXT((m) => m.nome), NUM((m) => m.marcas.length), VALOR((m) => m.valor), NUM((m) => U.paraMs(m.quando) || null), null] },
         cabecalho: '<th>Sentido</th><th>Fornecedor</th><th class="num">Linhas</th><th class="num">Valor</th><th>Quem e quando</th><th></th>',
         linhas: manuais,
         vazio: 'Nenhuma. Para fazer uma, selecione linhas nas abas "Não bateu" e use a barra que aparece no rodapé.',
@@ -472,6 +487,8 @@
     alvo.innerHTML = '<p class="suave pequeno" style="margin:0 0 8px">' + lista.length.toLocaleString('pt-BR') + ' linha(s) · soma no sentido da conta ' + T.moeda(total) +
       ' · marque linhas para reclassificar à mão (a barra aparece no rodapé).</p><div id="tabela-aba"></div>';
     T.tabelaPaginada(alvo.querySelector('#tabela-aba'), {
+      ordem: { id: 'p1-naobateu', colunas: [null, DATA((l) => l.data), TXT((l) => l.historico), TXT(nomeDoDono), VALOR(valorDaLinha), VALOR(valorDaLinha),
+        TXT((l) => (T.SITUACOES[l.situacao] || [0, l.situacao])[1]), null] },
       cabecalho: '<th class="caixa"><input type="checkbox" data-marcar-pagina title="Marcar as linhas mostradas"></th><th>Data</th><th>Histórico</th><th>Fornecedor</th><th class="num">Débito</th><th class="num">Crédito</th><th>Situação</th><th>Observação</th>',
       linhas: lista,
       vazio: 'Nada em aberto com estes filtros.',
@@ -497,6 +514,8 @@
     alvo.innerHTML = '<p class="suave pequeno" style="margin:0 0 8px">Conta por conta: ' + (lado === 'F' ? 'aqui só a conta de <b>fornecedores</b> (positivo = a empresa deve).' :
       'aqui só a conta de <b>adiantamento</b> (positivo = a empresa adiantou).') + ' Nunca numa linha só com as duas contas: pareceria saldo líquido.</p><div id="tabela-aba"></div>';
     T.tabelaPaginada(alvo.querySelector('#tabela-aba'), {
+      ordem: { id: 'p1-porfornecedor', colunas: [TXT((x) => (x.chave === SEM ? '' : x.nome)), TXT((x) => x.cnpj), TXT((x) => (T.SITUACOES[x.situacao] || [0, x.situacao])[1]),
+        VALOR((x) => x.tinha), NUM((x) => x.linhas), NUM((x) => x.bateram), VALOR((x) => x.reclassificado), VALOR((x) => x.fica)] },
       cabecalho: '<th>Fornecedor</th><th>CNPJ</th><th>Situação</th><th class="num" title="Saldo do fornecedor nesta conta no período">Tinha</th><th class="num">Linhas</th><th class="num">Bateram</th><th class="num" title="Efeito das reclassificações marcadas e à mão, com sinal">Reclassificado</th><th class="num">Fica</th>',
       linhas: lista,
       vazio: 'Nenhum fornecedor com estes filtros.',
@@ -522,6 +541,8 @@
       (!busca || (l.batida && l.batida.indexOf(busca.toUpperCase()) >= 0) || combinaBusca(busca, l.dono.nome, l.historico)));
     alvo.innerHTML = '<div id="tabela-aba"></div>';
     T.tabelaPaginada(alvo.querySelector('#tabela-aba'), {
+      ordem: { id: 'p1-razao', colunas: [TXT((l) => l.lado + ' ' + l.conta), DATA((l) => l.data), TXT((l) => l.historico), TXT((l) => l.contrapartida), TXT(nomeDoDono),
+        VALOR(valorDaLinha), VALOR(valorDaLinha), TXT((l) => (T.SITUACOES[l.situacao] || [0, l.situacao])[1]), null] },
       cabecalho: '<th>Fonte</th><th>Data</th><th>Histórico</th><th>Contrapartida</th><th>Fornecedor</th><th class="num">Débito</th><th class="num">Crédito</th><th>Situação</th><th>Observação</th>',
       linhas: lista,
       vazio: 'Nenhuma linha com estes filtros.',
