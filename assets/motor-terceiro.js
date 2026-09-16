@@ -351,8 +351,8 @@
 
   // ------------------------------------------------------------------
   // Conciliar SÓ PELO VALOR (Dony, 16/09/2026): há contas em que nem o documento nem o fornecedor
-  // ligam os dois lados ("a compra é a nota 45 do Zequinha, de 200 reais, e o pagamento saiu como
-  // Bradesco cartão de crédito, 200 reais: nunca vou achar"). Botão próprio, em todas as conciliações
+  // ligam os dois lados (a compra é a nota 45 de um fornecedor e o pagamento saiu com o nome do
+  // cartão de crédito do banco, mesmo valor: "nunca vou achar"). Botão próprio, em todas as conciliações
   // A × B, que só roda quando ele aperta. Casa o que ficou em aberto por valor igual, sem olhar
   // documento e fornecedor — e só valor QUEBRADO, para evitar coincidência: valor inteiro terminado
   // em zero (10, 20, 100, 200, 250, 1.000…) fica de fora; 200,15 e 281,00 entram.
