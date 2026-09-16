@@ -1058,7 +1058,7 @@
       'Elas <b>continuam conciliadas</b> até você decidir: se o item saiu de verdade, clique em <b>Desfazer</b> (o resto dela volta para em aberto); ' +
       'se foi engano no arquivo, carregue a versão certa — ela fica completa de novo sozinha. ' +
       '<span class="linha-flex" style="margin-top:6px"><button type="button" class="botao pequeno" data-acao="mostrar-faltando">Mostrar essas</button>' +
-      '<button type="button" class="botao pequeno perigo" data-acao="desfazer-faltando">Desfazer as ' + lista.length + '</button></span></div></div>';
+      '<button type="button" class="botao pequeno perigo" data-acao="desfazer-faltando">↺ ' + (lista.length === 1 ? 'Desfazer esta' : 'Desfazer as ' + lista.length) + '</button></span></div></div>';
   }
 
   // Janela com o detalhe da última atualização.
@@ -1170,35 +1170,53 @@
     const naoBatem = grupos.reduce((s, g) => s + (g.a || []).reduce((t, id) => t + ((E.itens.porId.get(id) || {}).valor || 0), 0)
       - (g.b || []).reduce((t, id) => t + ((E.itens.porId.get(id) || {}).valor || 0), 0), 0);
     const conferir = grupos.filter((g) => g.aviso === 'baixa-antes-da-nota');
+    const n = (q) => q.toLocaleString('pt-BR');
+    // As três ações grandes, do mesmo tamanho, com a cor do selo de cada uma (Dony, 16/09/2026: "acabamento
+    // mais bonitinho — o Conciliar ficou caprichado e os demais muito abaixo").
+    const acao = (acaoId, classe, icone, titulo, sub, dica) => '<button type="button" class="acao ' + classe + '" data-acao="' + acaoId + '" title="' + T.esc(dica) + '">' +
+      '<span class="acao-icone" aria-hidden="true">' + icone + '</span><span class="acao-texto"><b>' + titulo + '</b><small>' + sub + '</small></span></button>';
+    const lote = (acaoId, cor, rotulo, qtd, dica) => '<button type="button" class="chip-desfazer" data-acao="' + acaoId + '" title="' + T.esc(dica) + '">' +
+      '<span class="cor ' + cor + '" aria-hidden="true"></span>' + rotulo + ' <span class="qtd">' + n(qtd) + '</span></button>';
+    const lotes = [
+      auto ? lote('desfazer-automaticas', 'documento', 'Automáticas', auto, 'Desfaz as conciliações feitas pelo ⚡ Conciliar (pelo documento)') : '',
+      porValor ? lote('desfazer-valor', 'valor', 'Só pelo valor', porValor, 'Desfaz as conciliações feitas pelo ≈ Conciliar só pelo valor') : '',
+      comMargem ? lote('desfazer-margem', 'margem', 'Com margem', comMargem, 'Desfaz as conciliações feitas pelo ± Conciliar com margem') : '',
+      aMao ? lote('desfazer-manuais', 'manual', 'À mão', aMao, 'Desfaz as conciliações feitas à mão') : '',
+      E.comFalta.size ? lote('desfazer-faltando', 'faltando', 'Com item faltando', E.comFalta.size, 'Desfaz as conciliações com item que não está mais nos arquivos') : '',
+    ].join('');
+    const pilula = (cor, texto) => '<span class="pilula ' + cor + '">' + texto + '</span>';
     return '<div class="cartao corpo" style="margin-bottom:12px">' +
-      '<div class="linha-flex" style="justify-content:space-between;align-items:flex-start;gap:14px">' +
       '<div class="ponte">' +
       pedaco('Em aberto · Parte A', ab.valorA, ab.abertosA.length + ' item(ns) em aberto na contabilidade') +
       ' <b>−</b> ' + pedaco('Em aberto · Parte B', ab.valorB, ab.abertosB.length + ' item(ns) em aberto no financeiro') +
       ' <b>=</b> ' + pedaco('Diferença a investigar', dif, 'o que sobra em aberto', 'forte') +
       '</div>' +
-      '<div class="linha-flex">' +
-      '<button type="button" class="botao primario" data-acao="conciliar-tudo" title="Acha tudo o que casa pelo documento e marca cada conciliação com um ID">⚡ Conciliar</button>' +
+      '<div class="acoes-ab">' +
+      '<div class="acoes-conciliar">' +
+      acao('conciliar-tudo', 'documento', '⚡', 'Conciliar', 'pelo documento e fornecedor',
+        'Acha tudo o que casa pelo documento — primeiro com o mesmo fornecedor, depois com o mesmo nome, depois só pelo documento — e dá um ID para cada conciliação (1, 2, 3…)') +
       // Dony, 16/09/2026: só roda quando ele aperta (valores quebrados, sem documento e sem fornecedor).
-      '<button type="button" class="botao" data-acao="conciliar-valor" title="Depois do ⚡ pelo documento, casa o que sobrou por VALOR igual, sem olhar documento e fornecedor. Só valor quebrado: inteiro terminado em zero (10, 100, 200…) fica de fora.">≈ Conciliar só pelo valor</button>' +
+      acao('conciliar-valor', 'valor', '≈', 'Conciliar só pelo valor', 'sem documento e sem fornecedor',
+        'Depois do ⚡ pelo documento, casa o que sobrou por VALOR igual, sem olhar documento e fornecedor. Só valor quebrado: inteiro terminado em zero (10, 100, 200…) fica de fora. Só roda quando você aperta.') +
       // Dony, 16/09/2026: "fechar documento + fornecedor com margem de diferença, até um real; só quando eu apertar".
-      '<button type="button" class="botao" data-acao="conciliar-margem" title="Depois do ⚡ pelo documento, casa o que sobrou pelo MESMO documento e MESMO fornecedor aceitando diferença de até ' + T.moeda(M.MARGEM_AB) + ' (centavos de arredondamento, juros pequenos). Só roda quando você aperta.">± Conciliar doc + fornecedor com margem</button>' +
-      (auto ? '<button type="button" class="botao pequeno perigo" data-acao="desfazer-automaticas">Desfazer as automáticas</button>' : '') +
-      (porValor ? '<button type="button" class="botao pequeno perigo" data-acao="desfazer-valor">Desfazer as só pelo valor</button>' : '') +
-      (comMargem ? '<button type="button" class="botao pequeno perigo" data-acao="desfazer-margem">Desfazer as com margem</button>' : '') +
-      (aMao ? '<button type="button" class="botao pequeno perigo" data-acao="desfazer-manuais">Desfazer as manuais</button>' : '') +
-      '</div></div>' +
-      '<p class="suave pequeno" style="margin:10px 0 0">' +
-      (grupos.length ? '<b>' + grupos.length.toLocaleString('pt-BR') + '</b> conciliação(ões) com ID: ' + conta('AxA') + ' A×A · ' + conta('AxB') + ' A×B' + (conta('BxB') ? ' · ' + conta('BxB') + ' B×B' : '') + ' · ' + aMao + ' à mão' +
-        (porValor ? ' · <b>' + porValor + '</b> só pelo valor' : '') + (comMargem ? ' · <b>' + comMargem + '</b> com margem' : '') +
-        (E.comFalta.size ? ' · <span class="falta"><b>' + E.comFalta.size + '</b> com item faltando</span>' : '') +
-        ' · em aberto: <b>' + ab.abertosA.length + '</b> na A e <b>' + ab.abertosB.length + '</b> na B. ' : 'Nada conciliado ainda. ') +
-      'O <b>⚡ Conciliar</b> casa pelo <b>documento</b> — primeiro com o mesmo fornecedor, depois com o mesmo nome de fornecedor, depois só pelo documento — e dá um ID para cada conciliação (1, 2, 3…). ' +
-      'O <b>≈ Conciliar só pelo valor</b> casa o que sobrou por valor igual, sem documento e sem fornecedor (só valor quebrado); ' +
-      'o <b>± com margem</b> casa pelo mesmo documento e fornecedor com diferença de até ' + T.moeda(M.MARGEM_AB) + ' — confira cada um no <b>Mostrar</b>.' +
-      (Math.abs(naoBatem) >= 1 ? ' <span class="falta">Conciliações que não batem (à mão com diferença, com margem ou com item faltando): ' + textoDC(naoBatem) + '.</span>' : '') +
-      (conferir.length ? '<br><span style="color:var(--ambar)">⚠ Para conferir — ' + E.cfg.avisoAntes + ':</span> ' + botoesDeIds(conferir.map((g) => g.id)) : '') +
-      '</p></div>';
+      acao('conciliar-margem', 'margem', '±', 'Conciliar com margem', 'doc + fornecedor · até ' + T.moeda(M.MARGEM_AB),
+        'Depois do ⚡ pelo documento, casa o que sobrou pelo MESMO documento e MESMO fornecedor aceitando diferença de até ' + T.moeda(M.MARGEM_AB) + ' (centavos de arredondamento). Só roda quando você aperta.') +
+      '</div>' +
+      (lotes ? '<div class="desfazer-lote"><span class="rotulo-lote">↺ Desfazer em lote</span>' + lotes + '</div>' : '') +
+      '</div>' +
+      (grupos.length
+        ? '<div class="contagem-ab pequeno"><b>' + n(grupos.length) + '</b>&nbsp;conciliação(ões) com ID:' +
+          pilula('cinza', n(conta('AxA')) + ' A×A') + pilula('azul', n(conta('AxB')) + ' A×B') + (conta('BxB') ? pilula('cinza', n(conta('BxB')) + ' B×B') : '') +
+          (aMao ? pilula('cinza', n(aMao) + ' à mão') : '') + (porValor ? '<span class="selo valor">' + n(porValor) + ' só pelo valor</span>' : '') +
+          (comMargem ? '<span class="selo margem">' + n(comMargem) + ' com margem</span>' : '') +
+          (E.comFalta.size ? '<span class="selo perigo">⚠ ' + n(E.comFalta.size) + ' com item faltando</span>' : '') +
+          '<span class="suave">· em aberto: <b>' + n(ab.abertosA.length) + '</b> na A e <b>' + n(ab.abertosB.length) + '</b> na B</span></div>'
+        : '<p class="suave pequeno" style="margin:12px 0 0">Nada conciliado ainda. Comece pelo <b>⚡ Conciliar</b>; o que sobrar dá para casar só pelo valor, com margem ou à mão (marque os itens nas partes).</p>') +
+      (Math.abs(naoBatem) >= 1 || conferir.length ? '<p class="pequeno" style="margin:8px 0 0">' +
+        (Math.abs(naoBatem) >= 1 ? '<span class="falta">Conciliações que não batem (à mão com diferença, com margem ou com item faltando): ' + textoDC(naoBatem) + '.</span>' : '') +
+        (conferir.length ? (Math.abs(naoBatem) >= 1 ? '<br>' : '') + '<span style="color:var(--ambar)">⚠ Para conferir — ' + E.cfg.avisoAntes + ':</span> ' + botoesDeIds(conferir.map((g) => g.id)) : '') +
+        '</p>' : '') +
+      '</div>';
   }
 
   function colunaAB(lado, titulo, sub, itens, fixos, rot) {

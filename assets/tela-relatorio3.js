@@ -49,9 +49,11 @@
     R.el.innerHTML =
       '<div class="barra-relatorio nao-imprimir">' +
       '<a class="voltar" style="margin:0" href="' + R.voltar + '">← Voltar para a conciliação</a>' +
-      '<div class="linha-flex" style="gap:14px">' +
+      '<div class="linha-flex" style="gap:6px 14px;flex:1;min-width:280px">' +
       '<span class="suave pequeno">Mostrar:</span>' + marca('manuais', 'Manuais') + marca('automaticas', 'Automáticas') + marca('valor', 'Só pelo valor') + marca('margem', 'Com margem') +
       marca('itens', 'Itens de cada ID') + marca('abertos', 'Em aberto') + marca('versoes', 'Versões dos arquivos') +
+      '</div>' +
+      '<div class="linha-flex" style="flex-wrap:nowrap">' +
       '<button type="button" class="botao" data-acao="excel" title="Baixar o relatório em planilha">⬇ Excel</button>' +
       '<button type="button" class="botao primario" data-acao="imprimir" title="Na janela de impressão, escolha a impressora ou “Salvar como PDF”">🖨 Imprimir / salvar PDF</button>' +
       '</div></div>' +
@@ -90,13 +92,15 @@
     return nomeDaFonte(x.fonte);
   }
   // De onde veio o saldo inicial da contabilidade: conforme o aging ou conforme o razão do mês anterior.
+  // Texto simples (vai na ficha da capa, que escapa o texto, e numa célula do Excel): "801.889,12 C".
   function textoInicio() {
     const p = R.dados.r.ponte, ini = p.inicio || { modo: 'aging' }, c = R.dados.itens.continuacao;
     const mesAnt = R.dados.entrada.mesAnterior;
+    const v = (x) => T.valorDC(x, dc(x));
     return ini.modo === 'razao'
-      ? 'conforme o RAZÃO de ' + mesAnt + ' · ' + dinheiro(p.anterior) + ' (aging ' + dinheiro(ini.aging) + ' − ' + ini.qtdTirados + ' título(s) da B ' + dinheiro(ini.tirados) +
-        ' + ' + ini.qtdPendentes + ' pendência(s) da A ' + dinheiro(ini.pendentesA) + ')' + (c && c.naoAchados.length ? ' · ' + c.naoAchados.length + ' título(s) da B não achados' : '')
-      : 'conforme o AGING de ' + mesAnt + ' · ' + dinheiro(p.anterior);
+      ? 'conforme o RAZÃO de ' + mesAnt + ' · ' + v(p.anterior) + ' (aging ' + v(ini.aging) + ' − ' + ini.qtdTirados + ' título(s) da B ' + v(ini.tirados) +
+        ' + ' + ini.qtdPendentes + ' pendência(s) da A ' + v(ini.pendentesA) + ')' + (c && c.naoAchados.length ? ' · ' + c.naoAchados.length + ' título(s) da B não achados' : '')
+      : 'conforme o AGING de ' + mesAnt + ' · ' + v(p.anterior);
   }
   // Valor com a natureza (D/C) no lugar do sinal (Dony, 16/09/2026).
   function dc(c) { return M.ladoDC(c, R.cfg.natureza); }
