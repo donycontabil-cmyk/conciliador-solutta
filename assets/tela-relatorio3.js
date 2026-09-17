@@ -336,6 +336,9 @@
     const X = raiz.XLSX;
     const d = R.dados, rel = R.rel, p = d.r.ponte, t = rel.totais;
     const reais = (c) => Math.round(Number(c) || 0) / 100;
+    // Valor absoluto (Dony, 17/09/2026: "uma coluna de valor absoluto, que não considere se é débito ou
+    // crédito, para ficar mais fácil de analisar no Excel"): ao lado do valor com sinal e do D/C.
+    const absoluto = (c) => Math.abs(reais(c));
     const wb = X.utils.book_new();
 
     function folha(linhas, larguras, colunasValor, inicioDados) {
@@ -360,30 +363,38 @@
       ['Emitido', (app().usuario.nome || '') + ' · ' + U.dataHoraLocal(R.emitido)],
       [],
     ];
+    // Linha de valor do resumo: rótulo, valor com sinal, D/C e valor absoluto (só elas com formato de dinheiro;
+    // as contagens ficam como número inteiro).
+    const valor = (rotulo, c) => { const l = [rotulo, reais(c), dc(c), absoluto(c)]; l.ehValor = true; return l; };
     const resumo = cab.concat([
-      ['Ponte'],
-      [((p.inicio && p.inicio.modo === 'razao') ? 'Saldo inicial · razão ' : 'Saldo inicial · aging ') + d.entrada.mesAnterior, reais(p.anterior), dc(p.anterior)],
-      ['Movimento do razão', reais(p.movimento), dc(p.movimento)],
-      ['Esperado (contabilidade)', reais(p.esperado), dc(p.esperado)],
-      ['Aging ' + d.entrada.mesAtual, reais(p.atual), dc(p.atual)],
-      ['Diferença da ponte', reais(p.diferenca), dc(p.diferenca)],
+      ['Ponte', 'Valor', 'D/C', 'Valor absoluto'],
+      valor(((p.inicio && p.inicio.modo === 'razao') ? 'Saldo inicial · razão ' : 'Saldo inicial · aging ') + d.entrada.mesAnterior, p.anterior),
+      valor('Movimento do razão', p.movimento),
+      valor('Esperado (contabilidade)', p.esperado),
+      valor('Aging ' + d.entrada.mesAtual, p.atual),
+      valor('Diferença da ponte', p.diferenca),
       [],
       ['Conciliações com ID', t.conciliacoes],
       ['  A×A', t.AxA], ['  A×B', t.AxB],
       ['Automáticas (⚡ Conciliar)', t.automaticas],
       ['Manuais (à mão)', t.manuais],
       ['Só pelo valor (≈)', t.porValor],
-      ['Com margem (±)', t.comMargem], ['Com margem · diferença somada', reais(t.diferencaComMargem), dc(t.diferencaComMargem)],
+      ['Com margem (±)', t.comMargem], valor('Com margem · diferença somada', t.diferencaComMargem),
       ['Manuais com diferença', t.manuaisComDiferenca],
       ['Com item que não está mais nos arquivos', t.comItemFaltando],
       ['Atualizações de arquivo depois de conciliar', atualizacoes().length],
-      ['Em aberto · Parte A (itens)', rel.abertosA.length], ['Em aberto · Parte A (valor)', reais(rel.valorAbertoA), dc(rel.valorAbertoA)],
-      ['Em aberto · Parte B (itens)', rel.abertosB.length], ['Em aberto · Parte B (valor)', reais(rel.valorAbertoB), dc(rel.valorAbertoB)],
-      ['Diferença a investigar', reais(rel.valorAbertoA - rel.valorAbertoB), dc(rel.valorAbertoA - rel.valorAbertoB)],
+      ['Em aberto · Parte A (itens)', rel.abertosA.length], valor('Em aberto · Parte A (valor)', rel.valorAbertoA),
+      ['Em aberto · Parte B (itens)', rel.abertosB.length], valor('Em aberto · Parte B (valor)', rel.valorAbertoB),
+      valor('Diferença a investigar', rel.valorAbertoA - rel.valorAbertoB),
     ]);
-    X.utils.book_append_sheet(wb, folha(resumo, [34, 60, 6], [1], 7), 'Resumo');
+    const folhaResumo = folha(resumo, [34, 60, 6, 16], []);
+    resumo.forEach((l, r) => {
+      if (!l.ehValor) return;
+      [1, 3].forEach((c) => { const cel = folhaResumo[X.utils.encode_cell({ r, c })]; if (cel && cel.t === 'n') cel.z = '#,##0.00'; });
+    });
+    X.utils.book_append_sheet(wb, folhaResumo, 'Resumo');
 
-    const cabecalhoItens = ['ID', 'Tipo', 'Como', 'Documento (ID)', 'Fornecedor (ID)', 'Parte A (ID)', 'Parte B (ID)', 'Quem', 'Quando', 'Observação', 'Aviso', 'Lado', 'Documento', 'Origem', 'Data', 'Fornecedor', 'Histórico', 'Valor', 'D/C'];
+    const cabecalhoItens = ['ID', 'Tipo', 'Como', 'Documento (ID)', 'Fornecedor (ID)', 'Parte A (ID)', 'Parte B (ID)', 'Quem', 'Quando', 'Observação', 'Aviso', 'Lado', 'Documento', 'Origem', 'Data', 'Fornecedor', 'Histórico', 'Valor', 'D/C', 'Valor absoluto'];
     const linhasDe = (lista) => {
       const linhas = [cabecalhoItens];
       for (const x of lista) {
@@ -391,25 +402,27 @@
         for (const i of x.itens) {
           linhas.push([g.id, TIPO[g.tipo] || g.tipo, COMO[g.regra] || g.regra, g.documento || '', g.nome || '', reais(g.valorA), reais(g.valorB), g.quem || '',
             g.quando ? U.dataHoraLocal(g.quando) : '', g.obs || '', g.aviso === 'baixa-antes-da-nota' ? R.cfg.avisoCurto : '',
-            ...(i.faltando ? itemQueSaiuNoExcel(i.id) : [i.lado, i.doc, fonte(i), i.data || '', i.nome || '', i.historico || '', reais(i.valor), dc(i.valor)])]);
+            ...(i.faltando ? itemQueSaiuNoExcel(i.id) : [i.lado, i.doc, fonte(i), i.data || '', i.nome || '', i.historico || '', reais(i.valor), dc(i.valor), absoluto(i.valor)])]);
         }
       }
       return linhas;
     };
     function itemQueSaiuNoExcel(id) {
       const s = itemQueSaiu(id);
-      return s ? [s.lado || '', s.doc || '', 'SAIU DO ARQUIVO', s.data || '', s.nome || '', s.historico || '', reais(s.valor), dc(s.valor)]
-        : ['', '', 'item não está mais nos arquivos', '', '', id, '', ''];
+      return s ? [s.lado || '', s.doc || '', 'SAIU DO ARQUIVO', s.data || '', s.nome || '', s.historico || '', reais(s.valor), dc(s.valor), absoluto(s.valor)]
+        : ['', '', 'item não está mais nos arquivos', '', '', id, '', '', ''];
     }
-    const larguras = [6, 6, 20, 14, 30, 13, 13, 16, 16, 30, 18, 5, 12, 18, 11, 30, 50, 13, 5];
-    X.utils.book_append_sheet(wb, folha(linhasDe(rel.manuais), larguras, [5, 6, 17], 1), 'Manuais');
-    X.utils.book_append_sheet(wb, folha(linhasDe(rel.automaticas), larguras, [5, 6, 17], 1), 'Automáticas');
-    if (rel.porValor.length) X.utils.book_append_sheet(wb, folha(linhasDe(rel.porValor), larguras, [5, 6, 17], 1), 'Só pelo valor');
-    if (rel.comMargem.length) X.utils.book_append_sheet(wb, folha(linhasDe(rel.comMargem), larguras, [5, 6, 17], 1), 'Com margem');
+    const larguras = [6, 6, 20, 14, 30, 13, 13, 16, 16, 30, 18, 5, 12, 18, 11, 30, 50, 13, 5, 14];
+    const colunasDeValor = [5, 6, 17, 19];
+    X.utils.book_append_sheet(wb, folha(linhasDe(rel.manuais), larguras, colunasDeValor, 1), 'Manuais');
+    X.utils.book_append_sheet(wb, folha(linhasDe(rel.automaticas), larguras, colunasDeValor, 1), 'Automáticas');
+    if (rel.porValor.length) X.utils.book_append_sheet(wb, folha(linhasDe(rel.porValor), larguras, colunasDeValor, 1), 'Só pelo valor');
+    if (rel.comMargem.length) X.utils.book_append_sheet(wb, folha(linhasDe(rel.comMargem), larguras, colunasDeValor, 1), 'Com margem');
 
-    const abertos = (lista) => [['Documento', 'Origem', 'Data', 'Fornecedor', 'Histórico', 'Valor', 'D/C']].concat(lista.map((i) => [i.doc, fonte(i), i.data || '', i.nome || '', i.historico || '', reais(i.valor), dc(i.valor)]));
-    X.utils.book_append_sheet(wb, folha(abertos(rel.abertosA), [12, 18, 11, 34, 60, 13, 5], [5], 1), 'Em aberto A');
-    X.utils.book_append_sheet(wb, folha(abertos(rel.abertosB), [12, 18, 11, 34, 60, 13, 5], [5], 1), 'Em aberto B');
+    const abertos = (lista) => [['Documento', 'Origem', 'Data', 'Fornecedor', 'Histórico', 'Valor', 'D/C', 'Valor absoluto']]
+      .concat(lista.map((i) => [i.doc, fonte(i), i.data || '', i.nome || '', i.historico || '', reais(i.valor), dc(i.valor), absoluto(i.valor)]));
+    X.utils.book_append_sheet(wb, folha(abertos(rel.abertosA), [12, 18, 11, 34, 60, 13, 5, 14], [5, 7], 1), 'Em aberto A');
+    X.utils.book_append_sheet(wb, folha(abertos(rel.abertosB), [12, 18, 11, 34, 60, 13, 5, 14], [5, 7], 1), 'Em aberto B');
 
     // Versões dos arquivos e atualizações depois de conciliar (a prova do que mudou).
     const versoes = [['Arquivo', 'Versão', 'Em uso', 'Nome do arquivo', 'Carregado por', 'Carregado em', 'Itens', 'Iguais à anterior', 'Entraram', 'Saíram', 'Mudaram', 'Total (aging)']];
