@@ -11,6 +11,7 @@
  *  - Desenho B (.xlsx "Relatório Razão Contábil"): linha "classificação | código - nome",
  *    cabeçalho "DATA | LOTE | LANC | C/PARTIDA | HISTORICO | DÉBITO | CRÉDITO | SALDO",
  *    "Saldo anterior", "Totais conta:"; o período pode vir só no nome do arquivo.
+ *  - Desenhos C, D e E: ver lerFlat e lerPorContrapartida. Desenho F: ver lerAnalitico.
  *
  * Saída (igual para todos os desenhos). VALORES EM CENTAVOS INTEIROS.
  * Saldos no sentido DÉBITO − CRÉDITO (devedor positivo, credor negativo), como o
@@ -44,11 +45,13 @@
   // Crédito | Saldo Acum. | D/C" — por isso "dtmovto", "cphistorico", "ctared", "contcontabil" e "saldoacum".
   // Razão por contrapartida de outro cliente (16/09/2026, desenho E): "ID Documento | Data | … |
   // Descrição Documento | Histórico | Contra-Partida | Descrição | R$ Débito | R$ Crédito | R$ Saldo".
+  // Razão analítico de um terceiro cliente (17/09/2026, desenho F): "Data | Partida | Lote/Lanc | Nº Doc. |
+  // Histórico | Débito | Crédito | Saldo" — por isso "partida", "lotelanc" e "ndoc".
   const SINONIMOS = {
     data: ['data', 'dt', 'datalanc', 'datadolancamento', 'datalancamento', 'datamovimento', 'datamov', 'dtmovto', 'dtmovimento', 'dtmov'],
-    numero: ['numero', 'num', 'lancamento', 'lanc', 'lcto', 'nlanc', 'nlancamento', 'numlancamento', 'lote', 'numlote', 'iddocumento'],
+    numero: ['numero', 'num', 'lancamento', 'lanc', 'lcto', 'nlanc', 'nlancamento', 'numlancamento', 'lote', 'numlote', 'iddocumento', 'lotelanc'],
     historico: ['complhis', 'complementohistorico', 'historicocomplemento', 'complemento', 'historico', 'historicos', 'cphistorico', 'cphist'],
-    contrapartida: ['ctacpart', 'contrapartida', 'cpart', 'cpartida', 'ctacpartida', 'contracpartida', 'ccontrapartida', 'contacontrapartida', 'contacontabilcontrapartida'],
+    contrapartida: ['ctacpart', 'contrapartida', 'cpart', 'cpartida', 'ctacpartida', 'contracpartida', 'ccontrapartida', 'contacontrapartida', 'contacontabilcontrapartida', 'partida'],
     filial: ['filial'],
     debito: ['debito', 'debitos', 'valordebito', 'vlrdebito', 'rdebito'],
     credito: ['credito', 'creditos', 'valorcredito', 'vlrcredito', 'rcredito'],
@@ -59,7 +62,7 @@
     conta: ['contareduzida', 'contacontabil', 'contaredz', 'reduzida', 'ctared', 'ctareduzida', 'ctaredz', 'contared'],
     contaClassificacao: ['contacontabil', 'classificacao', 'classificacaocontabil', 'contcontabil', 'ctacontabil'],
     descricaoConta: ['descricao', 'descricaoconta', 'nomeconta', 'descricaodaconta'],
-    documento: ['numdocumento', 'numerodocumento', 'ndocumento', 'nrodocumento', 'nrodoc', 'documento'],
+    documento: ['numdocumento', 'numerodocumento', 'ndocumento', 'nrodocumento', 'nrodoc', 'documento', 'ndoc'],
   };
 
   function mapearCabecalho(linha) {
@@ -578,6 +581,148 @@
     return { tipo: 'razao', desenho: 'E', empresa: info.empresa, cnpj: info.cnpj, titulo: info.titulo, periodo, periodoOrigem, contas, avisos, linhasIgnoradas };
   }
 
+  // ------------------------------------------------------------------
+  // Desenho F — razão ANALÍTICO de um terceiro cliente real (17/09/2026): no topo, a conta num texto só
+  // ("2.1.1.01.02004-2004-FORNECEDORES NACIONAIS"; a linha de cima é a conta-mãe, sem lançamentos), o
+  // nome da empresa e "Razão Analítico de 01/08/2026 à 31/08/2026" na coluna ao lado; cabeçalho
+  // "Data | Partida | Lote/Lanc | Nº Doc. | Histórico | Débito | Crédito | Saldo" e o D/C do saldo na
+  // coluna seguinte, sem título; os números vêm como texto ("1.234.567,89"). "Saldo da Conta->" duas
+  // vezes: antes dos lançamentos (o saldo anterior e o D/C) e no fim (total dos débitos, total dos
+  // créditos, saldo final e o D/C).
+  // O histórico cita o NRM (o número do lançamento no financeiro, o mesmo do aging) e o fornecedor:
+  //   "VALOR REF. NF 1234 / NRM 5001-FORNECEDOR" (também "MERCADORIAS PARA REVENDA NF …",
+  //   "VALOR REF. CSLL/IR/ISS RETIDO …", "… ICMS A RECUPERAR SOBRE NOTA FISCAL NF … / NRM …-…");
+  // o pagamento só traz os números: "PAGAMENTO CF NRM4001 - 1 - NFº <999> - Parcela 1 / 5 …"
+  // (o "- 1 -" é a parcela; também "PAGAMENTO CF SAI 12/26 - 1 - …", "PAGAMENTO CF 202401 - 32 - …");
+  // juros e descontos: "… Ocorrencia ref: NRM4002-1- NFº <555> - …". O fornecedor do pagamento
+  // o motor acha pelo documento (MotorTerceiro.calcular).
+  // ------------------------------------------------------------------
+  const RE_CONTA_F = /^\s*(\d+(?:\.\d+)+)\s*-\s*(\d+)\s*-\s*(.*\S)\s*$/;
+  const RE_PAGAMENTO_F = /^pagamento\s+cf\s+(.+?)\s+-\s+(\d{1,3})\s+-/i;
+  const RE_OCORRENCIA_F = /ocorr[eê]ncia\s+ref\s*:\s*(\S+?)-(\d{1,3})-/i;
+  const RE_NRM_FORNECEDOR_F = /\bNRM\s*(\d+)\s*-\s*(.*\S)\s*$/i;
+  const RE_NF_F = /\bNF\s*(?:º\s*<\s*|N[º°o]\.?\s*:\s*)?(\d+)/i;
+
+  function contaF(linha) {
+    const cheias = celulasCheias(linha);
+    if (!cheias.length || typeof cheias[0].v !== 'string') return null;
+    const m = cheias[0].v.match(RE_CONTA_F);
+    return m ? { classificacao: m[1], codigo: m[2], nome: m[3].replace(/\s+/g, ' ').trim(), resto: cheias.slice(1).map((c) => String(c.v).trim()) } : null;
+  }
+  function ehSaldoDaConta(linha) {
+    const cheias = celulasCheias(linha);
+    return !!cheias.length && typeof cheias[0].v === 'string' && /^saldo\s+da\s+conta/i.test(Util.semAcento(cheias[0].v).trim());
+  }
+  function ehRazaoAnalitico(abas) {
+    return abas.some((a) => {
+      const rCab = a.linhas.findIndex((l) => l && ehCabecalho(l));
+      if (rCab < 0 || !a.linhas.slice(0, rCab).some((l) => l && contaF(l))) return false;
+      return a.linhas.slice(rCab + 1, rCab + 400).some((l) => l && ehSaldoDaConta(l));
+    });
+  }
+  const semNrm = (s) => String(s || '').replace(/^\s*NRM\s*/i, '').trim();
+  // Documento (o NRM, sem o prefixo), parcela, nota fiscal e fornecedor de um lançamento do desenho F.
+  function lancamentoF(historico, documento) {
+    const h = String(historico || '');
+    const nf = (h.match(RE_NF_F) || [])[1] || '';
+    let m = h.match(RE_PAGAMENTO_F) || h.match(RE_OCORRENCIA_F);
+    if (m) return { nota: semNrm(m[1]), parcela: m[2], notaFiscal: nf, fornecedor: '' };
+    m = h.match(RE_NRM_FORNECEDOR_F);
+    if (m) return { nota: m[1], parcela: '', notaFiscal: nf, fornecedor: m[2].replace(/\s+/g, ' ').trim() };
+    const d = String(documento || '').trim().match(/^(.*\S)\s*-\s*(\d{1,3})$/);
+    return { nota: semNrm(d ? d[1] : documento), parcela: d ? d[2] : '', notaFiscal: nf, fornecedor: '' };
+  }
+
+  function lerAnalitico(abas, opcoes) {
+    const nomeArquivo = (opcoes && opcoes.nomeArquivo) || '';
+    const avisos = [];
+    const contas = [];
+    let linhasIgnoradas = 0;
+    const info = { empresa: '', cnpj: '', periodo: null, titulo: '' };
+    const texto = (linha, i) => (i === undefined || linha[i] === null || linha[i] === undefined ? '' : String(linha[i]).replace(/\s+/g, ' ').trim());
+    const comDC = (n, dc) => (n === null ? null : /^c$/i.test(dc) ? -Math.abs(n) : /^d$/i.test(dc) ? Math.abs(n) : n);
+    const novaConta = (c) => ({ codigo: c.codigo, classificacao: c.classificacao, nome: c.nome, saldoAnterior: null, lancamentos: [],
+      totalDebitoDeclarado: null, totalCreditoDeclarado: null, saldoFinalDeclarado: null, avisos: [] });
+
+    for (const aba of abas) {
+      const linhas = aba.linhas;
+      let mapa = null, conta = null, pendente = null;
+      for (let r = 0; r < linhas.length; r++) {
+        const linha = linhas[r];
+        if (!linha || !celulasCheias(linha).length) continue;
+        if (ehCabecalho(linha)) {
+          mapa = mapearCabecalho(linha);
+          if (pendente) { conta = novaConta(pendente); contas.push(conta); pendente = null; }
+          continue;
+        }
+        const c = contaF(linha);
+        if (c) {
+          // O que vem ao lado da conta: o nome da empresa e o título com o período.
+          for (const t of c.resto) {
+            const p = lerFaixaDeDatas(t);
+            if (p) { if (!info.periodo) info.periodo = p; if (!info.titulo) info.titulo = t.replace(/\s+de\s+\d.*$/i, '').trim(); } else if (!info.empresa && /[a-z]/i.test(t)) info.empresa = t;
+          }
+          // Antes do primeiro cabeçalho, a última conta vale (a de cima é a conta-mãe).
+          if (mapa) { conta = novaConta(c); contas.push(conta); } else pendente = c;
+          continue;
+        }
+        if (!mapa || !conta) { linhasIgnoradas++; continue; }
+        if (ehSaldoDaConta(linha)) {
+          const cheias = celulasCheias(linha).slice(1);
+          const dcs = cheias.filter((x) => /^[DC]$/i.test(String(x.v).trim()));
+          const dc = dcs.length ? String(dcs[dcs.length - 1].v).trim() : '';
+          const nums = cheias.filter((x) => !/^[DC]$/i.test(String(x.v).trim())).map((x) => numeroDe(x.v)).filter((n) => n !== null);
+          if (!conta.lancamentos.length && conta.saldoAnterior === null && nums.length) {
+            conta.saldoAnterior = comDC(nums[0], dc);
+          } else if (nums.length >= 3) {
+            conta.totalDebitoDeclarado = nums[0];
+            conta.totalCreditoDeclarado = nums[1];
+            conta.saldoFinalDeclarado = comDC(nums[2], dc);
+          }
+          linhasIgnoradas++;
+          continue;
+        }
+        // Linha com uma célula a menos (caso real: o Nº Doc. vazio sumiu na exportação e o resto andou uma
+        // coluna para a esquerda): o D/C cai na coluna do Saldo. Aí o documento fica vazio e o histórico,
+        // o débito, o crédito e o saldo são lidos uma coluna antes.
+        const ehDC = (i) => i !== undefined && /^[DC]$/i.test(texto(linha, i));
+        const desloca = mapa.saldo !== undefined && mapa.documento !== undefined && ehDC(mapa.saldo) && !ehDC(mapa.saldo + 1);
+        const col = (campo) => (mapa[campo] === undefined ? undefined : desloca && mapa[campo] > mapa.documento ? mapa[campo] - 1 : mapa[campo]);
+        const data = Util.lerData(linha[mapa.data]);
+        const deb = col('debito') !== undefined ? numeroDe(linha[col('debito')]) : null;
+        const cred = col('credito') !== undefined ? numeroDe(linha[col('credito')]) : null;
+        if (!data || (deb === null && cred === null)) { linhasIgnoradas++; continue; }
+        const historico = texto(linha, col('historico'));
+        const documento = desloca ? '' : texto(linha, mapa.documento);
+        const lido = lancamentoF(historico, documento);
+        conta.lancamentos.push({
+          data: data.texto, dia: data.dia, mes: data.mes, ano: data.ano,
+          numero: texto(linha, mapa.numero), historico, contrapartida: texto(linha, mapa.contrapartida),
+          documento, nota: lido.nota, parcela: lido.parcela, notaFiscal: lido.notaFiscal, fornecedor: lido.fornecedor,
+          debito: deb || 0, credito: cred || 0,
+          saldo: col('saldo') !== undefined ? comDC(numeroDe(linha[col('saldo')]), texto(linha, col('saldo') + 1)) : null,
+        });
+      }
+    }
+    // Conta-mãe (ou outra) sem lançamento e sem saldo: fica fora.
+    const lidas = contas.filter((c) => c.lancamentos.length || c.saldoAnterior !== null);
+    let periodo = info.periodo;
+    let periodoOrigem = periodo ? 'conteudo' : null;
+    if (!periodo) { const pn = periodoPeloNome(nomeArquivo); if (pn) { periodo = pn; periodoOrigem = 'nome-do-arquivo'; } }
+    if (!periodo) {
+      const numeros = [];
+      lidas.forEach((c) => c.lancamentos.forEach((l) => numeros.push(Util.montarData(l.dia, l.mes, l.ano).numero)));
+      if (numeros.length) {
+        periodo = { de: Util.dataDeNumero(Math.min.apply(null, numeros)).texto, ate: Util.dataDeNumero(Math.max.apply(null, numeros)).texto };
+        periodoOrigem = 'datas-dos-lancamentos';
+        avisos.push('O arquivo não diz o período: usei a primeira e a última data dos lançamentos. Confirme a competência.');
+      }
+    }
+    for (const c of lidas) conferirConta(c);
+    if (!lidas.length) avisos.push('Não achei lançamentos neste razão.');
+    return { tipo: 'razao', desenho: 'F', empresa: info.empresa, cnpj: info.cnpj, titulo: info.titulo, periodo, periodoOrigem, contas: lidas, avisos, linhasIgnoradas };
+  }
+
   /**
    * Diz se as abas são um razão, um balancete ou outra coisa.
    * @returns { tipo: 'razao' | 'balancete' | null, motivo }
@@ -585,6 +730,9 @@
   function reconhecer(abas) {
     if (ehRazaoPorContrapartida(abas)) {
       return { tipo: 'razao', porContrapartida: true, motivo: 'Razão por contrapartida: blocos "Conta Contábil" com Data, Histórico, Contra-Partida, Débito e Crédito.' };
+    }
+    if (ehRazaoAnalitico(abas)) {
+      return { tipo: 'razao', analitico: true, motivo: 'Razão analítico: a conta no topo ("classificação-código-nome"), "Saldo da Conta" e Data, Nº Doc., Histórico, Débito, Crédito e Saldo.' };
     }
     let temCabecalho = false, temConta = false, balancete = false, temFlat = false;
     for (const aba of abas) {
@@ -611,8 +759,9 @@
    */
   function ler(abas, opcoes) {
     const nomeArquivo = (opcoes && opcoes.nomeArquivo) || '';
-    // Razão por contrapartida (desenho E) tem um leitor próprio.
+    // Razão por contrapartida (desenho E) e razão analítico (desenho F) têm leitores próprios.
     if (ehRazaoPorContrapartida(abas)) return lerPorContrapartida(abas);
+    if (ehRazaoAnalitico(abas)) return lerAnalitico(abas, opcoes);
     // Razão em lista (desenho C) tem um leitor próprio: uma linha por lançamento, conta na coluna.
     const temBloco = abas.some((a) => a.linhas.some((l) => l && lerLinhaDeConta(l)));
     const temFlat = !temBloco && abas.some((a) => a.linhas.some((l) => l && ehCabecalhoFlat(l)));
@@ -824,5 +973,5 @@
     delete c.totalCreditoDeclarado;
   }
 
-  return { reconhecer, ler, mapearCabecalho, ehCabecalho, lerLinhaDeConta, periodoPeloNome, lerFaixaDeDatas, notaEFornecedorE };
+  return { reconhecer, ler, mapearCabecalho, ehCabecalho, lerLinhaDeConta, periodoPeloNome, lerFaixaDeDatas, notaEFornecedorE, lancamentoF };
 });

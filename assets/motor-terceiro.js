@@ -227,6 +227,7 @@
         const id = ids[i];
         const item = { id, lado, fonte, doc, parcela: t.parcela || '',
           chave: chaveDoTitulo(t), nome: t.nome, cnpj: t.cnpj || '', data: t.vencimento || '', ordem: 0, historico: '', valor: t.valor };
+        if (t.registro) item.registro = t.registro; // quando o título entrou na contabilidade (se o relatório diz)
         if (lado === 'A' && tirar.has(id)) { excluidos.push(item); return; }
         const x = guardar(item);
         legado.set(prefixoLegado + ':' + i, x.id);
@@ -249,7 +250,7 @@
       const d = r.porLinha.get(l.digital);
       const lados = ladosDoRazao(entrada.natureza, lc);
       const x = guardar({ id: 'RZ:' + Util.hash8(l.digital), lado: 'A', fonte: lados.aumento > 0 ? 'nota' : 'baixa',
-        doc: documentoDaLinha(lc), parcela: '', chave: d.chave, nome: d.nome, cnpj: '', data: lc.data, ordem: l.dia,
+        doc: documentoDaLinha(lc), parcela: lc.parcela || '', chave: d.chave, nome: d.nome, cnpj: '', data: lc.data, ordem: l.dia,
         historico: lc.historico || '', valor: lados.aumento > 0 ? lados.aumento : -lados.reducao, linha: l.i });
       legado.set('RAZ:' + l.digital, x.id);
     });
@@ -313,12 +314,18 @@
     const novos = [];
     const soma = (xs) => xs.reduce((s, x) => s + x.valor, 0);
     const porOrdem = (p, q) => p.ordem - q.ordem;
-    // O candidato que bate, o mais perto no valor (com margem) e, empatado, o primeiro da lista.
-    const melhor = (lista, dif, pode) => {
+    // O candidato que bate, o mais perto no valor (com margem); empatado, o da MESMA PARCELA que o item
+    // de referência (parcelas de mesmo valor: a parcela 1 paga mata a parcela 1) e, depois, o primeiro da lista.
+    const parcelaDe = (x) => String((x && x.parcela) || '').trim().replace(/^0+(?=\d)/, '');
+    const melhor = (lista, dif, pode, ref) => {
+      const pr = parcelaDe(ref);
+      const mesma = (c) => !!pr && parcelaDe(c) === pr;
       let k = -1;
       lista.forEach((c, j) => {
         if (!pode(c) || !bate(dif(c))) return;
-        if (k < 0 || Math.abs(dif(c)) < Math.abs(dif(lista[k]))) k = j;
+        if (k < 0) { k = j; return; }
+        const d = Math.abs(dif(c)), dk = Math.abs(dif(lista[k]));
+        if (d < dk || (d === dk && mesma(c) && !mesma(lista[k]))) k = j;
       });
       return k;
     };
@@ -362,7 +369,7 @@
         const notas = xs.filter((x) => x.lado === 'A' && x.valor > 0).sort(porOrdem);
         const baixas = xs.filter((x) => x.lado === 'A' && x.valor < 0).sort(porOrdem);
         for (const bx of baixas) {
-          const j = melhor(notas, (n) => n.valor + bx.valor, (n) => n.ordem <= bx.ordem && serve([n, bx]));
+          const j = melhor(notas, (n) => n.valor + bx.valor, (n) => n.ordem <= bx.ordem && serve([n, bx]), bx);
           if (j >= 0) { registrar([notas[j], bx], regra); notas.splice(j, 1); }
         }
       }
@@ -385,7 +392,7 @@
         if (!ladoA.length || !ladoB.length) continue;
         for (const a of ladoA) {
           if (a.valor === 0) continue;
-          const j = melhor(ladoB, (b) => a.valor - b.valor, (b) => serve([a, b]));
+          const j = melhor(ladoB, (b) => a.valor - b.valor, (b) => serve([a, b]), a);
           if (j >= 0) { registrar([a, ladoB[j]], regra); ladoB.splice(j, 1); }
         }
       }
@@ -737,6 +744,53 @@
     return { abertosA, abertosB, valorA: soma(abertosA), valorB: soma(abertosB), usados };
   }
 
+  // ------------------------------------------------------------------
+  // Fornecedor pelo DOCUMENTO (17/09/2026, razão em que o pagamento só traz o número do lançamento do
+  // financeiro — "PAGAMENTO CF NRM4001 - 1 - …"): o documento é o mesmo do título do aging e da nota
+  // do razão, e quem é o fornecedor está lá. Só para o leitor que separa o fornecedor do histórico
+  // (l.fornecedor existe) e só quando o documento é de UM fornecedor:
+  //  - linha sem fornecedor: ganha o nome (e o CNPJ) do título do aging com o mesmo documento, ou o
+  //    nome de outra linha do razão com o mesmo documento;
+  //  - linha com fornecedor: ganha o CNPJ do título do aging com o mesmo documento, se o nome do
+  //    título começa pela mesma palavra (a régua liga pelo CNPJ, sem depender da grafia).
+  // Documento repetido em fornecedores diferentes (ex.: um número genérico) não empresta nada.
+  // ------------------------------------------------------------------
+  function fornecedorPeloDocumento(lancamentos, titulos) {
+    const primeira = (nome) => nomeComparavel({ nome }).split(' ')[0] || '';
+    const porDoc = new Map();
+    const pegar = (doc) => { if (!porDoc.has(doc)) porDoc.set(doc, { cnpjs: new Map(), nomesTitulo: new Map(), nomesRazao: new Map() }); return porDoc.get(doc); };
+    for (const t of titulos || []) {
+      const doc = normalizarDocumento(t.documento);
+      if (!doc || !t.nome) continue;
+      const g = pegar(doc);
+      if (t.cnpj && Util.cnpjValido(t.cnpj)) { const m = Util.cnpjMatriz(t.cnpj); if (!g.cnpjs.has(m)) g.cnpjs.set(m, { nome: t.nome, cnpj: t.cnpj }); }
+      g.nomesTitulo.set(Util.normalizarNome(t.nome), t.nome);
+    }
+    for (const l of lancamentos || []) {
+      if (!l.fornecedor) continue;
+      const doc = documentoDaLinha(l);
+      if (doc) pegar(doc).nomesRazao.set(Util.normalizarNome(l.fornecedor), l.fornecedor);
+    }
+    // O fornecedor único de um documento: { nome, cnpj } ou null.
+    const unico = (doc) => {
+      const g = porDoc.get(doc);
+      if (!g) return null;
+      if (g.cnpjs.size === 1) return g.cnpjs.values().next().value;
+      if (g.cnpjs.size > 1) return null;
+      if (g.nomesTitulo.size === 1) return { nome: g.nomesTitulo.values().next().value, cnpj: '' };
+      if (g.nomesTitulo.size > 1) return null;
+      if (g.nomesRazao.size === 1) return { nome: g.nomesRazao.values().next().value, cnpj: '' };
+      return null;
+    };
+    return (l) => {
+      const doc = documentoDaLinha(l);
+      const u = doc ? unico(doc) : null;
+      if (!l.fornecedor) return u ? { nome: u.nome, cnpj: u.cnpj || undefined } : { nome: '' };
+      if (u && u.cnpj && primeira(u.nome) && primeira(u.nome) === primeira(l.fornecedor)) return { nome: l.fornecedor, cnpj: u.cnpj };
+      return { nome: l.fornecedor };
+    };
+  }
+
   // Os leitores (ler-financeiro, ler-razao) já entregam os valores em CENTAVOS inteiros;
   // aqui não se multiplica de novo.
 
@@ -761,6 +815,7 @@
     const inicio = saldoInicialAB(entrada);
 
     // Linhas do razão para a régua de nomes. Digital estável (nasce do conteúdo).
+    const peloDoc = fornecedorPeloDocumento(razao.lancamentos, agAnt.titulos.concat(agAtu.titulos));
     const ocorr = new Map();
     const linhas = razao.lancamentos.map((l, i) => {
       const base = 'R|' + (razao.conta.codigo || '') + '|' + l.data + '|' + String(l.historico || '').slice(0, 120) + '|' +
@@ -770,8 +825,9 @@
         i, digital: base + '|' + n, conta: String(razao.conta.codigo || ''),
         dc: l.credito > 0 ? 'C' : 'D', dia: Util.montarData(l.dia, l.mes, l.ano).numero,
         debito: l.debito, credito: l.credito, historico: l.historico || '',
-        // O fornecedor que o leitor tirou do histórico (desenho E) vale; senão, depois da última vírgula.
-        fornecedorDeclarado: { nome: l.fornecedor !== undefined ? l.fornecedor : fornecedorDoHistorico(l.historico) },
+        // O fornecedor que o leitor tirou do histórico (desenhos E e F) vale; senão, depois da última vírgula.
+        // Sem fornecedor no histórico (o pagamento do desenho F), o do mesmo documento.
+        fornecedorDeclarado: l.fornecedor === undefined ? { nome: fornecedorDoHistorico(l.historico) } : peloDoc(l),
       };
     });
 

@@ -712,16 +712,19 @@
 
   function nomeDaFonte(fonte) { return fonte === 'nota' ? 'razão · ' + E.cfg.aumento : fonte === 'baixa' ? 'razão · ' + E.cfg.reducao : 'aging'; }
   function rotuloFonte(x) {
-    if (x.fonte === 'anterior') return 'aging ' + E.entrada.mesAnterior;
-    if (x.fonte === 'atual') return 'aging ' + E.entrada.mesAtual;
+    const reg = x.registro ? ' (registro contábil em ' + x.registro + ')' : '';
+    if (x.fonte === 'anterior') return 'aging ' + E.entrada.mesAnterior + reg;
+    if (x.fonte === 'atual') return 'aging ' + E.entrada.mesAtual + reg;
     if (x.fonte === 'pendente') return 'pendente de ' + U.nomeCompetencia(x.origem) + (x.fonteOriginal ? ' · ' + nomeDaFonte(x.fonteOriginal) : '');
     return nomeDaFonte(x.fonte);
   }
   // Na tabela estreita de cada parte: "aging jun/26", "nota", "baixa", "pend. jul/26".
   function rotuloCurto(x) {
     const curto = (mes) => String(mes).slice(0, 3) + '/' + String(mes).slice(-2);
-    if (x.fonte === 'anterior') return 'aging ' + curto(E.entrada.mesAnterior);
-    if (x.fonte === 'atual') return 'aging ' + curto(E.entrada.mesAtual);
+    // Título com a data do registro contábil (quando o relatório diz): "reg. 03/08".
+    const reg = x.registro ? ' · reg. ' + String(x.registro).slice(0, 5) : '';
+    if (x.fonte === 'anterior') return 'aging ' + curto(E.entrada.mesAnterior) + reg;
+    if (x.fonte === 'atual') return 'aging ' + curto(E.entrada.mesAtual) + reg;
     if (x.fonte === 'pendente') return 'pend. ' + curto(U.nomeCompetencia(x.origem));
     return x.fonte === 'nota' ? E.cfg.aumento : E.cfg.reducao;
   }

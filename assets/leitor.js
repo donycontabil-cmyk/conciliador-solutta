@@ -90,9 +90,11 @@
       r.financeiro = fin;
       r.avisos = r.avisos.concat(fin.avisos);
       if (fin.posicao) r.competencia = Util.competenciaDe(Util.lerData(fin.posicao));
-      // Sem data de posição no arquivo: tenta a competência pelo NOME (ex.: "06.2026 -aging" -> junho/2026).
+      // Sem data de posição no arquivo: tenta a competência pelo NOME (ex.: "06.2026 -aging" -> junho/2026;
+      // "AGING 072026" -> julho/2026).
       if (!r.competencia) {
-        const m = String(nomeArquivo || '').match(/(?:^|[^\d])(0[1-9]|1[0-2])[.\-_ /](20\d{2})(?!\d)/);
+        const nome = String(nomeArquivo || '');
+        const m = nome.match(/(?:^|[^\d])(0[1-9]|1[0-2])[.\-_ /](20\d{2})(?!\d)/) || nome.match(/(?:^|[^\d])(0[1-9]|1[0-2])(20\d{2})(?!\d)/);
         if (m) { r.competencia = m[2] + '-' + m[1] + '-01'; r.competenciaPeloNome = true; }
       }
       return fechar(r);

@@ -396,6 +396,9 @@
           await versaoNova(g, ativo, comparacao);
         }
         resumo = r.financeiro.titulos.length + ' títulos · ' + T.moeda(r.financeiro.total);
+        // Relatório com filtro (só um tipo de linha entra): diz quantas linhas ficaram de fora e por quê.
+        const fora = (r.financeiro.descartados || []).reduce((s, d) => s + (d.quantidade || 0), 0);
+        if (fora && r.financeiro.formato) resumo += ' · ' + fora + ' linha(s) de fora — entram ' + r.financeiro.formato;
       }
       // Número da versão de cada arquivo novo.
       let textoVersao = '';
