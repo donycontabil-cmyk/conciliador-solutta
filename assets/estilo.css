@@ -95,7 +95,35 @@ p { margin: 0; }
 }
 .app.com-faixa { grid-template-rows: 52px auto 1fr; }
 
+/* Menu flutuante (18/09/2026): a setinha solta o menu (some e a tela ganha a largura toda) ou fixa de novo.
+ * Solto, ele aparece quando o mouse chega na borda esquerda (a alcinha "›") e some quando o mouse sai. */
+.fixar-menu {
+  align-self: flex-end; flex: none; display: inline-flex; align-items: center; justify-content: center; gap: 4px;
+  min-width: 28px; height: 26px; padding: 0 8px; margin: -6px -2px 0 0; border: 1px solid var(--borda); border-radius: 6px;
+  background: #fff; color: var(--texto-suave); font-size: 15px; line-height: 1; cursor: pointer;
+}
+.fixar-menu:hover { color: var(--primaria-escura); border-color: var(--primaria); background: var(--primaria-clara); }
+.borda-menu { display: none; }
+@media (min-width: 861px) {
+  .app.menu-flutuante { grid-template-columns: 1fr; }
+  .app.menu-flutuante .topo, .app.menu-flutuante .faixa-modo, .app.menu-flutuante .conteudo { grid-column: 1 / -1; }
+  .app.menu-flutuante .menu {
+    position: fixed; left: 0; top: 52px; bottom: 0; width: 236px; z-index: 45; transform: translateX(-100%);
+    transition: transform 0.18s ease, box-shadow 0.18s ease;
+  }
+  .app.menu-flutuante .menu.aberto { transform: none; box-shadow: 6px 0 24px rgba(20, 30, 40, 0.2); }
+  .app.menu-flutuante .fixar-menu { font-size: 12.5px; font-weight: 600; }
+  .app.menu-flutuante .borda-menu { display: block; position: fixed; left: 0; top: 52px; bottom: 0; width: 14px; z-index: 44; cursor: pointer; }
+  .app.menu-flutuante .borda-menu::after {
+    content: '›'; position: absolute; left: 0; top: 50%; transform: translateY(-50%); width: 14px; height: 56px;
+    border-radius: 0 8px 8px 0; background: var(--primaria); color: #fff; opacity: 0.5;
+    display: grid; place-items: center; font-size: 15px; font-weight: 700;
+  }
+  .app.menu-flutuante .borda-menu:hover::after { opacity: 0.9; }
+}
+
 @media (max-width: 860px) {
+  .fixar-menu { display: none; }
   .app { grid-template-columns: 1fr; grid-template-rows: 52px auto 1fr; }
   .menu { grid-row: 2; border-right: 0; border-bottom: 1px solid var(--borda); display: flex; flex-direction: row; gap: 4px; overflow-x: auto; padding: 6px; }
   .menu .grupo, .menu .rodape-menu { display: none; }

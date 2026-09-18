@@ -14,6 +14,9 @@
     'Tela', 'TelaPasta', 'TelaCarteira', 'TelaEmpresa', 'TelaFamilia', 'TelaSubir', 'TelaPasso1', 'TelaPasso3', 'TelaRelatorio3', 'TelaApresentacao', 'TelaSuporte'];
 
   const CHAVE_USUARIO = 'conciliador-solutta.usuario';
+  // Menu da esquerda fixo ou flutuante (Dony, 18/09/2026: "uma setinha que eu possa fixar quando eu quiser;
+  // clicando nela, o menu fica flutuante e só reaparece quando eu passar o mouse até a esquerda").
+  const CHAVE_MENU = 'conciliador-solutta.menu';
 
   const App = {
     config: null,
@@ -42,7 +45,7 @@
     const faixa = App.modo === 'memoria'
       ? '<div class="faixa-modo">Modo demonstração: os dados ficam só na memória desta aba e somem ao fechar. Nada é gravado no disco.</div>' : '';
     document.body.innerHTML =
-      '<div class="app' + (faixa ? ' com-faixa' : '') + '">' +
+      '<div class="app' + (faixa ? ' com-faixa' : '') + (menuFlutuante() ? ' menu-flutuante' : '') + '">' +
       '<header class="topo">' +
       '<div class="marca">' + (cfg.logo ? '<img src="' + T.esc(cfg.logo) + '" alt="">' : '<span class="selo-marca">S</span>') + '<span>' + T.esc(cfg.programa) + '</span></div>' +
       '<span class="espaco"></span>' +
@@ -50,11 +53,41 @@
       '<button type="button" class="pilula-topo" id="topo-usuario" title="Quem está usando (fica gravado em cada ação)">👤 <span></span></button>' +
       '</header>' + faixa +
       '<nav class="menu" id="menu"></nav>' +
+      '<div class="borda-menu" id="borda-menu" title="Menu (passe o mouse ou clique)"></div>' +
       '<main class="conteudo" id="conteudo"></main>' +
       '</div>';
     el('topo-usuario').addEventListener('click', () => raiz.TelaPasta.pedirNome(true).then(() => { atualizarTopo(); }));
     el('topo-pasta').addEventListener('click', () => raiz.TelaPasta.menuDaPasta());
+    ligarMenuFlutuante();
     atualizarTopo();
+  }
+
+  // ------------------------------------------------------------------
+  // Menu flutuante: a setinha no alto do menu solta (o menu some e a tela ganha a largura toda) ou fixa
+  // de novo. Solto, ele aparece quando o mouse chega na borda esquerda e some quando o mouse sai dele.
+  // ------------------------------------------------------------------
+  function menuFlutuante() { return lerLocal(CHAVE_MENU) === 'flutuante'; }
+  function ligarMenuFlutuante() {
+    const menu = el('menu'), borda = el('borda-menu'), app = document.querySelector('.app');
+    let relogio = null;
+    const solto = () => app.classList.contains('menu-flutuante');
+    const abrir = () => { if (!solto()) return; clearTimeout(relogio); menu.classList.add('aberto'); };
+    const fechar = (espera) => { clearTimeout(relogio); relogio = setTimeout(() => menu.classList.remove('aberto'), espera || 0); };
+    borda.addEventListener('mouseenter', abrir);
+    borda.addEventListener('click', abrir);
+    menu.addEventListener('mouseenter', () => clearTimeout(relogio));
+    menu.addEventListener('mouseleave', () => { if (solto()) fechar(350); });
+    menu.addEventListener('click', (ev) => {
+      if (ev.target.closest('[data-fixar-menu]')) {
+        const soltar = !solto();
+        gravarLocal(CHAVE_MENU, soltar ? 'flutuante' : 'fixo');
+        app.classList.toggle('menu-flutuante', soltar);
+        menu.classList.remove('aberto');
+        atualizarMenu();
+        return;
+      }
+      if (solto() && ev.target.closest('a')) fechar(0);
+    });
   }
 
   async function atualizarTopo() {
@@ -74,7 +107,11 @@
     const menu = el('menu');
     if (!menu) return;
     const r = App.rota || {};
-    const partes = ['<div class="grupo">Carteira</div>',
+    const solto = menuFlutuante();
+    const partes = ['<button type="button" class="fixar-menu" data-fixar-menu aria-label="' + (solto ? 'Fixar o menu' : 'Soltar o menu') + '" title="' +
+      (solto ? 'Fixar o menu aqui do lado' : 'Soltar o menu: ele se esconde e aparece quando você leva o mouse até a borda esquerda') + '">' +
+      (solto ? '📌 Fixar' : '‹') + '</button>',
+      '<div class="grupo">Carteira</div>',
       '<a href="#/" class="' + (r.nome === 'carteira' ? 'ativo' : '') + '">🏢 Empresas<span class="sub">cadastro e busca</span></a>'];
     if (r.codigo) {
       const emp = App.empresas.find((e) => String(e.codigo) === String(r.codigo));

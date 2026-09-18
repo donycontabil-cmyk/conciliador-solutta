@@ -48,6 +48,9 @@
     { categoria: 'Operacional', id: 'ocupacao', rotulo: '(-) Ocupação', prefixos: ['5.1.4'] },
     { categoria: 'Operacional', id: 'viagens', rotulo: '(-) Viagens, representação e veículos', prefixos: ['5.1.5'] },
     { categoria: 'Operacional', id: 'logistica', rotulo: '(-) Entrega e logística', prefixos: ['5.1.6'] },
+    // Linha nova (Dony, 18/09/2026, "resolve aí essa nova conta"): o grupo 5.1.7 do plano ("despesas com
+    // provisões", ex.: perdas com créditos incobráveis), que entrou no balancete depois da planilha modelo.
+    { categoria: 'Operacional', id: 'provisoes', rotulo: '(-) Despesas com provisões', prefixos: ['5.1.7'] },
     { categoria: 'Operacional', id: 'tributarias', rotulo: '(-) Despesas tributárias operacionais', prefixos: ['5.1.8'] },
     { categoria: 'Operacional', id: 'gerais', rotulo: '(-) Despesas gerais e não dedutíveis', prefixos: ['5.1.9'] },
     { categoria: 'Operacional', id: 'comerciais', rotulo: '(-) Despesas comerciais variáveis', prefixos: ['5.2.1'] },
@@ -57,7 +60,7 @@
     // DRE sempre fechar com o balancete. Sem conta assim, a linha nem aparece.
     { categoria: 'Operacional', id: 'semLinha', rotulo: '(-) Outras contas de resultado (sem linha no modelo)', prefixos: [], semLinha: true },
     { categoria: 'Operacional', id: 'lucroOperacional', rotulo: 'Lucro ou prejuízo operacional', destaque: true,
-      soma: ['lucroBruto', 'outrasReceitas', 'pessoal', 'servicos', 'utilidades', 'ocupacao', 'viagens', 'logistica', 'tributarias', 'gerais', 'comerciais', 'propaganda', 'depreciacao', 'semLinha'] },
+      soma: ['lucroBruto', 'outrasReceitas', 'pessoal', 'servicos', 'utilidades', 'ocupacao', 'viagens', 'logistica', 'provisoes', 'tributarias', 'gerais', 'comerciais', 'propaganda', 'depreciacao', 'semLinha'] },
     { categoria: 'Operacional', id: 'ebitda', rotulo: 'EBITDA gerencial', soma: ['lucroOperacional'], menos: ['depreciacao'] },
     { categoria: 'Investimentos', id: 'investimentos', rotulo: 'Resultado de investimentos e outros resultados não operacionais', prefixos: ['3.5'] },
     { categoria: 'Subtotal CPC 51', id: 'antesFinanciamento', rotulo: 'Lucro ou prejuízo antes de financiamento e tributos sobre o lucro', soma: ['lucroOperacional', 'investimentos'], destaque: true },
