@@ -3,17 +3,29 @@
  * Balancete mensal, a base do RELATÓRIO DE APRESENTAÇÃO (Dony, 18/09/2026: "um relatório de
  * apresentação dentro da empresa, com um lugar para importar os balancetes").
  *
- * Desenho visto (arquivos reais, 18/09/2026): uma aba; no topo o nome da empresa e
- * "Período: 01/01/2026 à 31/01/2026", embaixo o CNPJ e a emissão; cabeçalho
- * "Conta Contabil | Red. | Título da Conta | Saldo Ant. | Débitos | Créditos | Saldo Atual"; uma linha
- * por conta, sintéticas e analíticas ("1", "1.1", …, "1.1.1.001.00001"), números em texto
- * ("1.234,56", saldo credor com sinal de menos) e, no fim, "Total Geral:".
- * As colunas são achadas pelo TÍTULO (com sinônimos), como nos outros leitores.
+ * Cada sistema contábil exporta o balancete de um jeito (Dony, 18/09/2026: "várias empresas com vários
+ * tipos de balancete; o sistema tem que entender um plano de contas básico — conta, débito, crédito — e,
+ * se não entender, eu indico as colunas no primeiro e ele guarda"). A leitura:
+ *  1. MAPA (opcoes.mapa): as colunas indicadas por quem usa (guardadas na empresa);
+ *  2. CABEÇALHO: as colunas achadas pelo título, com muitos nomes (Conta/Classificação/Código,
+ *     Descrição/Título/Nome, Saldo anterior/inicial, Débito(s), Crédito(s), Saldo atual/final, D/C,
+ *     "Saldo em 31/12/2025"), também com o cabeçalho em duas linhas ("Saldo | Movimento" em cima e
+ *     "Anterior | Débito | Crédito | Atual" embaixo);
+ *  3. CONTEÚDO (opcoes.inferir): sem cabeçalho conhecido, acha a coluna do código da conta, a do nome e
+ *     as de valores, e escolhe as quatro de valores em que SALDO ANTERIOR + DÉBITOS − CRÉDITOS = SALDO
+ *     ATUAL na maior parte das contas (é essa conta que diz que é um balancete).
+ * Valores: número, "1.234,56", "(1.234,56)", "1.234,56-", "-1.234,56", "1.234,56 D"/"C" ou uma coluna D/C
+ * ao lado do saldo. Saldo sem sinal nenhum: o lado de cada conta sai da própria conta (anterior + débitos
+ * − créditos = atual). Código: "1.1.01.001", "1-1-01-001", "1.1.01.001 - CAIXA" (código e nome na mesma
+ * célula) ou sem pontos ("11101001"): a hierarquia sai das contas do próprio balancete (a mãe é o maior
+ * código que é o começo dele) e o código ganha os pontos ("1.1.1.01.001").
  *
  * Saída (VALORES EM CENTAVOS; saldos no sentido débito − crédito: devedor +, credor −):
  * { tipo: 'balancete', empresa, cnpj, periodo: { de, ate }, competencia, variosMeses,
  *   contas: [{ conta, reduzido, titulo, nivel, pai, analitica, saldoAnterior, debitos, creditos, saldoAtual }],
- *   total: { debitos, creditos } | null, confere, avisos, linhasIgnoradas }
+ *   total: { debitos, creditos } | null, confere, avisos, linhasIgnoradas,
+ *   qualidade (fração das contas em que anterior + débitos − créditos = atual), como ('mapa' | 'cabecalho' | 'conteudo'),
+ *   mapa: { aba, colunas } (as colunas usadas, para guardar e usar de novo) }
  */
 (function (raiz, fabrica) {
   if (typeof module === 'object' && module.exports) module.exports = fabrica(require('./util.js'));
@@ -21,49 +33,113 @@
 })(typeof self !== 'undefined' ? self : this, function (Util) {
   'use strict';
 
+  const CAMPOS = ['conta', 'titulo', 'saldoAnterior', 'debitos', 'creditos', 'saldoAtual'];
+  const OPCIONAIS = ['reduzido', 'dcAnterior', 'dcAtual'];
+  const OBRIGATORIOS_MAPA = ['conta', 'saldoAnterior', 'debitos', 'creditos', 'saldoAtual'];
+  const vazio = (v) => v === null || v === undefined || String(v).trim() === '';
   function chaveTitulo(v) {
     return Util.semAcento(v === null || v === undefined ? '' : String(v)).toLowerCase().replace(/[^a-z0-9]+/g, '');
   }
 
-  const SINONIMOS = {
-    conta: ['contacontabil', 'conta', 'classificacao', 'codigo', 'codigodaconta', 'contaclassificacao'],
-    reduzido: ['red', 'reduzido', 'reduzida', 'codreduzido', 'contareduzida', 'codigoreduzido'],
-    titulo: ['titulodaconta', 'titulo', 'descricaodaconta', 'descricao', 'nomedaconta', 'nome'],
-    saldoAnterior: ['saldoant', 'saldoanterior', 'saldoinicial'],
-    debitos: ['debitos', 'debito'],
-    creditos: ['creditos', 'credito'],
-    saldoAtual: ['saldoatual', 'saldofinal'],
-  };
-  const RE_CONTA = /^\d+(\.\d+)*$/;
+  // O que um título de coluna pode ser (a chave é o título sem acento, espaço nem pontuação).
+  function campoDoTitulo(k) {
+    if (!k) return null;
+    if (/^(dc|dcs|natureza|nat|sinal|debcred|dc\d)$/.test(k) || /(saldo|anterior|inicial|atual|final|ant)dc$/.test(k)) return 'dc';
+    if (/^(red|reduzido|reduzida|codreduzido|contareduzida|codigoreduzido|codred|reduz|codigored|creduzido)$/.test(k)) return 'reduzido';
+    if (/^(contacontabil|conta|classificacao|classificacaocontabil|classif|codigodaconta|contaclassificacao|codconta|contacodigo|numerodaconta|numeroconta|nconta|mascara|estrutura|codigocontabil|contas)$/.test(k)) return 'conta';
+    if (/^(codigo|cod|codig)$/.test(k)) return 'codigo';
+    if (/^(titulodaconta|titulo|descricaodaconta|descricao|descricaoconta|nomedaconta|nome|nomeconta|denominacao|especificacao|discriminacao|contadescricao|historicodaconta|contanome)$/.test(k)) return 'titulo';
+    if (/^saldoem/.test(k)) return 'saldoEm';
+    if ((/anterior|inicial|abertura/.test(k) || /^(saldoant|sldant|sdoant|sdant|salant|ant|saldoini|sldini)$/.test(k)) && !/debit|credit/.test(k)) return 'saldoAnterior';
+    if (/debit|^debs?$/.test(k)) return 'debitos';
+    if (/credit|^creds?$/.test(k)) return 'creditos';
+    if (/atual|final|encerramento|fim$|^saldos?$|^sld$/.test(k)) return 'saldoAtual';
+    return null;
+  }
 
-  function mapear(linha) {
-    const chaves = (linha || []).map(chaveTitulo);
-    const mapa = {};
-    const usados = new Set();
-    for (const campo of Object.keys(SINONIMOS)) {
-      for (const sin of SINONIMOS[campo]) {
-        const i = chaves.findIndex((c, k) => c === sin && !usados.has(k));
-        if (i >= 0) { mapa[campo] = i; usados.add(i); break; }
-      }
-    }
-    mapa.temHistorico = chaves.indexOf('historico') >= 0;
+  function mapearCabecalho(celulas) {
+    const m = {};
+    const saldoEm = [], dcs = [], codigos = [];
+    const chaves = (celulas || []).map(chaveTitulo);
+    chaves.forEach((k, i) => {
+      const campo = campoDoTitulo(k);
+      if (!campo) return;
+      if (campo === 'dc') dcs.push(i);
+      else if (campo === 'saldoEm') saldoEm.push(i);
+      else if (campo === 'codigo') codigos.push(i);
+      else if (m[campo] === undefined) m[campo] = i;
+    });
+    // "Código" é a conta quando não há outra coluna de conta; havendo (ex.: "Classificação"), é o reduzido.
+    codigos.forEach((i) => { if (m.conta === undefined) m.conta = i; else if (m.reduzido === undefined) m.reduzido = i; });
+    // "Saldo em 31/12/2025" e "Saldo em 31/01/2026": o primeiro é o anterior, o último o atual.
+    if (saldoEm.length >= 2) {
+      if (m.saldoAnterior === undefined) m.saldoAnterior = saldoEm[0];
+      if (m.saldoAtual === undefined) m.saldoAtual = saldoEm[saldoEm.length - 1];
+    } else if (saldoEm.length === 1 && m.saldoAtual === undefined) m.saldoAtual = saldoEm[0];
+    // Coluna D/C logo depois de um saldo: é o lado dele.
+    dcs.forEach((i) => {
+      if (m.saldoAnterior !== undefined && i === m.saldoAnterior + 1) m.dcAnterior = i;
+      else if (m.saldoAtual !== undefined && i === m.saldoAtual + 1) m.dcAtual = i;
+    });
+    m.temHistorico = chaves.indexOf('historico') >= 0;
     // Coluna de mês/competência = base com vários meses (ex.: a "Base_Normalizada" da planilha de
     // apresentação), não o balancete de um mês.
-    mapa.temMes = chaves.some((c) => /^(mes|competencia|periodo|mesano|anomes)$/.test(c));
-    return mapa;
+    m.temMes = chaves.some((c) => /^(mes|competencia|periodo|mesano|anomes)$/.test(c));
+    return m;
+  }
+  const completo = (m) => CAMPOS.every((k) => m[k] !== undefined);
+
+  // Duas linhas de cabeçalho numa só ("Saldo" + "Anterior"); preencher = o título de cima vale para as
+  // colunas vazias à direita dele (célula mesclada).
+  function juntar(a, b, preencher) {
+    const n = Math.max((a || []).length, (b || []).length);
+    const out = [];
+    let ultimo = '';
+    for (let i = 0; i < n; i++) {
+      let cima = a && !vazio(a[i]) ? String(a[i]) : '';
+      if (preencher) { if (cima) ultimo = cima; else if (b && !vazio(b[i])) cima = ultimo; }
+      const baixo = b && !vazio(b[i]) ? String(b[i]) : '';
+      out.push((cima + ' ' + baixo).trim());
+    }
+    return out;
+  }
+
+  // Código da conta numa célula: "1.1.01.001", "1-1-01-001", "11101001", "1.1.01.001 - CAIXA".
+  function lerCodigo(v) {
+    if (v === null || v === undefined) return null;
+    if (typeof v === 'number') return Number.isInteger(v) && v >= 0 && v < 1e15 ? { codigo: String(v), resto: '' } : null;
+    const s = String(v).replace(/\s+/g, ' ').trim();
+    const m = s.match(/^(\d+(?:[.-]\d+)*)(?:\s*[-–—:]\s*|\s+)(\S.*)$/) || s.match(/^(\d+(?:[.-]\d+)*)\.?$/);
+    if (!m) return null;
+    return { codigo: m[1].replace(/-/g, '.'), resto: (m[2] || '').trim() };
+  }
+  // Valor em centavos e o lado escrito na própria célula ("1.234,56 D" / "C"). null = não é número.
+  function lerValor(v) {
+    if (vazio(v)) return { centavos: 0, vazio: true, lado: null };
+    const n = Util.paraNumero(v);
+    if (n === null) return null;
+    const s = typeof v === 'number' ? '' : String(v).trim().toUpperCase();
+    return { centavos: Util.centavos(n), lado: /D$/.test(s) ? 1 : /C$/.test(s) ? -1 : null };
+  }
+  function ladoCelula(v) {
+    const s = vazio(v) ? '' : String(v).trim().toUpperCase();
+    return s === 'D' ? 1 : s === 'C' ? -1 : null;
   }
 
   function acharCabecalho(abas) {
     for (let a = 0; a < abas.length; a++) {
-      const linhas = abas[a].linhas;
-      for (let r = 0; r < Math.min(20, linhas.length); r++) {
-        const m = mapear(linhas[r]);
-        if (m.temHistorico || m.temMes) continue;
-        if (!['conta', 'titulo', 'saldoAnterior', 'debitos', 'creditos', 'saldoAtual'].every((k) => m[k] !== undefined)) continue;
-        // Conta repetida em muitas linhas também é tabela de vários meses (ou relatório de outro tipo).
-        const codigos = linhas.slice(r + 1).map((l) => (l && l[m.conta] !== null && l[m.conta] !== undefined ? String(l[m.conta]).replace(/\s+/g, '') : '')).filter((c) => RE_CONTA.test(c));
-        if (codigos.length && new Set(codigos).size < codigos.length * 0.9) continue;
-        return { aba: a, linha: r, mapa: m };
+      const linhas = abas[a].linhas || [];
+      for (let r = 0; r < Math.min(30, linhas.length); r++) {
+        const tentativas = [{ celulas: linhas[r], altura: 1 }];
+        if (linhas[r + 1]) tentativas.push({ celulas: juntar(linhas[r], linhas[r + 1], false), altura: 2 }, { celulas: juntar(linhas[r], linhas[r + 1], true), altura: 2 });
+        for (const t of tentativas) {
+          const m = mapearCabecalho(t.celulas);
+          if (m.temHistorico || m.temMes || !completo(m)) continue;
+          // Conta repetida em muitas linhas também é tabela de vários meses (ou relatório de outro tipo).
+          const codigos = linhas.slice(r + t.altura).map((l) => { const c = l && lerCodigo(l[m.conta]); return c ? c.codigo : ''; }).filter(Boolean);
+          if (codigos.length && new Set(codigos).size < codigos.length * 0.9) continue;
+          return { aba: a, linha: r, altura: t.altura, mapa: m };
+        }
       }
     }
     return null;
@@ -75,12 +151,117 @@
       motivo: 'Este arquivo é um BALANCETE: conta por conta, com saldo anterior, débitos, créditos e saldo atual.' } : null;
   }
 
-  function centavosDe(v) {
-    const n = Util.paraNumero(v);
-    return n === null ? 0 : Util.centavos(n);
+  // ------------------------------------------------------------------
+  // Leitura pelo CONTEÚDO: a coluna do código, a do nome e as quatro de valores que fecham a conta.
+  // ------------------------------------------------------------------
+  // Fração das linhas com movimento em que anterior + débitos − créditos = atual (saldo sem sinal: vale o
+  // lado que fechar).
+  function fechamento(A, D, C, F, dcA, dcF) {
+    const assinado = !!(dcA || dcF) || A.some((x) => x.centavos < 0 || x.lado) || F.some((x) => x.centavos < 0 || x.lado);
+    let comMov = 0, fecham = 0;
+    for (let k = 0; k < A.length; k++) {
+      const d = Math.abs(D[k].centavos), c = Math.abs(C[k].centavos);
+      if (!d && !c) continue;
+      comMov++;
+      let a = A[k].centavos, f = F[k].centavos;
+      if (dcA && dcA[k]) a = Math.abs(a) * dcA[k];
+      if (dcF && dcF[k]) f = Math.abs(f) * dcF[k];
+      if (assinado) { if (Math.abs(a + d - c - f) <= 1) fecham++; } else if ([[1, 1], [-1, -1], [1, -1], [-1, 1]].some(([sa, sf]) => Math.abs(sa * a + d - c - sf * f) <= 1)) fecham++;
+    }
+    return comMov >= 3 ? fecham / comMov : 0;
+  }
+  function inferir(abas) {
+    let melhor = null;
+    abas.forEach((aba, ia) => {
+      const linhas = aba.linhas || [];
+      const uteis = [];
+      linhas.forEach((l, r) => { if (l && l.filter((c) => !vazio(c)).length >= 3) uteis.push(r); });
+      if (uteis.length < 5) return;
+      const nCols = Math.min(60, uteis.reduce((m, r) => Math.max(m, linhas[r].length), 0));
+      // 1) O código da conta: a coluna com mais códigos diferentes, de preferência em árvore (um é o começo do outro).
+      let colConta = -1, notaConta = 0;
+      for (let i = 0; i < nCols; i++) {
+        const cods = [];
+        uteis.forEach((r) => { const c = lerCodigo(linhas[r][i]); if (c) cods.push(c.codigo); });
+        if (cods.length < 5 || cods.length < uteis.length * 0.4) continue;
+        const conj = new Set(cods);
+        if (conj.size < cods.length * 0.9) continue;
+        const comMae = cods.filter((c) => { const p = c.lastIndexOf('.'); if (p > 0 && conj.has(c.slice(0, p))) return true; for (let n = c.length - 1; n >= 1; n--) if (conj.has(c.slice(0, n))) return true; return false; }).length;
+        const comPonto = cods.filter((c) => c.indexOf('.') >= 0).length;
+        const nota = cods.length * (1 + comMae / cods.length + (comPonto > cods.length / 2 ? 0.5 : 0));
+        if (nota > notaConta) { notaConta = nota; colConta = i; }
+      }
+      if (colConta < 0) return;
+      const comConta = uteis.filter((r) => lerCodigo(linhas[r][colConta]));
+      // 2) O nome: a coluna com mais texto com letras (pode não haver: nome junto do código).
+      let colTitulo, notaTitulo = 0;
+      for (let i = 0; i < nCols; i++) {
+        if (i === colConta) continue;
+        const n = comConta.filter((r) => { const v = linhas[r][i]; return typeof v === 'string' && /[a-z]{2}/i.test(v) && Util.paraNumero(v) === null; }).length;
+        if (n > notaTitulo) { notaTitulo = n; colTitulo = i; }
+      }
+      if (notaTitulo < comConta.length * 0.5) colTitulo = undefined;
+      // 3) As colunas de valor e as de D/C — só à direita do código, como em todo balancete. Sem essa regra
+      // a conta também fecha lida de trás para frente (atual + créditos − débitos = anterior) quando as
+      // colunas estão fora de ordem, e a leitura sairia errada sem ninguém ver.
+      const nums = [], dcs = [];
+      for (let i = colConta + 1; i < nCols; i++) {
+        if (i === colTitulo) continue;
+        let cheias = 0, numeros = 0, marcas = 0, inteiros = 0;
+        const distintos = new Set();
+        comConta.forEach((r) => {
+          const v = linhas[r][i];
+          if (vazio(v)) return;
+          cheias++;
+          if (ladoCelula(v)) { marcas++; return; }
+          const n = Util.paraNumero(v);
+          if (n !== null) { numeros++; distintos.add(n); if (Number.isInteger(n)) inteiros++; }
+        });
+        if (marcas && marcas >= cheias * 0.8) { dcs.push(i); continue; }
+        if (numeros < comConta.length * 0.3 || numeros < cheias * 0.7) continue;
+        if (inteiros === numeros && numeros >= 10 && distintos.size >= numeros * 0.95) continue; // código reduzido, não valor
+        nums.push(i);
+      }
+      if (nums.length < 4) return;
+      // 4) As quatro que fecham a conta (débito e crédito nas duas ordens).
+      const valores = new Map(nums.map((i) => [i, comConta.map((r) => lerValor(linhas[r][i]) || { centavos: 0 })]));
+      const dcDe = (i) => (dcs.indexOf(i + 1) >= 0 ? comConta.map((r) => ladoCelula(linhas[r][i + 1])) : null);
+      let aqui = null;
+      for (let a = 0; a < nums.length; a++) {
+        for (let b = a + 1; b < nums.length; b++) {
+          for (let c = b + 1; c < nums.length; c++) {
+            for (let d = c + 1; d < nums.length; d++) {
+              [[nums[b], nums[c]], [nums[c], nums[b]]].forEach(([deb, cred]) => {
+                const q = fechamento(valores.get(nums[a]), valores.get(deb), valores.get(cred), valores.get(nums[d]), dcDe(nums[a]), dcDe(nums[d]));
+                const largura = nums[d] - nums[a];
+                if (!aqui || q > aqui.q + 1e-9 || (Math.abs(q - aqui.q) <= 1e-9 && largura < aqui.largura)) {
+                  aqui = { q, largura, colunas: { saldoAnterior: nums[a], debitos: deb, creditos: cred, saldoAtual: nums[d] } };
+                }
+              });
+            }
+          }
+        }
+      }
+      if (!aqui || aqui.q < 0.6) return;
+      const colunas = Object.assign({ conta: colConta }, colTitulo !== undefined ? { titulo: colTitulo } : {}, aqui.colunas);
+      if (dcs.indexOf(colunas.saldoAnterior + 1) >= 0) colunas.dcAnterior = colunas.saldoAnterior + 1;
+      if (dcs.indexOf(colunas.saldoAtual + 1) >= 0) colunas.dcAtual = colunas.saldoAtual + 1;
+      const nota = aqui.q * comConta.length;
+      if (!melhor || nota > melhor.nota) melhor = { nota, escolha: { aba: ia, colunas, inicio: 0, como: 'conteudo' } };
+    });
+    return melhor ? melhor.escolha : null;
   }
 
-  // Empresa, CNPJ e período escritos acima do cabeçalho.
+  function doMapa(abas, mapa) {
+    if (!mapa || !mapa.colunas) return null;
+    const c = mapa.colunas;
+    if (!OBRIGATORIOS_MAPA.every((k) => Number.isInteger(c[k]) && c[k] >= 0)) return null;
+    const colunas = {};
+    CAMPOS.concat(OPCIONAIS).forEach((k) => { if (Number.isInteger(c[k]) && c[k] >= 0) colunas[k] = c[k]; });
+    return { aba: Number.isInteger(mapa.aba) && abas[mapa.aba] ? mapa.aba : 0, colunas, inicio: 0, como: 'mapa' };
+  }
+
+  // Empresa, CNPJ e período escritos acima das contas.
   function topo(linhas, ate) {
     const r = { empresa: '', cnpj: '', periodo: null };
     for (let i = 0; i < ate; i++) {
@@ -89,44 +270,100 @@
         const t = String(c).replace(/\s+/g, ' ').trim();
         if (!t) continue;
         const s = Util.semAcento(t);
-        const per = s.match(/periodo\s*:?\s*(\d{1,2}\/\d{1,2}\/\d{2,4})\s*(?:a|ate|-)\s*(\d{1,2}\/\d{1,2}\/\d{2,4})/i);
+        const per = s.match(/periodo\s*:?\s*(?:de\s*)?(\d{1,2}\/\d{1,2}\/\d{2,4})\s*(?:a|ate|-)\s*(\d{1,2}\/\d{1,2}\/\d{2,4})/i) ||
+          s.match(/(\d{1,2}\/\d{1,2}\/\d{4})\s*(?:a|ate|-)\s*(\d{1,2}\/\d{1,2}\/\d{4})/i);
         if (per) { const de = Util.lerData(per[1]), ateD = Util.lerData(per[2]); if (de && ateD) r.periodo = { de: de.texto, ate: ateD.texto }; continue; }
         const cnpj = s.match(/cnpj\s*:?\s*([\d./-]{14,18})/i);
         if (cnpj) { r.cnpj = Util.soDigitos(cnpj[1]); continue; }
-        if (!r.empresa && !/emissao|pagina|folha|balancete/i.test(s) && /[a-z]/i.test(s)) r.empresa = t;
+        if (!r.empresa && !/emissao|pagina|folha|balancete|periodo|data/i.test(s) && /[a-z]/i.test(s)) r.empresa = t;
       }
     }
     return r;
   }
 
-  function ler(abas, opcoes) {
-    const rec = reconhecer(abas);
-    if (!rec) throw new Error('Não achei o cabeçalho de um balancete (Conta, Título, Saldo anterior, Débitos, Créditos, Saldo atual).');
-    const { aba, linha: rCab, mapa } = rec.cabecalho;
-    const linhas = abas[aba].linhas;
-    const info = topo(linhas, rCab);
-    const texto = (l, i) => (i === undefined || l[i] === null || l[i] === undefined ? '' : String(l[i]).replace(/\s+/g, ' ').trim());
+  // Códigos sem pontos ("11101001"): a mãe é o maior código do balancete que é o começo dele.
+  function pontuar(contas) {
+    if (contas.filter((c) => c.conta.indexOf('.') < 0).length < contas.length * 0.8) return false;
+    const conj = new Set(contas.map((c) => c.conta));
+    const novo = new Map();
+    contas.map((c) => c.conta).sort((a, b) => a.length - b.length || a.localeCompare(b)).forEach((c) => {
+      let mae = null;
+      for (let n = c.length - 1; n >= 1; n--) { const p = c.slice(0, n); if (conj.has(p)) { mae = p; break; } }
+      novo.set(c, mae ? novo.get(mae) + '.' + c.slice(mae.length) : c);
+    });
+    const mudou = contas.some((c) => novo.get(c.conta) !== c.conta);
+    contas.forEach((c) => { c.conta = novo.get(c.conta); });
+    return mudou;
+  }
+
+  // Saldo sem sinal nem D/C: o lado de cada saldo é o que fecha a conta (anterior + débitos − créditos =
+  // atual); sem como decidir (sem movimento), fica o lado da conta-mãe, senão o da maioria do grupo.
+  function acertarSinais(contas) {
+    const decididas = new Map();
+    const indecisas = [];
+    contas.forEach((c) => {
+      const a = c.saldoAnterior, f = c.saldoAtual, mov = c.debitos - c.creditos;
+      const pares = [];
+      [[1, 1], [-1, -1], [1, -1], [-1, 1]].forEach(([sa, sf]) => {
+        if (Math.abs(sa * a + mov - sf * f) > 1) return;
+        const par = [sa * a, sf * f];
+        if (!pares.some((p) => p[0] === par[0] && p[1] === par[1])) pares.push(par);
+      });
+      if (pares.length === 1) { c.saldoAnterior = pares[0][0]; c.saldoAtual = pares[0][1]; decididas.set(c.conta, Math.sign(pares[0][1] || pares[0][0]) || 1); } else indecisas.push(c);
+    });
+    const grupo = {};
+    decididas.forEach((s, conta) => { const g = conta.split('.')[0]; grupo[g] = (grupo[g] || 0) + s; });
+    indecisas.forEach((c) => {
+      let lado = null;
+      for (let p = c.conta; p.indexOf('.') > 0 && lado === null;) { p = p.slice(0, p.lastIndexOf('.')); if (decididas.has(p)) lado = decididas.get(p); }
+      if (lado === null) lado = (grupo[c.conta.split('.')[0]] || 1) >= 0 ? 1 : -1;
+      c.saldoAnterior *= lado;
+      c.saldoAtual *= lado;
+    });
+  }
+
+  function montar(abas, escolha, opcoes) {
+    const linhas = (abas[escolha.aba] || {}).linhas || [];
+    const col = escolha.colunas;
+    const texto = (l, i) => (i === undefined || i === null || l[i] === null || l[i] === undefined ? '' : String(l[i]).replace(/\s+/g, ' ').trim());
     const contas = [];
     const vistas = new Set();
-    let total = null, linhasIgnoradas = 0, repetidas = 0;
-    for (let r = rCab + 1; r < linhas.length; r++) {
+    let total = null, linhasIgnoradas = 0, repetidas = 0, comLado = 0, negativos = 0, primeiraConta = -1;
+    for (let r = escolha.inicio || 0; r < linhas.length; r++) {
       const l = linhas[r];
-      if (!l || !l.some((c) => c !== null && String(c).trim() !== '')) continue;
-      const codigo = texto(l, mapa.conta).replace(/\s+/g, '');
-      if (/^total/i.test(Util.semAcento(codigo)) || (!codigo && /^total/i.test(Util.semAcento(texto(l, mapa.titulo))))) {
-        total = { debitos: centavosDe(l[mapa.debitos]), creditos: centavosDe(l[mapa.creditos]) };
+      if (!l || !l.some((c) => !vazio(c))) continue;
+      const cod = lerCodigo(l[col.conta]);
+      const tit = texto(l, col.titulo);
+      if (/^total/i.test(Util.semAcento(texto(l, col.conta))) || (!cod && /^total/i.test(Util.semAcento(tit)))) {
+        const d = lerValor(l[col.debitos]), c = lerValor(l[col.creditos]);
+        if (d && c) total = { debitos: Math.abs(d.centavos), creditos: Math.abs(c.centavos) };
         continue;
       }
-      if (!RE_CONTA.test(codigo)) { linhasIgnoradas++; continue; }
-      if (vistas.has(codigo)) { repetidas++; continue; } // cabeçalho de página repetido ou conta em dobro
-      vistas.add(codigo);
-      const partes = codigo.split('.');
-      contas.push({
-        conta: codigo, reduzido: texto(l, mapa.reduzido), titulo: texto(l, mapa.titulo),
-        nivel: partes.length, pai: partes.length > 1 ? partes.slice(0, -1).join('.') : '', analitica: true,
-        saldoAnterior: centavosDe(l[mapa.saldoAnterior]), debitos: centavosDe(l[mapa.debitos]),
-        creditos: centavosDe(l[mapa.creditos]), saldoAtual: centavosDe(l[mapa.saldoAtual]),
-      });
+      if (!cod) { linhasIgnoradas++; continue; }
+      const va = lerValor(l[col.saldoAnterior]), vd = lerValor(l[col.debitos]), vc = lerValor(l[col.creditos]), vf = lerValor(l[col.saldoAtual]);
+      if (!va || !vd || !vc || !vf) { linhasIgnoradas++; continue; } // valor que não é número: não é linha de conta
+      if (escolha.como === 'conteudo' && va.vazio && vd.vazio && vc.vazio && vf.vazio) { linhasIgnoradas++; continue; }
+      if (vistas.has(cod.codigo)) { repetidas++; continue; } // cabeçalho de página repetido ou conta em dobro
+      vistas.add(cod.codigo);
+      if (primeiraConta < 0) primeiraConta = r;
+      let sa = va.centavos, sf = vf.centavos;
+      const la = ladoCelula(col.dcAnterior === undefined ? null : l[col.dcAnterior]), lf = ladoCelula(col.dcAtual === undefined ? null : l[col.dcAtual]);
+      if (la) sa = Math.abs(sa) * la;
+      if (lf) sf = Math.abs(sf) * lf;
+      if (la || lf || va.lado || vf.lado) comLado++;
+      if (sa < 0 || sf < 0) negativos++;
+      contas.push({ conta: cod.codigo, reduzido: texto(l, col.reduzido), titulo: tit || cod.resto, nivel: 1, pai: '', analitica: true,
+        saldoAnterior: sa, debitos: Math.abs(vd.centavos), creditos: Math.abs(vc.centavos), saldoAtual: sf });
+    }
+    const avisos = [];
+    // Código sem pontos: a hierarquia sai das próprias contas.
+    if (pontuar(contas)) avisos.push('Os códigos das contas vieram sem pontos: a hierarquia saiu das próprias contas do balancete (a conta-mãe é o maior código que é o começo da filha).');
+    contas.forEach((c) => { const partes = c.conta.split('.'); c.nivel = partes.length; c.pai = partes.length > 1 ? partes.slice(0, -1).join('.') : ''; });
+    // Saldo sem sinal nenhum (nem D/C): o lado sai da própria conta.
+    const semSinal = !comLado && !negativos && contas.some((c) => c.saldoAnterior || c.saldoAtual);
+    if (semSinal) {
+      acertarSinais(contas);
+      avisos.push('Os saldos vieram sem sinal nem D/C: o lado (devedor ou credor) de cada conta saiu da própria conta (saldo anterior + débitos − créditos = saldo atual).');
     }
     // Analítica = conta sem filha no balancete.
     const pais = new Set(contas.map((c) => c.pai).filter(Boolean));
@@ -134,8 +371,7 @@
 
     // Conferências: cada conta (anterior + débitos − créditos = atual), as de 1º nível com o Total Geral,
     // o balancete fechado (soma dos saldos de 1º nível = zero) e cada conta-mãe = soma das filhas.
-    const avisos = [];
-    const erradas = contas.filter((c) => c.saldoAnterior + c.debitos - c.creditos !== c.saldoAtual);
+    const erradas = contas.filter((c) => Math.abs(c.saldoAnterior + c.debitos - c.creditos - c.saldoAtual) > 1);
     if (erradas.length) avisos.push(erradas.length + ' conta(s) em que saldo anterior + débitos − créditos não dá o saldo atual (ex.: ' + erradas[0].conta + ').');
     const primeiras = contas.filter((c) => c.nivel === 1);
     const soma = (xs, k) => xs.reduce((s, x) => s + x[k], 0);
@@ -155,7 +391,10 @@
     if (maesErradas.length) avisos.push(maesErradas.length + ' conta(s) sintética(s) com saldo diferente da soma das filhas (ex.: ' + maesErradas[0].conta + ').');
     if (repetidas) avisos.push(repetidas + ' linha(s) de conta repetida ignorada(s).');
     if (!contas.length) { confere = false; avisos.push('Não achei nenhuma conta neste balancete.'); }
+    const qualidade = contas.length ? (contas.length - erradas.length) / contas.length : 0;
+    if (escolha.como === 'conteudo') avisos.push('As colunas foram achadas pelo conteúdo (o cabeçalho do arquivo não tem os nomes conhecidos).');
 
+    const info = topo(linhas, escolha.linhaCabecalho !== undefined ? escolha.linhaCabecalho : Math.max(0, primeiraConta));
     let periodo = info.periodo;
     if (!periodo && opcoes && opcoes.nomeArquivo) {
       // Sem período no conteúdo: tenta o mês pelo nome ("Balancete_07_2026", "jan_26").
@@ -165,10 +404,33 @@
     const de = periodo && Util.lerData(periodo.de), ate = periodo && Util.lerData(periodo.ate);
     const variosMeses = !!(de && ate && (de.mes !== ate.mes || de.ano !== ate.ano));
     if (variosMeses) avisos.push('O período do balancete vai de ' + periodo.de + ' a ' + periodo.ate + ': o relatório espera um balancete por mês (débitos e créditos do mês).');
+    const usadas = {};
+    CAMPOS.concat(OPCIONAIS).forEach((k) => { if (Number.isInteger(col[k])) usadas[k] = col[k]; });
     return {
       tipo: 'balancete', empresa: info.empresa, cnpj: info.cnpj, periodo, competencia: ate ? Util.competenciaDe(ate) : null, variosMeses,
-      contas, total, confere, avisos, linhasIgnoradas,
+      contas, total, confere, avisos, linhasIgnoradas, qualidade, como: escolha.como, mapa: { aba: escolha.aba, colunas: usadas },
     };
+  }
+
+  // Lê o balancete: com o mapa indicado (só ele); senão pelo cabeçalho; e, com opcoes.inferir, pelo
+  // conteúdo quando o cabeçalho não fecha a conta. Fica a leitura com mais contas que fecham.
+  function ler(abas, opcoes) {
+    const op = opcoes || {};
+    if (op.mapa) {
+      const e = doMapa(abas, op.mapa);
+      if (!e) throw new Error('As colunas indicadas não servem para este arquivo (faltam conta, saldo anterior, débitos, créditos ou saldo atual).');
+      return montar(abas, e, op);
+    }
+    const leituras = [];
+    const cab = acharCabecalho(abas);
+    if (cab) leituras.push(montar(abas, { aba: cab.aba, inicio: cab.linha + cab.altura, linhaCabecalho: cab.linha, colunas: cab.mapa, como: 'cabecalho' }, op));
+    if (op.inferir && !leituras.some((x) => x.qualidade >= 0.9 && x.contas.length >= 3)) {
+      const inf = inferir(abas);
+      if (inf) leituras.push(montar(abas, inf, op));
+    }
+    if (!leituras.length) throw new Error('Não achei o cabeçalho de um balancete (Conta, Título, Saldo anterior, Débitos, Créditos, Saldo atual).');
+    leituras.sort((a, b) => b.qualidade * b.contas.length - a.qualidade * a.contas.length);
+    return leituras[0];
   }
 
   const MESES_CURTOS = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
@@ -182,5 +444,13 @@
     return null;
   }
 
-  return { reconhecer, ler, competenciaPeloNome, SINONIMOS };
+  // Nomes de coluna conhecidos (para quem quiser mostrar; a leitura usa campoDoTitulo).
+  const SINONIMOS = {
+    conta: ['Conta', 'Conta Contábil', 'Classificação', 'Código'], reduzido: ['Red.', 'Reduzido', 'Código (com Classificação ao lado)'],
+    titulo: ['Título', 'Descrição', 'Nome da conta'], saldoAnterior: ['Saldo anterior', 'Saldo inicial', 'Saldo ant.', 'Saldo em (1ª data)'],
+    debitos: ['Débito', 'Débitos', 'Movimento débito'], creditos: ['Crédito', 'Créditos', 'Movimento crédito'],
+    saldoAtual: ['Saldo atual', 'Saldo final', 'Saldo', 'Saldo em (2ª data)'], dc: ['D/C', 'Natureza (ao lado do saldo)'],
+  };
+
+  return { reconhecer, ler, inferir, lerCodigo, lerValor, campoDoTitulo, competenciaPeloNome, SINONIMOS, CAMPOS };
 });

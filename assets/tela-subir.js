@@ -88,6 +88,110 @@
   }
 
   // A versão que o lugar usa agora (a da mesma conta, no lugar de várias contas).
+  // ------------------------------------------------------------------
+  // Balancete de desenho novo: as colunas (Dony, 18/09/2026: "cada empresa tem um tipo de balancete; quero
+  // indicar a conta, o débito, o crédito, o saldo inicial e o final no primeiro, para não ter que pedir
+  // para mapear toda hora"). A leitura boa = pelo menos 3 contas e 90% delas fechando (anterior + débitos −
+  // créditos = atual).
+  // ------------------------------------------------------------------
+  const balanceteBom = (b) => !!b && !!b.contas && b.contas.length >= 3 && b.qualidade >= 0.9;
+  async function balanceteDoArquivo(r, arquivo, codigo) {
+    let abas;
+    try { abas = raiz.LerPlanilha.abrir(r.bytes).abas; } catch (e) { return null; }
+    const L = raiz.LerBalancete;
+    const tentar = (op) => { try { return L.ler(abas, Object.assign({ nomeArquivo: arquivo.name }, op)); } catch (e) { return null; } };
+    const emp = app().empresas.find((e) => String(e.codigo) === String(codigo)) || {};
+    // 1) As colunas que a empresa já tem guardadas (mesmo desenho dos meses anteriores): entra direto.
+    if (emp.mapaBalancete) { const x = tentar({ mapa: emp.mapaBalancete }); if (balanceteBom(x)) return x; }
+    // 2) Pelo conteúdo: quem usa confere as colunas na primeira vez; 3) senão, indica.
+    const pelo = tentar({ inferir: true });
+    const sugestao = pelo && pelo.contas.length ? pelo.mapa : emp.mapaBalancete || null;
+    const mapa = await escolherColunasDoBalancete(abas, arquivo.name, sugestao, balanceteBom(pelo));
+    if (!mapa) return false;
+    const b = tentar({ mapa });
+    if (!b || !b.contas.length) { T.avisoRapido('Com essas colunas não achei nenhuma conta.', 'erro', 5000); return false; }
+    await guardarMapaDoBalancete(codigo, mapa);
+    return b;
+  }
+  async function guardarMapaDoBalancete(codigo, mapa) {
+    try {
+      const arm = app().armazenamento;
+      const cad = (await arm.empresas()).find((e) => String(e.codigo) === String(codigo)); // relido: outra pessoa pode ter mexido
+      if (!cad) return;
+      const salvo = await arm.salvarEmpresa(Object.assign({}, cad, { mapaBalancete: mapa }));
+      const ix = app().empresas.findIndex((e) => String(e.codigo) === String(codigo));
+      if (ix >= 0) app().empresas[ix] = salvo;
+    } catch (e) { /* guardar as colunas ajuda na próxima vez; não impede esta leitura */ }
+  }
+  // A janela das colunas: o começo do arquivo, uma lista para cada coisa e, na hora, quantas contas fecham.
+  function escolherColunasDoBalancete(abas, nomeArquivo, sugestao, achouSozinho) {
+    const L = raiz.LerBalancete;
+    const CAMPOS = [['conta', 'Conta (código ou classificação)', true], ['titulo', 'Nome da conta', false], ['saldoAnterior', 'Saldo anterior (inicial)', true],
+      ['dcAnterior', 'D/C do saldo anterior', false], ['debitos', 'Débitos', true], ['creditos', 'Créditos', true], ['saldoAtual', 'Saldo atual (final)', true], ['dcAtual', 'D/C do saldo atual', false]];
+    const letra = (i) => { let s = '', k = i + 1; while (k > 0) { const r = (k - 1) % 26; s = String.fromCharCode(65 + r) + s; k = Math.floor((k - 1) / 26); } return s; };
+    const estado = { aba: sugestao && abas[sugestao.aba] ? sugestao.aba : 0, colunas: Object.assign({}, (sugestao && sugestao.colunas) || {}) };
+    const cheia = (v) => v !== null && v !== undefined && String(v).trim() !== '';
+    const linhasPrevia = () => ((abas[estado.aba] || {}).linhas || []).filter((l) => l && l.filter(cheia).length >= 2).slice(0, 14);
+    const nCols = () => Math.min(40, linhasPrevia().reduce((m, l) => Math.max(m, l.length), 0));
+    const amostra = (i) => { const v = linhasPrevia().map((l) => l[i]).find(cheia); return v === undefined ? '' : String(v).replace(/\s+/g, ' ').trim().slice(0, 18); };
+    const previa = () => {
+      const n = nCols(), usadas = new Map(Object.keys(estado.colunas).map((k) => [estado.colunas[k], k]));
+      const rotulo = Object.fromEntries(CAMPOS.map(([k, t]) => [k, t.split(' (')[0]]));
+      return '<table class="bal-previa"><thead><tr><th></th>' + Array.from({ length: n }, (v, i) => '<th class="' + (usadas.has(i) ? 'usada' : '') + '">' + letra(i) +
+        (usadas.has(i) ? '<small>' + T.esc(rotulo[usadas.get(i)]) + '</small>' : '') + '</th>').join('') + '</tr></thead><tbody>' +
+        linhasPrevia().map((l, r) => '<tr><td class="num-linha">' + (r + 1) + '</td>' + Array.from({ length: n }, (v, i) => '<td class="' + (usadas.has(i) ? 'usada' : '') + '">' +
+          T.esc(cheia(l[i]) ? String(l[i]).replace(/\s+/g, ' ').trim().slice(0, 28) : '') + '</td>').join('') + '</tr>').join('') + '</tbody></table>';
+    };
+    const listas = () => CAMPOS.map(([k, t, obrig]) => '<label class="bal-campo"><span>' + T.esc(t) + (obrig ? ' *' : '') + '</span><select class="apres-campo" data-campo="' + k + '">' +
+      '<option value="">' + (obrig ? '(escolha)' : '— não tem —') + '</option>' + Array.from({ length: nCols() }, (v, i) => '<option value="' + i + '"' + (estado.colunas[k] === i ? ' selected' : '') + '>' +
+      letra(i) + (amostra(i) ? ' · ' + T.esc(amostra(i)) : '') + '</option>').join('') + '</select></label>').join('');
+    // Na hora: quantas contas, quantas fecham e um exemplo.
+    const resultado = () => {
+      const faltam = CAMPOS.filter(([k, , obrig]) => obrig && !Number.isInteger(estado.colunas[k])).map(([, t]) => t.split(' (')[0].toLowerCase());
+      if (faltam.length) return { ok: false, html: 'Falta escolher: ' + T.esc(faltam.join(', ')) + '.' };
+      let b = null;
+      try { b = L.ler(abas, { mapa: { aba: estado.aba, colunas: estado.colunas }, nomeArquivo }); } catch (e) { return { ok: false, html: T.esc(e.message) }; }
+      if (!b.contas.length) return { ok: false, html: 'Com essas colunas não achei nenhuma conta: confira a coluna da conta.' };
+      const ex = b.contas.find((c) => c.analitica && (c.debitos || c.creditos)) || b.contas[0];
+      const r2 = (c) => U.formatarCentavos(c);
+      const pc = Math.round(b.qualidade * 1000) / 10;
+      return { ok: true, qualidade: b.qualidade, html: '<b>' + b.contas.length + ' contas</b> · <b class="' + (b.qualidade >= 0.9 ? 'ok' : 'rel-aviso') + '">' + String(pc).replace('.', ',') + '% fecham</b> ' +
+        '(saldo anterior + débitos − créditos = saldo atual)<br><span class="suave">Exemplo: ' + T.esc(ex.conta + ' ' + (ex.titulo || '')) + ': ' + r2(ex.saldoAnterior) + ' + ' + r2(ex.debitos) + ' − ' + r2(ex.creditos) + ' = ' + r2(ex.saldoAtual) + '</span>' };
+    };
+    const corpo = '<p style="margin:0 0 8px;line-height:1.5">' + (achouSozinho
+      ? 'Li <b>' + T.esc(nomeArquivo) + '</b> pelo conteúdo. <b>Confira se as colunas estão certas</b> (é só da primeira vez: a empresa guarda e os próximos balancetes deste desenho entram sozinhos).'
+      : 'Não entendi sozinho as colunas de <b>' + T.esc(nomeArquivo) + '</b>. <b>Diga qual coluna é cada coisa</b> (só desta vez: a empresa guarda e os próximos balancetes deste desenho entram sozinhos).') + '</p>' +
+      (abas.length > 1 ? '<label class="bal-campo" style="margin-bottom:8px"><span>Aba da planilha</span><select class="apres-campo" id="bal-aba">' + abas.map((a, i) => '<option value="' + i + '"' + (i === estado.aba ? ' selected' : '') + '>' + T.esc(a.nome || 'Aba ' + (i + 1)) + '</option>').join('') + '</select></label>' : '') +
+      '<div class="bal-previa-caixa" id="bal-previa">' + previa() + '</div>' +
+      '<div class="bal-campos" id="bal-campos">' + listas() + '</div>' +
+      '<p class="bal-resultado" id="bal-resultado"></p>' +
+      '<p class="suave pequeno" style="margin:6px 0 0">D/C: só quando o arquivo tem uma coluna com "D" ou "C" ao lado do saldo. Saldo sem sinal nenhum também serve: o lado sai da própria conta.</p>';
+    return T.janela({
+      titulo: 'Quais são as colunas deste balancete?', larga: true, corpo,
+      aoAbrir: (j) => {
+        const atualizar = (tudo) => {
+          if (tudo) { j.querySelector('#bal-campos').innerHTML = listas(); }
+          j.querySelector('#bal-previa').innerHTML = previa();
+          j.querySelector('#bal-resultado').innerHTML = resultado().html;
+        };
+        j.addEventListener('change', (ev) => {
+          if (ev.target.id === 'bal-aba') { estado.aba = Number(ev.target.value); estado.colunas = {}; atualizar(true); return; }
+          const s = ev.target.closest('select[data-campo]');
+          if (!s) return;
+          const k = s.getAttribute('data-campo');
+          if (s.value === '') delete estado.colunas[k]; else estado.colunas[k] = Number(s.value);
+          atualizar(false);
+        });
+        atualizar(false);
+      },
+      botoes: [{ texto: 'Cancelar', valor: null }, { texto: 'Usar estas colunas', tipo: 'primario', antes: (j) => {
+        const r = resultado();
+        if (!r.ok) { j.querySelector('#bal-resultado').innerHTML = '<span class="rel-aviso">' + r.html + '</span>'; return false; }
+        return { aba: estado.aba, colunas: Object.assign({}, estado.colunas) };
+      } }],
+    });
+  }
+
   function emUsoNoLugar(lugar, conta) {
     const lista = lugar.arquivos || [];
     if (lugar.tipo === 'razao' && lugar.varias) return lista.find((m) => m.conta && conta && String(m.conta.codigo) === String(conta.codigo)) || null;
@@ -395,6 +499,14 @@
         resumo = (contas.length === 1 ? 'conta ' + contas[0].codigo : contas.length + ' contas (' + contas.map((c) => c.codigo).join(', ') + ')') +
           ' · ' + noPeriodo + ' lançamento(s) ' + emPeriodo + (rz.periodo ? ' (arquivo de ' + rz.periodo.de + ' a ' + rz.periodo.ate + ')' : '');
       } else if (lugar.tipo === 'balancete') {
+        // Balancete que o leitor geral não entendeu (ou em que a conta não fecha): as colunas guardadas na
+        // empresa; senão pelo conteúdo ou indicadas por quem usa (Dony, 18/09/2026: "vários tipos de
+        // balancete; se não entender, eu indico as colunas no primeiro e ele guarda").
+        if (r.tipo !== 'razao' && !/^financeiro/.test(r.tipo) && !balanceteBom(r.balancete)) {
+          const lido = await balanceteDoArquivo(r, arquivo, codigo);
+          if (lido === false) return false;
+          if (lido) { r.tipo = 'balancete'; r.balancete = lido; r.competencia = lido.competencia; }
+        }
         const b = r.balancete;
         if (r.tipo !== 'balancete' || !b || !b.contas.length) { await naoServe('um balancete', r.tipo !== 'balancete' && r.tipo !== 'desconhecido'); return false; }
         const emp = app().empresas.find((e) => String(e.codigo) === String(codigo)) || {};

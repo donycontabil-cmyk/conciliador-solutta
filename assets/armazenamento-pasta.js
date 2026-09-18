@@ -387,6 +387,17 @@
       return limpo;
     }
 
+    function limparMapaBalancete(valor) {
+      if (!valor || typeof valor !== 'object' || !valor.colunas || typeof valor.colunas !== 'object') return null;
+      const colunas = {};
+      ['conta', 'titulo', 'reduzido', 'saldoAnterior', 'dcAnterior', 'debitos', 'creditos', 'saldoAtual', 'dcAtual'].forEach((k) => {
+        const v = valor.colunas[k];
+        if (Number.isInteger(v) && v >= 0 && v < 200) colunas[k] = v;
+      });
+      if (!['conta', 'saldoAnterior', 'debitos', 'creditos', 'saldoAtual'].every((k) => colunas[k] !== undefined)) return null;
+      return { aba: Number.isInteger(valor.aba) && valor.aba >= 0 && valor.aba < 100 ? valor.aba : 0, colunas };
+    }
+
     async function salvarEmpresa(empresa) {
       exigirConexao();
       const codigo = validarCodigo(empresa && empresa.codigo);
@@ -426,6 +437,10 @@
       // #rrggbb. Mesma regra: sem o campo na chamada, fica o que já estava; vazio tira.
       const logo = empresa.logo !== undefined ? empresa.logo : (anterior && anterior.logo);
       if (typeof logo === 'string' && logo.length <= 560000 && /^data:image\/(png|jpeg|webp|svg\+xml);base64,[A-Za-z0-9+/=]+$/.test(logo)) registro.logo = logo;
+      // Colunas do balancete indicadas por quem usa (Dony, 18/09/2026: "eu indico as colunas no primeiro e
+      // ele guarda"): { aba, colunas: { conta, titulo, saldoAnterior, debitos, creditos, saldoAtual, dcAnterior, dcAtual } }.
+      const mapaBal = limparMapaBalancete(empresa.mapaBalancete !== undefined ? empresa.mapaBalancete : (anterior && anterior.mapaBalancete));
+      if (mapaBal) registro.mapaBalancete = mapaBal;
       const cor = empresa.corRelatorio !== undefined ? empresa.corRelatorio : (anterior && anterior.corRelatorio);
       if (typeof cor === 'string' && /^#[0-9a-fA-F]{6}$/.test(cor)) registro.corRelatorio = cor.toLowerCase();
       if (i >= 0) lista[i] = registro; else lista.push(registro);
