@@ -640,6 +640,25 @@ table.apres.balancete tr.nivel-1 td { background: #e7e6e6; font-weight: 700; }
 table.apres.balancete tr.nivel-2 td, table.apres.balancete tr.nivel-3 td { font-weight: 600; }
 table.apres.balancete tr.sintetica.nivel-4 td { font-weight: 600; color: #34404d; }
 table.apres.simples tr.total td { background: #ddebf7; font-weight: 700; }
+/* Painel dos meses (18/09/2026, no estilo do exemplo do Dony): atalhos, o ano e um botão por mês; mês
+ * escolhido em verde, mês sem balancete apagado. */
+.seletor-meses { background: #10202f; border: 1px solid #1d3a52; border-radius: 10px; padding: 11px 14px 9px; margin: -2px 0 12px; color: #c9d6e2; }
+.sm-topo { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 9px; }
+.sm-rotulo { font-size: 10.5px; letter-spacing: 0.16em; text-transform: uppercase; color: #8fa6bb; font-weight: 700; margin-right: 6px; }
+.sm-rapido { border: 1px solid #2b4a63; background: transparent; color: #c9d6e2; border-radius: 999px; padding: 3px 11px; font-size: 11.5px; font-weight: 600; cursor: pointer; }
+.sm-rapido:hover:not(:disabled) { border-color: #5b8db5; color: #fff; }
+.sm-rapido.ativo { background: #2b4a63; border-color: #5b8db5; color: #fff; }
+.sm-rapido:disabled { opacity: 0.3; cursor: default; }
+.sm-separador { width: 1px; height: 16px; background: #2b4a63; margin: 0 4px; }
+.sm-ano { margin-left: auto; color: #6fb1ff; font-weight: 700; font-size: 12.5px; }
+.sm-grade { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 6px; }
+.sm-mes { border: 1px solid #2b4a63; background: transparent; color: #9fb3c6; border-radius: 7px; padding: 7px 0; font-weight: 700; font-size: 12.5px; cursor: pointer; transition: background 0.12s ease, border-color 0.12s ease; }
+.sm-mes:hover:not(:disabled) { border-color: #4f9d74; color: #e2f7eb; }
+.sm-mes.ativo { background: rgba(56, 170, 110, 0.17); border-color: #3fa66b; color: #bff0cf; }
+.sm-mes:disabled { opacity: 0.28; cursor: default; }
+.sm-mes:focus-visible, .sm-rapido:focus-visible { outline: 2px solid #6fb1ff; outline-offset: 2px; }
+.sm-dica { margin: 8px 0 0; font-size: 11.5px; color: #8fa6bb; }
+@media (max-width: 700px) { .sm-grade { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
 /* Coluna do acumulado (DRE mensal e Resumo): tinta por cima da cor da linha e borda à esquerda. */
 table.apres td.acum { box-shadow: inset 0 0 0 999px rgba(31, 78, 120, 0.07); font-weight: 700; }
 table.apres td.num.acum:not(.pct) { border-left: 2px solid #1f4e78; }

@@ -33,7 +33,7 @@
 
   // Estado da tela (continua entre redesenhos).
   const E = { codigo: null, ano: null, emp: null, rel: null, registro: null, config: {}, lugares: [], metas: [],
-    aba: 'dre-mensal', avah: true, nivel: 5, semZeradas: false, abertos: new Set() };
+    aba: 'dre-mensal', avah: true, nivel: 5, semZeradas: false, abertos: new Set(), selecao: null };
   (function lerPreferencias() {
     try {
       const p = JSON.parse((raiz.localStorage && raiz.localStorage.getItem(CHAVE_PREF)) || '{}') || {};
@@ -98,7 +98,7 @@
     }
     const registro = (await arm.conciliacoes(codigo, anoEscolhido + '-01-01')).find((r) => r.id === idRegistro(codigo, anoEscolhido)) || null;
     if (conferir && !conferir()) return;
-    if (E.codigo !== codigo || E.ano !== anoEscolhido) E.abertos = new Set();
+    if (E.codigo !== codigo || E.ano !== anoEscolhido) { E.abertos = new Set(); E.selecao = null; }
     Object.assign(E, { codigo, ano: anoEscolhido, emp, metas, lugares, registro, config: (registro && registro.config) || {} });
     E.rel = motor().montar({ ano: anoEscolhido, balancetes, config: E.config });
     E.anos = Array.from(new Set(anosComBalancete.concat([anoAtual, anoEscolhido]))).sort((a, b) => b - a);
@@ -149,6 +149,7 @@
   function conteudo() {
     return avisos() +
       '<div class="abas nao-imprimir" role="tablist">' + ABAS.map((a) => '<button type="button" role="tab" data-aba="' + a.id + '" class="' + (E.aba === a.id ? 'ativa' : '') + '">' + a.titulo + '</button>').join('') + '</div>' +
+      '<div id="apres-meses">' + seletorMeses() + '</div>' +
       '<div class="apres-opcoes nao-imprimir">' + opcoesDaAba() + '</div>' +
       '<div class="apres-folha" id="apres-folha">' + secao(E.aba, {}) + '</div>';
   }
@@ -169,16 +170,115 @@
       return '<button type="button" class="botao pequeno" data-opcao="editar-ajustes">✎ Lista de ajustes e conta do PAT</button>' +
         '<span class="suave pequeno">Apuração trimestral do lucro real. Os campos em azul da Parte B são preenchidos por você.</span>';
     }
-    return '<span class="suave pequeno">Contas de 1º nível. No acumulado, ativo e passivo mostram o saldo do último mês; receitas, custos e despesas, a soma dos meses.</span>';
+    return '<span class="suave pequeno">Contas de 1º nível. No acumulado, ativo e passivo mostram o saldo do último mês escolhido; receitas, custos e despesas, a soma dos meses escolhidos.</span>';
+  }
+
+  // ------------------------------------------------------------------
+  // Meses escolhidos (Dony, 18/09/2026: "escolher o período — eu não quero janeiro, fevereiro, março, eu quero
+  // abril, maio, junho — com botões mês a mês; clicou, o mês aparece ou some da DRE"). Vale para as visões
+  // mensais (Resumo, DRE mensal e balancete mensal), na tela, na impressão e no Excel. O acumulado passa a
+  // somar só os meses escolhidos. AH % continua sobre o mês anterior de verdade.
+  // E.selecao: null = todos os meses com balancete; senão, Set de competências.
+  // ------------------------------------------------------------------
+  const ABAS_MENSAIS = { resumo: true, 'dre-mensal': true, 'balancete-mensal': true };
+  function mesesComBalancete() { return E.rel.meses.filter((m) => m.tem); }
+  function mesesVisiveis() {
+    const com = mesesComBalancete();
+    if (!E.selecao) return com;
+    const escolhidos = com.filter((m) => E.selecao.has(m.comp));
+    return escolhidos.length ? escolhidos : com;
+  }
+  function indicesVisiveis() {
+    const vis = new Set(mesesVisiveis().map((m) => m.comp));
+    return E.rel.meses.map((m, k) => (vis.has(m.comp) ? k : -1)).filter((k) => k >= 0);
+  }
+  // "Jan–Ago", "Abr–Jun", "Jan, Mar, Jun" ou "5 meses".
+  function rotuloSelecao(ms) {
+    if (!ms.length) return '';
+    const curto = (m) => m.rotulo.slice(0, 3);
+    const seguidos = ms.every((m, i) => i === 0 || m.mes === ms[i - 1].mes + 1);
+    if (seguidos) return ms.length === 1 ? ms[0].rotulo : curto(ms[0]) + '–' + curto(ms[ms.length - 1]);
+    return ms.length <= 4 ? ms.map(curto).join(', ') : ms.length + ' meses';
+  }
+  const somaNos = (valores, ks) => { let s = 0, tem = false; ks.forEach((k) => { const v = valores[k]; if (v !== null && v !== undefined) { s += v; tem = true; } }); return tem ? s : null; };
+  // DRE mensal só com os meses escolhidos e, no fim, o acumulado deles.
+  function dreMensalVisivel() {
+    const dre = E.rel.dre.mensal;
+    const ks = indicesVisiveis();
+    const rlAc = somaNos(dre.linhas.find((l) => l.id === 'receitaLiquida').valores, ks);
+    return {
+      colunas: ks.map((k) => dre.colunas[k]).concat([{ id: 'acumulado', rotulo: 'Acumulado ' + rotuloSelecao(ks.map((k) => E.rel.meses[k])), acumulado: true }]),
+      linhas: dre.linhas.map((l) => {
+        const ac = somaNos(l.valores, ks);
+        return Object.assign({}, l, { valores: ks.map((k) => l.valores[k]).concat([ac]), av: ks.map((k) => l.av[k]).concat([ac === null || !rlAc ? null : ac / rlAc]), ah: ks.map((k) => l.ah[k]).concat([null]) });
+      }),
+    };
+  }
+  function balanceteMensalVisivel() {
+    const tab = E.rel.mensal;
+    const ks = indicesVisiveis();
+    return { colunas: ks.map((k) => tab.colunas[k]),
+      linhas: tab.linhas.map((l) => Object.assign({}, l, { valores: ks.map((k) => l.valores[k]), av: ks.map((k) => l.av[k]), ah: ks.map((k) => l.ah[k]) })) };
+  }
+  // Resumo: os meses escolhidos, o acumulado deles (ativo e passivo: saldo do último mês escolhido) e os trimestres.
+  function resumoVisivel() {
+    const r = E.rel.resumo;
+    const ks = indicesVisiveis();
+    const trimestres = r.colunas.map((c, i) => ({ c, i })).filter((x) => x.c.trimestre);
+    return {
+      colunas: ks.map((k) => r.colunas[k]).concat([{ id: 'acumulado', rotulo: rotuloSelecao(ks.map((k) => E.rel.meses[k])), acumulado: true }]).concat(trimestres.map((x) => x.c)),
+      linhas: r.linhas.map((l) => {
+        const vals = ks.map((k) => l.valores[k]);
+        const ac = l.patrimonial ? (vals.length ? vals[vals.length - 1] : null) : somaNos(l.valores, ks);
+        return Object.assign({}, l, { valores: vals.concat([ac]).concat(trimestres.map((x) => l.valores[x.i])) });
+      }),
+    };
+  }
+  // O painel dos meses (como o exemplo que o Dony mandou): atalhos, o ano e um botão por mês.
+  function seletorMeses() {
+    if (!ABAS_MENSAIS[E.aba]) return '';
+    const com = mesesComBalancete();
+    const vis = new Set(mesesVisiveis().map((m) => m.comp));
+    const todos = !E.selecao || vis.size === com.length;
+    const ultimos = (n) => !todos && vis.size === Math.min(n, com.length) && com.slice(-n).every((m) => vis.has(m.comp));
+    const tri = (n) => com.filter((m) => m.trimestre === n);
+    const eTri = (n) => { const ms = tri(n); return !todos && ms.length && vis.size === ms.length && ms.every((m) => vis.has(m.comp)); };
+    const rapido = (id, texto, ativo, desligado) => '<button type="button" class="sm-rapido' + (ativo ? ' ativo' : '') + '" data-meses="' + id + '"' + (desligado ? ' disabled' : '') + '>' + texto + '</button>';
+    const botoes = MESES_LONGOS.map((nome, i) => {
+      const comp = E.ano + '-' + String(i + 1).padStart(2, '0') + '-01';
+      const tem = com.some((m) => m.comp === comp);
+      return '<button type="button" class="sm-mes' + (vis.has(comp) ? ' ativo' : '') + '" data-mes="' + comp + '"' + (tem ? '' : ' disabled title="Sem balancete de ' + nome.toLowerCase() + '"') +
+        ' aria-pressed="' + vis.has(comp) + '">' + nome.slice(0, 3) + '</button>';
+    }).join('');
+    const escolhidos = mesesVisiveis();
+    return '<div class="seletor-meses nao-imprimir"><div class="sm-topo"><span class="sm-rotulo">Meses</span>' +
+      rapido('todos', 'Todos', todos) + rapido('ultimos-3', 'Últimos 3', ultimos(3), com.length <= 3) + rapido('ultimos-6', 'Últimos 6', ultimos(6), com.length <= 6) +
+      '<span class="sm-separador"></span>' + [1, 2, 3, 4].map((n) => rapido('tri-' + n, n + 'T', eTri(n), !tri(n).length)).join('') +
+      '<span class="sm-ano">' + E.ano + '</span></div><div class="sm-grade">' + botoes + '</div>' +
+      '<p class="sm-dica">' + (todos ? 'Mostrando todos os ' + com.length + ' meses com balancete.' : 'Mostrando ' + escolhidos.length + ' de ' + com.length + ': ' + T.esc(rotuloSelecao(escolhidos)) + ' (o acumulado soma só esses).') +
+      ' Clique num mês para ele aparecer ou sumir.</p></div>';
+  }
+  function mudarSelecao(qual) {
+    const com = mesesComBalancete().map((m) => m.comp);
+    if (qual === 'todos') { E.selecao = null; return; }
+    if (qual === 'ultimos-3' || qual === 'ultimos-6') { const n = qual === 'ultimos-3' ? 3 : 6; E.selecao = com.length <= n ? null : new Set(com.slice(-n)); return; }
+    if (/^tri-\d$/.test(qual)) { const n = Number(qual.slice(4)); E.selecao = new Set(mesesComBalancete().filter((m) => m.trimestre === n).map((m) => m.comp)); return; }
+    // Um mês: aparece ou some (fica sempre pelo menos um).
+    const atual = new Set(mesesVisiveis().map((m) => m.comp));
+    if (atual.has(qual)) {
+      if (atual.size === 1) { T.avisoRapido('Deixe pelo menos um mês na tela.', null, 3000); return; }
+      atual.delete(qual);
+    } else if (com.indexOf(qual) >= 0) atual.add(qual);
+    E.selecao = atual.size === com.length ? null : atual;
   }
 
   // Uma seção do relatório (na tela, a aba; na impressão, uma depois da outra). op.impressao: todas as contas da DRE abertas?
   function secao(aba, op) {
     const rel = E.rel;
     if (aba === 'resumo') return secaoResumo();
-    if (aba === 'dre-mensal') return secaoDre(rel.dre.mensal, 'DRE CPC 51 mensal detalhada', op);
+    if (aba === 'dre-mensal') return secaoDre(dreMensalVisivel(), 'DRE CPC 51 mensal detalhada', op);
     if (aba === 'dre-trimestral') return secaoDre(rel.dre.trimestral, 'DRE CPC 51 trimestral detalhada', op);
-    if (aba === 'balancete-mensal') return secaoBalancete(rel.mensal, 'Balancete analítico mensal');
+    if (aba === 'balancete-mensal') return secaoBalancete(balanceteMensalVisivel(), 'Balancete analítico mensal');
     if (aba === 'balancete-trimestral') return secaoBalancete(rel.trimestral, 'Balancete analítico trimestral');
     if (aba === 'lalur') return secaoLalur(op);
     return '';
@@ -208,13 +308,13 @@
 
   // ---------- Resumo
   function secaoResumo() {
-    const r = E.rel.resumo;
+    const r = resumoVisivel();
     const colunas = r.colunas.map((c) => Object.assign({}, c, { cls: c.acumulado ? 'acum' : c.trimestre ? 'tri' : '' }));
     const linhas = r.linhas.map((l) => '<tr class="nivel-1"><td class="fixa"><span class="cod">' + T.esc(l.conta) + '</span> ' + T.esc(l.titulo) + '</td>' +
       l.valores.map((v, k) => '<td class="num' + (colunas[k].cls ? ' ' + colunas[k].cls : '') + '">' + dinheiro(v) + '</td>').join('') + '</tr>').join('');
-    const dre = E.rel.dre.mensal;
+    const dre = dreMensalVisivel();
     const indicador = (id) => dre.linhas.find((l) => l.id === id);
-    const iAcum = dre.colunas.findIndex((c) => c.acumulado); // a DRE mensal traz o acumulado na última coluna
+    const iAcum = dre.colunas.findIndex((c) => c.acumulado); // o acumulado dos meses escolhidos, na última coluna
     const fichas = ['receitaLiquida', 'lucroBruto', 'ebitda', 'lucroOperacional', 'lucroLiquido'].map((id) => {
       const l = indicador(id);
       const total = l.valores[iAcum] || 0;
@@ -330,6 +430,9 @@
       if (aba) { E.aba = aba.getAttribute('data-aba'); guardarPreferencias(); redesenharConteudo(el); return; }
       const nivel = ev.target.closest('[data-nivel]');
       if (nivel) { E.nivel = Number(nivel.getAttribute('data-nivel')); guardarPreferencias(); redesenharConteudo(el); return; }
+      // Painel dos meses: um mês aparece ou some; os atalhos escolhem vários de uma vez.
+      const mes = ev.target.closest('button[data-mes], button[data-meses]');
+      if (mes && !mes.disabled) { mudarSelecao(mes.getAttribute('data-mes') || mes.getAttribute('data-meses')); redesenharConteudo(el); return; }
       const g = ev.target.closest('tr.grupo[data-grupo]');
       if (g) { const id = g.getAttribute('data-grupo'); if (E.abertos.has(id)) E.abertos.delete(id); else E.abertos.add(id); redesenharFolha(el); return; }
       const o = ev.target.closest('button[data-opcao]');
@@ -352,6 +455,8 @@
 
   function redesenharConteudo(el) {
     el.querySelectorAll('.abas [data-aba]').forEach((b) => b.classList.toggle('ativa', b.getAttribute('data-aba') === E.aba));
+    const meses = el.querySelector('#apres-meses');
+    if (meses) meses.innerHTML = seletorMeses();
     const op = el.querySelector('.apres-opcoes');
     if (op) op.innerHTML = opcoesDaAba();
     redesenharFolha(el);
@@ -466,6 +571,7 @@
     alvo.innerHTML = '<div class="apres-capa"><div class="rel-marca"><span class="selo-marca">S</span> ' + T.esc(app().config.programa) + '</div>' +
       '<h1>Relatório de apresentação · ' + E.ano + '</h1><p>' + T.esc(E.emp.nome) + (E.emp.cnpj ? ' · CNPJ ' + T.esc(U.formatarCnpj(E.emp.cnpj)) : '') + '</p>' +
       '<p class="suave">' + (carregados.length ? T.esc(carregados[0].rotulo + ' a ' + carregados[carregados.length - 1].rotulo) + ' · ' : '') +
+      (E.selecao ? 'visões mensais com os meses escolhidos: ' + T.esc(rotuloSelecao(mesesVisiveis())) + ' · ' : '') +
       'emitido por ' + T.esc(app().usuario.nome || '') + ' em ' + U.dataHoraLocal(U.agoraISO()) + '</p></div>' +
       escolha.partes.map((p) => '<section class="apres-parte">' + secao(p, { impressao: true, abrirTudo: escolha.abrirTudo }) + '</section>').join('');
     document.body.classList.add('imprimindo-apresentacao');
@@ -511,21 +617,24 @@
       const aoa = tituloAba(t, sub).concat([cab1, cab2], dados);
       folha(t, aoa, fixasCab.map((f, i) => (i === 1 ? 44 : 16)).concat(...colunas.map(() => [15, 8, 8])), (r, c) => (r < 5 || c < n ? null : ((c - n) % 3 === 0 ? FMT_V : FMT_P)), nomeAba);
     }
-    // Resumo
-    const res = rel.resumo;
-    folha('Resumo', tituloAba('Resumo executivo das contas de 1º nível').concat([['Conta', 'Título'].concat(res.colunas.map((c) => c.rotulo))],
+    // Resumo (visões mensais com os meses escolhidos na tela)
+    const res = resumoVisivel();
+    const escolha = E.selecao ? ' · meses escolhidos: ' + rotuloSelecao(mesesVisiveis()) : '';
+    folha('Resumo', tituloAba('Resumo executivo das contas de 1º nível', escolha.slice(3)).concat([['Conta', 'Título'].concat(res.colunas.map((c) => c.rotulo))],
       res.linhas.map((l) => [l.conta, l.titulo].concat(l.valores.map(R)))), [8, 30].concat(res.colunas.map(() => 15)), (r, c) => (r > 3 && c > 1 ? FMT_V : null));
     // DRE
     const dreLinhas = (dre) => dre.linhas;
     const dreFixas = (l) => [l.categoria, l.rotulo, l.conta || '', l.tipo === 'analitica' ? 'Analítica' : 'Total / Subtotal'];
-    comPeriodos('DRE CPC 51 Mensal Detalhada', E.ano + ' · AV % sobre a receita líquida · AH % sobre o mês anterior', ['Categoria CPC 51', 'Linha / Conta Analítica', 'Conta Contábil', 'Tipo'],
-      rel.dre.mensal.colunas, dreLinhas(rel.dre.mensal), dreFixas, 'DRE mensal');
+    const dreMes = dreMensalVisivel();
+    comPeriodos('DRE CPC 51 Mensal Detalhada', E.ano + ' · AV % sobre a receita líquida · AH % sobre o mês anterior' + escolha, ['Categoria CPC 51', 'Linha / Conta Analítica', 'Conta Contábil', 'Tipo'],
+      dreMes.colunas, dreLinhas(dreMes), dreFixas, 'DRE mensal');
     comPeriodos('DRE CPC 51 Trimestral Detalhada', E.ano + ' · AV % sobre a receita líquida · AH % sobre o trimestre anterior', ['Categoria CPC 51', 'Linha / Conta Analítica', 'Conta Contábil', 'Tipo'],
       rel.dre.trimestral.colunas, dreLinhas(rel.dre.trimestral), dreFixas, 'DRE trimestral');
     // Balancetes
     const balFixas = (l) => [l.conta, l.reduzido, l.titulo, l.nivel, l.pai];
-    comPeriodos('Balancete Analítico Mensal com AV e AH', 'Contas 1 e 2: saldo final · 3, 4 e 5: movimento do mês · AV % sobre a conta-mãe', ['Conta', 'Red.', 'Título da Conta', 'Nível', 'Conta Pai'],
-      rel.mensal.colunas, rel.mensal.linhas, balFixas, 'Mensal');
+    const balMes = balanceteMensalVisivel();
+    comPeriodos('Balancete Analítico Mensal com AV e AH', 'Contas 1 e 2: saldo final · 3, 4 e 5: movimento do mês · AV % sobre a conta-mãe' + escolha, ['Conta', 'Red.', 'Título da Conta', 'Nível', 'Conta Pai'],
+      balMes.colunas, balMes.linhas, balFixas, 'Mensal');
     comPeriodos('Análise Trimestral', 'Contas 1 e 2: saldo final do trimestre · 3, 4 e 5: soma dos meses', ['Conta', 'Red.', 'Título da Conta', 'Nível', 'Conta Pai'],
       rel.trimestral.colunas, rel.trimestral.linhas, balFixas, 'Trimestral');
     // LALUR
