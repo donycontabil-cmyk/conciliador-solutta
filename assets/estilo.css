@@ -715,3 +715,110 @@ table.apres.premissas td { vertical-align: top; }
   .apres-impressao .apres-fichas { grid-template-columns: repeat(5, minmax(0, 1fr)); }
   .apres-impressao .apres-titulo h2 { font-size: 13px; }
 }
+
+/* ---------- Indicadores (aba da apresentação) ---------- */
+table.apres.indicadores td.fixa b { display: block; font-weight: 600; }
+table.apres.indicadores td.fixa small { display: block; color: var(--texto-fraco); font-size: 11px; font-weight: 400; white-space: normal; max-width: 380px; }
+table.apres.indicadores td.num { vertical-align: middle; }
+.ind-seta { font-size: 9px; margin-left: 3px; }
+.ind-seta.bom { color: var(--verde); }
+.ind-seta.ruim { color: var(--vermelho); }
+table.apres.indicadores td.evolucao { padding: 2px 8px; }
+table.apres.indicadores td.evolucao svg { display: block; width: 110px; height: 26px; }
+.ind-contas { font-size: 12px; color: var(--texto-suave); margin: 10px 0 0; line-height: 1.6; }
+.ind-contas b { color: var(--texto); font-weight: 600; }
+
+/* ---------- Relatório para o cliente: folhas A4 em pé no desenho do "Relatório de Variações Mensais" ---------- */
+.rc-barra { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; background: #fff; border: 1px solid var(--borda); border-radius: 8px; padding: 10px 12px; margin-bottom: 10px; }
+.rc-barra label { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
+.rc-barra .rc-par { font-size: 12.5px; color: var(--texto-suave); }
+.rc-barra .rc-logo-mini { height: 30px; max-width: 90px; object-fit: contain; border: 1px solid var(--borda); border-radius: 4px; background: #fff; padding: 2px; }
+.rc-barra .rc-sem-logo { font-size: 12px; color: var(--texto-fraco); border: 1px dashed var(--borda-forte); border-radius: 4px; padding: 6px 8px; }
+.rc-barra input[type=color] { width: 38px; height: 28px; padding: 0 2px; border: 1px solid var(--borda-forte); border-radius: 4px; background: #fff; cursor: pointer; }
+.rc-barra .rc-direita { margin-left: auto; display: inline-flex; gap: 8px; }
+.rc-ajuda { font-size: 12.5px; color: var(--texto-suave); margin: 0 0 10px; }
+.rc-aviso-estouro { font-size: 12.5px; color: var(--vermelho); font-weight: 600; margin: 0 0 10px; }
+.rc-previa { background: #d9dee4; border-radius: 8px; padding: 22px 12px 34px; display: flex; flex-direction: column; align-items: center; gap: 22px; overflow-x: auto; }
+
+.rc { --rc-cor: #1f4e78; --rc-clara: #e8eef4; --rc-media: #bfd0e0; font-family: "Segoe UI", "DejaVu Sans", Arial, sans-serif; color: #2b2b2b; }
+.rc-pagina { width: 210mm; height: 296mm; box-sizing: border-box; padding: 15mm 17mm 13mm; position: relative; overflow: hidden; background: #fff;
+  box-shadow: 0 3px 14px rgba(0, 0, 0, 0.22); display: flex; flex-direction: column; font-size: 10pt; line-height: 1.45; flex: none; }
+.rc-corpo { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.rc-topo-faixa { position: absolute; left: 0; right: 0; top: 0; height: 3.2mm; background: var(--rc-cor); }
+.rc-cab { display: flex; justify-content: space-between; align-items: flex-end; gap: 8mm; border-bottom: 0.45mm solid var(--rc-cor); padding: 2mm 0 2.5mm; margin-bottom: 7mm; }
+.rc-cab-empresa { font-size: 10pt; font-weight: 600; letter-spacing: 0.02em; text-transform: uppercase; }
+.rc-cab h2 { margin: 3.5mm 0 0; font-size: 18pt; line-height: 1.15; font-weight: 600; color: #2b2b2b; }
+.rc-logo { max-height: 15mm; max-width: 42mm; object-fit: contain; flex: none; }
+.rc-numero { position: absolute; right: 17mm; bottom: 7mm; font-size: 8.5pt; color: #777; }
+.rc-sub { color: var(--rc-cor); font-size: 13.5pt; font-weight: 600; margin: 0 0 3mm; }
+.rc-h3 { font-size: 11pt; font-weight: 600; margin: 8mm 0 2mm; }
+.rc-h4 { font-size: 10.5pt; font-weight: 600; margin: 0 0 2mm; }
+.rc-espaco { height: 9mm; flex: none; }
+.rc-empurra { flex: 1; min-height: 4mm; }
+.rc-grafico-caixa { break-inside: avoid; }
+.rc-grafico-titulo { font-weight: 600; font-size: 11.5pt; margin: 0 0 1.5mm 10mm; }
+.rc-grafico { width: 100%; height: auto; display: block; }
+.rc-leitura { font-size: 9.5pt; margin: 1.5mm 0 0 3mm; color: #333; }
+.rc-caixa { background: var(--rc-clara); border-radius: 3mm; padding: 5mm 6mm; font-size: 10pt; }
+.rc-caixa-cinza { background: #f2f2f2; }
+.rc-caixa-titulo { color: var(--rc-cor); font-weight: 600; font-size: 11.5pt; text-transform: uppercase; margin-bottom: 2.5mm; }
+.rc-texto { white-space: pre-wrap; }
+.rc-pequeno { font-size: 8.5pt; }
+.rc-fonte { font-size: 7.5pt; color: #888; margin-top: 3mm; }
+.rc-nota { font-size: 7.5pt; color: #888; margin: 2mm 0 0; }
+.rc-cartoes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 5mm 5.5mm; margin: 4mm 0 10mm; }
+.rc-cartao { background: #f2f2f2; border-radius: 2.5mm; padding: 4mm 4.5mm; min-height: 31mm; display: flex; flex-direction: column; box-sizing: border-box; }
+.rc-cartao span { font-size: 7.5pt; font-weight: 600; color: #777; text-transform: uppercase; letter-spacing: 0.02em; }
+.rc-cartao b { font-weight: 600; font-size: 13.5pt; margin: 3mm 0 auto; white-space: nowrap; }
+.rc-cartao small { font-size: 8pt; font-weight: 600; margin-top: 4mm; }
+.rc-bom { color: #1d7a4c; }
+.rc-ruim { color: #c0392b; }
+.rc-neutro { color: #777; }
+.rc-centro { text-align: center !important; }
+.rc-bolinhas { list-style: none; padding: 0; margin: 1mm 0; }
+.rc-bolinhas li { position: relative; padding-left: 7mm; margin: 3.5mm 0; }
+.rc-bolinhas li::before { content: ""; position: absolute; left: 1mm; top: 1.3mm; width: 3.2mm; height: 3.2mm; border-radius: 50%; background: var(--rc-cor); }
+.rc-recomendacoes li { margin: 5mm 0; }
+.rc-rec-titulo { font-weight: 600; }
+.rc-rec-texto { font-size: 9.5pt; }
+.rc-grade4 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9mm 7mm; }
+.rc-grade4 .rc-grafico-titulo { margin-left: 4mm; font-size: 10.5pt; }
+table.rc-tabela { width: 100%; border-collapse: collapse; font-size: 8.5pt; }
+table.rc-tabela th { background: var(--rc-cor); color: #fff; text-align: left; padding: 3.4mm 2.5mm; font-weight: 600; }
+table.rc-tabela b { font-weight: 600; }
+table.rc-tabela td { padding: 3.1mm 2.5mm; }
+table.rc-tabela tbody tr:nth-child(odd) td { background: #f2f2f2; }
+table.rc-tabela .num { text-align: right; white-space: nowrap; }
+table.rc-tabela-ind td, table.rc-tabela-ind th { padding-top: 3.6mm; padding-bottom: 3.6mm; }
+table.rc-tabela-contas { font-size: 7.6pt; }
+.rc-capa { padding: 25mm 20mm 14mm 27mm; }
+.rc-capa-faixa { position: absolute; left: 0; top: 0; bottom: 0; width: 7.5mm; background: var(--rc-cor); }
+.rc-capa-topo { display: flex; justify-content: space-between; align-items: flex-start; gap: 10mm; }
+.rc-sobre { font-weight: 600; font-size: 12.5pt; letter-spacing: 0.03em; margin-top: 7mm; }
+.rc-capa-logo { max-height: 40mm; max-width: 62mm; object-fit: contain; }
+.rc-capa-titulo { color: var(--rc-cor); font-size: 34pt; line-height: 1.12; margin: 7mm 0 8mm; font-weight: 700; max-width: 140mm; }
+.rc-capa-sub { font-size: 12.5pt; max-width: 140mm; margin: 0; }
+.rc-capa-escopo { min-height: 40mm; box-sizing: border-box; }
+.rc-capa-escopo .rc-caixa-titulo { font-size: 11pt; }
+.rc-capa-base { font-size: 9pt; color: #777; margin-top: 16mm; line-height: 1.9; }
+.rc-capa-base b { color: #444; font-weight: 600; }
+/* Na prévia: o que dá para reescrever */
+.rc-previa .rc-edita { border-radius: 2px; }
+.rc-previa .rc-edita:hover { outline: 1px dashed #9fb3c8; outline-offset: 2px; cursor: text; }
+.rc-previa .rc-edita:focus { outline: 2px solid #e0a800; outline-offset: 2px; background: #fffbe6; }
+.rc-previa .rc-edita:empty::before { content: "(vazio: clique para escrever)"; color: #aaa; font-style: italic; }
+.rc-so-tela { font: inherit; font-size: 11px; line-height: 1; padding: 3px 7px; border: 1px solid #c9ced6; border-radius: 4px; background: #fff; color: #56606c; cursor: pointer; }
+.rc-so-tela:hover { border-color: #2f4a64; color: #2f4a64; }
+.rc-tirar { margin-left: 4px; color: #b3261e; padding: 1px 5px; vertical-align: 1px; }
+.rc-mais { margin: 1mm 0 0 7mm; }
+.rc-pagina.rc-estourou { outline: 3px solid #c0392b; outline-offset: 3px; }
+
+@media print {
+  @page cliente { size: A4 portrait; margin: 0; }
+  body.imprimindo-cliente .conteudo > *:not(.apres-impressao) { display: none !important; }
+  body.imprimindo-cliente .apres-impressao { display: block !important; }
+  body.imprimindo-cliente .rc-pagina { page: cliente; box-shadow: none; margin: 0; break-after: page; }
+  body.imprimindo-cliente .rc-pagina:last-child { break-after: auto; }
+  .rc, .rc * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .rc-so-tela { display: none !important; }
+}

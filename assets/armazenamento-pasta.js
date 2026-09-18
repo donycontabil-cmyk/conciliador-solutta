@@ -421,6 +421,13 @@
       // de adiantamento com o nome da conta cortado): { '634': { familia: 'fornecedores', papel: 'adiantamento' } }.
       const papeis = limparPapeisDeConta(empresa.papeisDeConta !== undefined ? empresa.papeisDeConta : (anterior && anterior.papeisDeConta));
       if (Object.keys(papeis).length) registro.papeisDeConta = papeis;
+      // Logo e cor do relatório para o cliente (Dony, 18/09/2026: "um lugar em que eu coloque o logo da
+      // empresa para sair no relatório"): imagem já reduzida pela tela (data URL de até ~400 KB) e cor
+      // #rrggbb. Mesma regra: sem o campo na chamada, fica o que já estava; vazio tira.
+      const logo = empresa.logo !== undefined ? empresa.logo : (anterior && anterior.logo);
+      if (typeof logo === 'string' && logo.length <= 560000 && /^data:image\/(png|jpeg|webp|svg\+xml);base64,[A-Za-z0-9+/=]+$/.test(logo)) registro.logo = logo;
+      const cor = empresa.corRelatorio !== undefined ? empresa.corRelatorio : (anterior && anterior.corRelatorio);
+      if (typeof cor === 'string' && /^#[0-9a-fA-F]{6}$/.test(cor)) registro.corRelatorio = cor.toLowerCase();
       if (i >= 0) lista[i] = registro; else lista.push(registro);
       await gravar(raiz, 'empresas.json', JSON.stringify(lista, null, 2));
       await pastaDaEmpresa(codigo, true);

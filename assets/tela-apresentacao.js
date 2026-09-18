@@ -11,6 +11,9 @@
  *  - O que quem usa informa (Parte B, lista de ajustes, conta do PAT) fica num registro do ano.
  *  - Adições e exclusões do LALUR: quem usa marca cada conta na própria DRE ou no balancete (botão
  *    "✎ Marcar adições e exclusões do LALUR"); a lista começa vazia (Dony, 18/09/2026).
+ *  - Indicadores (liquidez, endividamento, margens, ROI, ROE, prazos) e o RELATÓRIO DO CLIENTE: folhas A4
+ *    em pé com o logo da empresa, no desenho do "Relatório de Variações Mensais" (relatorio-cliente.js),
+ *    com os textos reescritos direto na prévia (Dony, 18/09/2026).
  *  - Imprimir / salvar PDF (folha deitada) e Excel com as mesmas abas da planilha modelo.
  */
 (function (raiz) {
@@ -24,18 +27,20 @@
   const MESES_LONGOS = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
   const ABAS = [
     { id: 'resumo', titulo: 'Resumo' },
+    { id: 'indicadores', titulo: 'Indicadores' },
     { id: 'dre-mensal', titulo: 'DRE mensal' },
     { id: 'dre-trimestral', titulo: 'DRE trimestral' },
     { id: 'balancete-mensal', titulo: 'Balancete mensal' },
     { id: 'balancete-trimestral', titulo: 'Balancete trimestral' },
     { id: 'lalur', titulo: 'LALUR trimestral' },
+    { id: 'cliente', titulo: '📄 Relatório do cliente' },
   ];
   const REGRAS = { movimento: 'Movimento do mês (conta de resultado)', 'aumento-credor': 'Aumento do saldo credor (conta patrimonial)' };
   const CHAVE_PREF = 'conciliador-solutta.apresentacao';
 
   // Estado da tela (continua entre redesenhos).
   const E = { codigo: null, ano: null, emp: null, rel: null, registro: null, config: {}, lugares: [], metas: [],
-    aba: 'dre-mensal', avah: true, nivel: 5, semZeradas: false, abertos: new Set(), selecao: null, marcarLalur: false, balancetes: [], fila: null };
+    aba: 'dre-mensal', avah: true, nivel: 5, semZeradas: false, abertos: new Set(), selecao: null, marcarLalur: false, balancetes: [], fila: null, clienteMes: null, cacheCliente: null, ultimoCliente: null };
   (function lerPreferencias() {
     try {
       const p = JSON.parse((raiz.localStorage && raiz.localStorage.getItem(CHAVE_PREF)) || '{}') || {};
@@ -129,7 +134,8 @@
       '<div class="linha-flex">' +
       (E.anos.length > 1 ? '<select class="apres-campo" id="apres-ano" title="Ano do relatório">' + E.anos.map((a) => '<option value="' + a + '"' + (a === E.ano ? ' selected' : '') + '>' + a + '</option>').join('') + '</select>' : '') +
       raiz.TelaSubir.botao(chave) +
-      (semBalancete ? '' : '<button type="button" class="botao" id="apres-excel" title="As mesmas abas da planilha modelo">⬇ Excel</button>' +
+      (semBalancete ? '' : '<button type="button" class="botao" data-aba="cliente" title="As folhas para mandar ao cliente, com o logo da empresa">📄 Relatório do cliente</button>' +
+        '<button type="button" class="botao" id="apres-excel" title="As mesmas abas da planilha modelo">⬇ Excel</button>' +
         '<button type="button" class="botao primario" id="apres-imprimir" title="Na janela de impressão, escolha a impressora ou “Salvar como PDF”">🖨 Imprimir / PDF</button>') +
       '</div></div>' +
       '<div id="apres-painel" class="nao-imprimir">' + painel + '</div>' +
@@ -138,6 +144,7 @@
         'o <b>balancete mensal e trimestral</b> (com AV % e AH %) e o <b>LALUR trimestral</b>, no desenho da planilha de apresentação.</p></div>' : conteudo()) +
       '</div><div id="apres-impressao" class="apres-impressao"></div>';
     ligar(el.querySelector('.apres-raiz'));
+    conferirEstouro(el);
   }
 
   function avisos() {
@@ -176,6 +183,11 @@
       return '<button type="button" class="botao pequeno" data-opcao="editar-ajustes">✎ Lista de ajustes e conta do PAT</button>' +
         '<span class="suave pequeno">Apuração trimestral do lucro real. As adições e exclusões são as contas que você marca na DRE ou no balancete. Os campos em azul da Parte B são preenchidos por você.</span>';
     }
+    if (E.aba === 'indicadores') {
+      return '<span class="suave pequeno">Balanço pelo saldo do fim do mês; resultado pelo movimento do mês. <b>Período</b>: resultado somado nos meses escolhidos e balanço do último mês. ' +
+        '▲▼ = mudança sobre a coluna anterior (verde melhora, vermelho piora).</span>';
+    }
+    if (E.aba === 'cliente') return '';
     return '<span class="suave pequeno">Contas de 1º nível. No acumulado, ativo e passivo mostram o saldo do último mês escolhido; receitas, custos e despesas, a soma dos meses escolhidos.</span>';
   }
 
@@ -186,7 +198,7 @@
   // somar só os meses escolhidos. AH % continua sobre o mês anterior de verdade.
   // E.selecao: null = todos os meses com balancete; senão, Set de competências.
   // ------------------------------------------------------------------
-  const ABAS_MENSAIS = { resumo: true, 'dre-mensal': true, 'balancete-mensal': true };
+  const ABAS_MENSAIS = { resumo: true, indicadores: true, 'dre-mensal': true, 'balancete-mensal': true };
   function mesesComBalancete() { return E.rel.meses.filter((m) => m.tem); }
   function mesesVisiveis() {
     const com = mesesComBalancete();
@@ -282,6 +294,8 @@
   function secao(aba, op) {
     const rel = E.rel;
     if (aba === 'resumo') return secaoResumo();
+    if (aba === 'indicadores') return secaoIndicadores();
+    if (aba === 'cliente') return secaoCliente(op);
     if (aba === 'dre-mensal') return secaoDre(dreMensalVisivel(), 'DRE CPC 51 mensal detalhada', op);
     if (aba === 'dre-trimestral') return secaoDre(rel.dre.trimestral, 'DRE CPC 51 trimestral detalhada', op);
     if (aba === 'balancete-mensal') return secaoBalancete(balanceteMensalVisivel(), 'Balancete analítico mensal');
@@ -455,6 +469,12 @@
       if (lt) { marcarConta(el, lt.getAttribute('data-lalur-tirar'), null); return; }
       const g = ev.target.closest('tr.grupo[data-grupo]');
       if (g) { const id = g.getAttribute('data-grupo'); if (E.abertos.has(id)) E.abertos.delete(id); else E.abertos.add(id); redesenharFolha(el); return; }
+      const rc = ev.target.closest('button[data-rc]');
+      if (rc) { await acaoCliente(el, rc.getAttribute('data-rc')); return; }
+      const mais = ev.target.closest('button[data-rc-mais]');
+      if (mais) { itemCliente(el, mais.getAttribute('data-rc-mais'), 'mais'); return; }
+      const tira = ev.target.closest('button[data-rc-tirar]');
+      if (tira) { itemCliente(el, tira.getAttribute('data-rc-tirar'), 'tirar', Number(tira.getAttribute('data-i'))); return; }
       const o = ev.target.closest('button[data-opcao]');
       if (!o) return;
       const qual = o.getAttribute('data-opcao');
@@ -463,7 +483,27 @@
       else if (qual === 'guardar-parte-b') await guardarParteB(el);
       else if (qual === 'editar-ajustes') await editarAjustes();
     });
+    // Relatório do cliente: texto reescrito na prévia (guarda ao sair do texto), mês, cor e logo.
+    el.addEventListener('focusout', (ev) => {
+      const alvo = ev.target.closest && ev.target.closest('.rc-previa [data-texto], .rc-previa [data-lista]');
+      if (alvo) guardarEdicaoCliente(el, alvo);
+    });
+    // Guarda também enquanto escreve (1 s depois de parar), para nada se perder se a tela for fechada.
+    let esperaTexto = null;
+    el.addEventListener('input', (ev) => {
+      const alvo = ev.target.closest && ev.target.closest('.rc-previa [data-texto], .rc-previa [data-lista]');
+      if (!alvo) return;
+      clearTimeout(esperaTexto);
+      esperaTexto = setTimeout(() => guardarEdicaoCliente(el, alvo, true), 1000);
+    });
+    el.addEventListener('keydown', (ev) => {
+      const alvo = ev.target.closest && ev.target.closest('.rc-previa [data-texto="nome"], .rc-previa [data-parte="titulo"]');
+      if (alvo && ev.key === 'Enter') { ev.preventDefault(); alvo.blur(); }
+    });
     el.addEventListener('change', (ev) => {
+      if (ev.target.id === 'rc-mes') { E.clienteMes = ev.target.value; redesenharFolha(el); return; }
+      if (ev.target.id === 'rc-cor') { mudarCorCliente(el, ev.target.value); return; }
+      if (ev.target.id === 'rc-arquivo-logo') { trocarLogo(el, ev.target.files && ev.target.files[0]); ev.target.value = ''; return; }
       const c = ev.target.closest('input[data-opcao]');
       if (!c) return;
       if (c.getAttribute('data-opcao') === 'marcar-lalur') {
@@ -498,6 +538,7 @@
     f.innerHTML = secao(E.aba, {});
     const nova = f.querySelector('.apres-caixa');
     if (nova && rolagem) { nova.scrollLeft = rolagem.x; nova.scrollTop = rolagem.y; }
+    conferirEstouro(el);
   }
 
   // ------------------------------------------------------------------
@@ -540,6 +581,269 @@
       .then(() => guardarConfig(config, 'apresentacao-ajustes', texto))
       .then(() => T.avisoRapido(texto + ' · LALUR recalculado.', 'ok', 2500))
       .catch((e) => { T.avisoRapido('Não foi possível guardar a marcação: ' + T.mensagemDeErro(e), 'erro'); app().mostrarRota(); });
+  }
+
+  // ------------------------------------------------------------------
+  // Indicadores (Dony, 18/09/2026: "uma tela de índices — liquidez, ROI, investidores, endividamento").
+  // ------------------------------------------------------------------
+  function indicadoresVisiveis() { return motor().indicadores(E.rel, indicesVisiveis(), { acumulado: true }); }
+  const LIMITE_IND = { x: 0.005, '%': 0.0005, 'R$': 100, dias: 0.5 };
+  function fmtIndicador(tipo, v) {
+    if (v === null || v === undefined || !isFinite(v)) return '';
+    if (tipo === 'x') return v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + 'x';
+    if (tipo === '%') return pct(v);
+    if (tipo === 'dias') return Math.round(v) + ' dias';
+    return dinheiro(v);
+  }
+  // Linha pequena com a evolução do indicador nos meses (sem o período).
+  function miniLinha(valores, melhor) {
+    const vs = valores.filter((v) => v !== null && isFinite(v));
+    if (vs.length < 2) return '';
+    const min = Math.min.apply(null, vs), max = Math.max.apply(null, vs), amp = max - min || 1;
+    const pts = [];
+    valores.forEach((v, i) => { if (v !== null && isFinite(v)) pts.push([(4 + (i * 102) / Math.max(1, valores.length - 1)).toFixed(1), (22 - ((v - min) / amp) * 18).toFixed(1)]); });
+    const ult = pts[pts.length - 1], d = vs[vs.length - 1] - vs[vs.length - 2];
+    const cor = !d ? '#8a94a1' : (d > 0) === (melhor === 'maior') ? '#1d7a4c' : '#b3261e';
+    return '<svg viewBox="0 0 110 26" aria-hidden="true"><polyline points="' + pts.map((p) => p.join(',')).join(' ') + '" fill="none" stroke="#1f4e78" stroke-width="1.6" stroke-linejoin="round"/>' +
+      '<circle cx="' + ult[0] + '" cy="' + ult[1] + '" r="2.6" fill="' + cor + '"/></svg>';
+  }
+  function secaoIndicadores() {
+    const ind = indicadoresVisiveis();
+    const n = ind.colunas.length;
+    let grupo = null;
+    const corpo = ind.linhas.map((l) => {
+      let faixa = '';
+      if (l.grupo !== grupo) { grupo = l.grupo; faixa = '<tr class="cat"><td class="fixa">' + T.esc(grupo) + '</td><td colspan="' + (n + 1) + '"></td></tr>'; }
+      const celulas = l.valores.map((v, i) => {
+        const col = ind.colunas[i], ant = i > 0 && !ind.colunas[i - 1].acumulado ? l.valores[i - 1] : null;
+        let seta = '';
+        if (!col.acumulado && v !== null && ant !== null && Math.abs(v - ant) >= LIMITE_IND[l.tipo]) {
+          const bom = (v > ant) === (l.melhor === 'maior');
+          seta = '<span class="ind-seta ' + (bom ? 'bom' : 'ruim') + '" title="' + (bom ? 'Melhorou' : 'Piorou') + ' sobre ' + T.esc(ind.colunas[i - 1].rotulo) + '">' + (v > ant ? '▲' : '▼') + '</span>';
+        }
+        return '<td class="num' + (col.acumulado ? ' acum' : '') + '">' + fmtIndicador(l.tipo, v) + seta + '</td>';
+      }).join('');
+      return faixa + '<tr><td class="fixa"><b>' + T.esc(l.rotulo) + '</b><small>' + T.esc(l.formula) + '</small></td>' + celulas +
+        '<td class="evolucao">' + miniLinha(l.valores.slice(0, ind.colunas.filter((c) => !c.acumulado).length), l.melhor) + '</td></tr>';
+    }).join('');
+    const colunas = ind.colunas.map((c) => '<th class="num per' + (c.acumulado ? ' acum' : '') + (c.falta ? ' falta' : '') + '">' + T.esc(c.rotulo) + '</th>').join('');
+    const contas = '<p class="ind-contas">Contas usadas (achadas pelo nome no plano de contas): ' + ind.contas.map((c) => '<b>' + T.esc(c.nome) + '</b> = ' +
+      (c.conta ? T.esc(c.conta + ' ' + c.titulo) : '<span class="rel-aviso">não achada</span>')).join(' · ') + '. PL* = ativo total − passivo circulante − passivo não circulante ' +
+      '(inclui o resultado do ano que ainda não foi encerrado no balancete).</p>';
+    const falta = ind.faltam.length ? '<div class="aviso ambar nao-imprimir" style="margin:0 0 10px"><span class="icone-aviso">⚠️</span><div>Não achei no plano de contas: ' + T.esc(ind.faltam.join(', ')) +
+      '. Os indicadores que dependem dessas contas ficam vazios.</div></div>' : '';
+    return tituloSecao('Indicadores financeiros e patrimoniais', T.esc(E.ano) + ' · liquidez, endividamento, rentabilidade e retorno (ROI e ROE) e prazos médios') + falta +
+      '<div class="apres-caixa"><table class="apres indicadores"><thead><tr><th class="fixa">Indicador</th>' + colunas + '<th>Evolução</th></tr></thead><tbody>' + corpo + '</tbody></table></div>' + contas;
+  }
+
+  // ------------------------------------------------------------------
+  // Relatório para o cliente (Dony, 18/09/2026: "um imprimir relatório para o cliente, desta forma aí,
+  // mostrando as variações; e um lugar em que eu coloque o logo da empresa"). As folhas vêm do
+  // relatorio-cliente.js; aqui ficam a prévia, os textos reescritos, o logo, a cor e a impressão.
+  // Textos guardados no registro do ano: config.cliente = { fixos: { nome, titulo, subtitulo }, meses: { <comp>: {...} } }.
+  // Logo e cor ficam no cadastro da empresa (valem para todos os anos).
+  // ------------------------------------------------------------------
+  function mesesDoCliente() { return E.rel.meses.filter((m) => m.tem); }
+  function compDoCliente() {
+    const ms = mesesDoCliente();
+    if (!ms.length) return null;
+    return ms.some((m) => m.comp === E.clienteMes) ? E.clienteMes : ms[ms.length - 1].comp;
+  }
+  // O relatório cortado no mês escolhido (o trimestre do LALUR vai até esse mês).
+  function relDoCliente(comp) {
+    if (E.cacheCliente && E.cacheCliente.comp === comp && E.cacheCliente.base === E.rel) return E.cacheCliente.rel;
+    const rel = motor().montar({ ano: E.ano, balancetes: E.balancetes.filter((b) => b.competencia <= comp), config: E.config });
+    E.cacheCliente = { comp, base: E.rel, rel };
+    return rel;
+  }
+  function textosDoCliente(comp) { const c = E.config.cliente || {}; return Object.assign({}, c.fixos || {}, (c.meses || {})[comp] || {}); }
+  function corDoCliente() { return E.emp.corRelatorio || raiz.RelatorioCliente.COR_PADRAO; }
+  function montarCliente(editavel) {
+    const comp = compDoCliente();
+    const r = raiz.RelatorioCliente.montar({ rel: relDoCliente(comp), comp, emp: { nome: E.emp.nome, cnpj: E.emp.cnpj, logo: E.emp.logo }, cor: corDoCliente(),
+      textos: textosDoCliente(comp), editavel, emissao: U.dataHoraLocal(U.agoraISO()).slice(0, 10) });
+    if (editavel) E.ultimoCliente = r.textos;
+    return r;
+  }
+  function secaoCliente(op) {
+    const ms = mesesDoCliente();
+    if (!ms.length) return '<p class="suave">Carregue os balancetes para montar o relatório do cliente.</p>';
+    if (op && op.impressao) return montarCliente(false).html;
+    const comp = compDoCliente();
+    const r = montarCliente(true);
+    const k = ms.findIndex((m) => m.comp === comp);
+    const par = k > 0 ? 'Comparativo ' + ms[k - 1].rotulo + ' × ' + ms[k].rotulo : 'Primeiro mês com balancete: sem comparativo';
+    const barra = '<div class="rc-barra nao-imprimir">' +
+      '<label>Mês do relatório <select class="apres-campo" id="rc-mes">' + ms.map((m) => '<option value="' + m.comp + '"' + (m.comp === comp ? ' selected' : '') + '>' + T.esc(m.rotulo) + '</option>').join('') + '</select></label>' +
+      '<span class="rc-par">' + T.esc(par) + ' · ' + r.paginas + ' folhas</span>' +
+      (E.emp.logo ? '<img class="rc-logo-mini" src="' + T.esc(E.emp.logo) + '" alt="Logo da empresa">' : '<span class="rc-sem-logo">sem logo</span>') +
+      '<button type="button" class="botao pequeno" data-rc="logo">🖼 ' + (E.emp.logo ? 'Trocar o logo' : 'Colocar o logo da empresa') + '</button>' +
+      (E.emp.logo ? '<button type="button" class="botao pequeno" data-rc="tirar-logo">Tirar o logo</button>' : '') +
+      '<input type="file" id="rc-arquivo-logo" accept="image/png,image/jpeg,image/webp,image/svg+xml" hidden>' +
+      '<label title="A cor da capa, dos títulos, dos gráficos e das tabelas">Cor <input type="color" id="rc-cor" value="' + T.esc(corDoCliente()) + '"></label>' +
+      '<span class="rc-direita"><button type="button" class="botao pequeno" data-rc="textos-auto" title="Desfaz o que foi escrito neste mês e volta aos textos que o programa monta">↺ Textos automáticos</button>' +
+      '<button type="button" class="botao primario" data-rc="imprimir" title="Na janela de impressão, escolha “Salvar como PDF” para mandar ao cliente">🖨 Imprimir / salvar PDF</button></span></div>';
+    return barra + '<p class="rc-ajuda nao-imprimir">É assim que sai para o cliente (folhas A4 em pé). <b>Dá para reescrever qualquer texto direto na folha</b>: clique nele e escreva; ' +
+      'fica guardado para este mês. O nome no topo das folhas, o título e o subtítulo da capa valem para todos os meses.</p>' +
+      '<p class="rc-aviso-estouro nao-imprimir" id="rc-estouro" hidden></p><div class="rc-previa">' + r.html + '</div>';
+  }
+  // Texto que passou do tamanho da folha: a folha fica com borda vermelha e um aviso em cima.
+  function conferirEstouro(el) {
+    const aviso = el.querySelector('#rc-estouro');
+    if (!aviso) return;
+    const cheias = [];
+    el.querySelectorAll('.rc-previa .rc-pagina').forEach((p, i) => { const passou = p.scrollHeight > p.clientHeight + 2; p.classList.toggle('rc-estourou', passou); if (passou) cheias.push(i + 1); });
+    aviso.hidden = !cheias.length;
+    aviso.textContent = cheias.length ? '⚠️ O texto passou do tamanho da folha ' + cheias.join(', ') + ': encurte, senão a parte de baixo sai cortada.' : '';
+  }
+  const ESPACO_DURO = new RegExp(String.fromCharCode(160), 'g');
+  const limparTexto = (s) => String(s || '').replace(ESPACO_DURO, ' ').replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+  function guardarTextoCliente(comp, chave, valor) {
+    const cli = JSON.parse(JSON.stringify(E.config.cliente || {}));
+    if (raiz.RelatorioCliente.TEXTOS_FIXOS.indexOf(chave) >= 0) cli.fixos = Object.assign({}, cli.fixos || {}, { [chave]: valor });
+    else { cli.meses = cli.meses || {}; cli.meses[comp] = Object.assign({}, cli.meses[comp] || {}, { [chave]: valor }); }
+    E.config = Object.assign({}, E.config, { cliente: cli });
+    if (E.ultimoCliente) E.ultimoCliente[chave] = valor;
+    salvarEmFila('apresentacao-cliente', 'Relatório do cliente ' + String(comp).slice(0, 7) + ': ' + chave);
+  }
+  function guardarEdicaoCliente(el, alvo, digitando) {
+    const comp = compDoCliente();
+    const previa = el.querySelector('.rc-previa');
+    if (!comp || !previa) return;
+    const campo = alvo.getAttribute('data-texto');
+    let chave, valor, redesenhar = false;
+    if (campo) {
+      chave = campo;
+      valor = limparTexto(alvo.innerText);
+      if (campo === 'nome' || campo === 'titulo') valor = valor.replace(/\s*\n\s*/g, ' ');
+      redesenhar = campo === 'nome';
+    } else {
+      chave = alvo.getAttribute('data-lista');
+      const itens = Array.from(previa.querySelectorAll('[data-lista="' + chave + '"]'));
+      if (chave === 'recomendacoes') {
+        const porItem = new Map();
+        itens.forEach((x) => { const i = x.getAttribute('data-i'); const o = porItem.get(i) || { titulo: '', texto: '' }; o[x.getAttribute('data-parte')] = limparTexto(x.innerText); porItem.set(i, o); });
+        valor = Array.from(porItem.values());
+        redesenhar = valor.some((o) => !o.titulo && !o.texto);
+        valor = valor.filter((o) => o.titulo || o.texto);
+      } else {
+        valor = itens.map((x) => limparTexto(x.innerText));
+        redesenhar = valor.some((x) => !x);
+        valor = valor.filter(Boolean);
+      }
+    }
+    const antes = E.ultimoCliente ? E.ultimoCliente[chave] : undefined;
+    if (JSON.stringify(antes) !== JSON.stringify(valor)) guardarTextoCliente(comp, chave, valor);
+    if (digitando) return;
+    if (redesenhar) setTimeout(() => redesenharFolha(el), 0);
+    else conferirEstouro(el);
+  }
+  function itemCliente(el, lista, acao, i) {
+    const comp = compDoCliente();
+    const atual = ((E.ultimoCliente && E.ultimoCliente[lista]) || []).slice();
+    if (acao === 'mais') atual.push(lista === 'recomendacoes' ? { titulo: 'Nova recomendação', texto: 'Escreva aqui o que recomendar.' } : 'Escreva aqui.');
+    else atual.splice(i, 1);
+    guardarTextoCliente(comp, lista, atual);
+    redesenharFolha(el);
+    if (acao !== 'mais') return;
+    const itens = el.querySelectorAll('.rc-previa [data-lista="' + lista + '"]');
+    const novo = itens[itens.length - (lista === 'recomendacoes' ? 2 : 1)];
+    if (novo) {
+      novo.focus();
+      const faixa = document.createRange(); faixa.selectNodeContents(novo);
+      const sel = raiz.getSelection(); sel.removeAllRanges(); sel.addRange(faixa);
+    }
+  }
+  async function acaoCliente(el, qual) {
+    if (qual === 'logo') { const inp = el.querySelector('#rc-arquivo-logo'); if (inp) inp.click(); return; }
+    if (qual === 'tirar-logo') { if (await salvarEmpresaCliente({ logo: '' }, 'Logo tirado do relatório.')) redesenharFolha(el); return; }
+    if (qual === 'imprimir') { await imprimirCliente(); return; }
+    if (qual === 'textos-auto') {
+      const comp = compDoCliente();
+      const ok = await T.janela({ titulo: 'Voltar aos textos automáticos',
+        corpo: '<p style="margin:0;line-height:1.5">Os textos que você escreveu no relatório de <b>' + T.esc(U.nomeCompetencia(comp)) + '</b> voltam a ser os que o programa monta pelos números. ' +
+          'O nome no topo, o título e o subtítulo também voltam ao padrão.</p>',
+        botoes: [{ texto: 'Cancelar', valor: false }, { texto: '↺ Voltar aos automáticos', tipo: 'primario', valor: true }] });
+      if (!ok) return;
+      const cli = JSON.parse(JSON.stringify(E.config.cliente || {}));
+      delete cli.fixos;
+      if (cli.meses) delete cli.meses[comp];
+      E.config = Object.assign({}, E.config, { cliente: cli });
+      salvarEmFila('apresentacao-cliente', 'Relatório do cliente ' + String(comp).slice(0, 7) + ': textos automáticos', 'Textos automáticos de volta.');
+      redesenharFolha(el);
+    }
+  }
+  async function salvarEmpresaCliente(mudancas, aviso) {
+    try {
+      const salvo = await app().armazenamento.salvarEmpresa(Object.assign({}, E.emp, mudancas));
+      const lista = app().empresas || [];
+      const i = lista.findIndex((e) => String(e.codigo) === String(E.codigo));
+      if (i >= 0) lista[i] = salvo;
+      E.emp = salvo;
+      if (aviso) T.avisoRapido(aviso, 'ok', 3500);
+      return true;
+    } catch (e) {
+      T.avisoRapido('Não foi possível guardar: ' + T.mensagemDeErro(e), 'erro', 6000);
+      return false;
+    }
+  }
+  async function mudarCorCliente(el, cor) {
+    if (!/^#[0-9a-fA-F]{6}$/.test(cor)) return;
+    if (await salvarEmpresaCliente({ corRelatorio: cor })) redesenharFolha(el);
+  }
+  // Lê o logo: reduz (até 900 × 450) e acha a cor principal dele para o relatório.
+  async function lerLogo(arquivo) {
+    if (!/^image\/(png|jpeg|webp|svg\+xml)$/.test(arquivo.type)) throw new Error('Escolha uma imagem PNG, JPG, WEBP ou SVG.');
+    if (arquivo.size > 8 * 1024 * 1024) throw new Error('Imagem grande demais (mais de 8 MB).');
+    const original = await new Promise((ok, falha) => { const r = new FileReader(); r.onload = () => ok(r.result); r.onerror = () => falha(r.error); r.readAsDataURL(arquivo); });
+    const img = await new Promise((ok, falha) => { const i = new Image(); i.onload = () => ok(i); i.onerror = () => falha(new Error('Não consegui abrir essa imagem.')); i.src = original; });
+    const w = img.naturalWidth || 600, h = img.naturalHeight || 300;
+    const escala = Math.min(1, 900 / w, 450 / h);
+    const cv = document.createElement('canvas');
+    cv.width = Math.max(1, Math.round(w * escala)); cv.height = Math.max(1, Math.round(h * escala));
+    const g = cv.getContext('2d');
+    g.drawImage(img, 0, 0, cv.width, cv.height);
+    let cor = null;
+    try { cor = raiz.RelatorioCliente.corDoLogo(g.getImageData(0, 0, cv.width, cv.height).data); } catch (e) { /* sem acesso aos pixels: fica a cor que já estava */ }
+    let logo = original;
+    if (arquivo.type !== 'image/svg+xml') {
+      const reduzido = cv.toDataURL(arquivo.type === 'image/jpeg' ? 'image/jpeg' : 'image/png', 0.92);
+      if (escala < 1 || reduzido.length < original.length || arquivo.type === 'image/webp') logo = reduzido;
+    }
+    if (logo.length > 550000) throw new Error('O logo ficou grande demais mesmo reduzido. Use uma imagem menor (até uns 300 KB).');
+    return { logo, cor };
+  }
+  async function trocarLogo(el, arquivo) {
+    if (!arquivo) return;
+    try {
+      const { logo, cor } = await lerLogo(arquivo);
+      const mudancas = { logo };
+      if (cor) mudancas.corRelatorio = cor;
+      if (await salvarEmpresaCliente(mudancas, 'Logo guardado' + (cor ? '; a cor do relatório veio do logo (dá para trocar no quadradinho “Cor”).' : '.'))) redesenharFolha(el);
+    } catch (e) { T.avisoRapido(T.mensagemDeErro(e), 'erro', 6000); }
+  }
+  async function imprimirCliente() {
+    const comp = compDoCliente();
+    if (!comp) return;
+    const alvo = document.getElementById('apres-impressao');
+    alvo.innerHTML = montarCliente(false).html;
+    await Promise.all(Array.from(alvo.querySelectorAll('img')).map((i) => (i.decode ? i.decode().catch(() => null) : null)));
+    document.body.classList.add('imprimindo-cliente');
+    const antes = document.title;
+    const mes = E.rel.meses.find((m) => m.comp === comp);
+    document.title = 'Relatório de variações ' + E.emp.nome + ' ' + (mes ? mes.rotulo.replace('/', '-') : '');
+    const fim = () => { document.body.classList.remove('imprimindo-cliente'); alvo.innerHTML = ''; document.title = antes; raiz.removeEventListener('afterprint', fim); };
+    raiz.addEventListener('afterprint', fim);
+    setTimeout(() => raiz.print(), 80);
+    app().armazenamento.registrarNoLog({ codigo: E.codigo, acao: 'apresentacao-cliente-impresso', alvo: 'apresentacao/' + E.ano, detalhe: String(comp).slice(0, 7) }).catch(() => {});
+  }
+  // Guarda a configuração em fila (cliques e textos em sequência não se atropelam).
+  function salvarEmFila(acao, detalhe, aviso) {
+    const config = E.config;
+    E.fila = (E.fila || Promise.resolve())
+      .then(() => guardarConfig(config, acao, detalhe))
+      .then(() => { if (aviso) T.avisoRapido(aviso, 'ok', 2500); })
+      .catch((e) => { T.avisoRapido('Não foi possível guardar: ' + T.mensagemDeErro(e), 'erro'); app().mostrarRota(); });
   }
 
   async function guardarConfig(novo, acao, detalhe) {
@@ -628,7 +932,7 @@
     const escolha = await T.janela({
       titulo: 'Imprimir ou salvar em PDF',
       corpo: '<p class="suave pequeno" style="margin:0 0 8px">Escolha as partes. Cada uma começa numa folha nova, deitada. O balancete sai até o nível e com as opções que estão na tela.</p>' +
-        ABAS.map((a) => '<label class="item-aba"><input type="checkbox" value="' + a.id + '"' + (/^balancete/.test(a.id) ? '' : ' checked') + '> ' + a.titulo + '</label>').join('') +
+        ABAS.filter((a) => a.id !== 'cliente').map((a) => '<label class="item-aba"><input type="checkbox" value="' + a.id + '"' + (/^balancete/.test(a.id) ? '' : ' checked') + '> ' + a.titulo + '</label>').join('') +
         '<label class="item-aba" style="margin-top:8px"><input type="checkbox" id="apres-imp-abrir" checked> DRE com todas as contas analíticas abertas</label>',
       botoes: [{ texto: 'Cancelar', valor: null }, { texto: '🖨 Imprimir', tipo: 'primario', antes: (j) => {
         const partes = Array.from(j.querySelectorAll('input[type=checkbox][value]:checked')).map((x) => x.value);
@@ -698,6 +1002,13 @@
       e[t + '.val.acum'] = Object.assign({}, base, { formato: 'dinheiro', negrito: true, fundo: ACUM[t], borda: borda({ esq: { estilo: 'medium', cor: COR.azul } }) });
       e[t + '.pct.acum'] = Object.assign({}, base, { formato: 'porcento', tam: 9, cor: b.cor || COR.suave, fundo: ACUM[t], borda: borda() });
     });
+    // Indicadores: "1,56x", "12,5%", R$ e "38 dias"; o período com fundo e a linha à esquerda.
+    const FMT_IND = { x: '0.00"x";[Red]-0.00"x";"–"', pct: 'porcento', val: 'dinheiro', dias: '0" dias";[Red]-0" dias";"–"' };
+    Object.keys(FMT_IND).forEach((k) => {
+      e['ind.' + k] = { formato: FMT_IND[k], cor: COR.texto, borda: { baixo: { cor: COR.linha } } };
+      e['ind.' + k + '.acum'] = { formato: FMT_IND[k], negrito: true, cor: COR.texto, fundo: 'FFEEF3F8', borda: { baixo: { cor: COR.linha }, esq: { estilo: 'medium', cor: COR.azul } } };
+    });
+    e['ind.formula'] = { tam: 9, cor: COR.suave, borda: { baixo: { cor: COR.linha } } };
     return e;
   }
 
@@ -765,6 +1076,31 @@
       if (avah) { out.push({ v: P(l.av[k]), e: tipo + '.pct' + acum }); out.push({ v: P(l.ah[k]), e: tipo + '.pct' + acum }); }
     });
     return out;
+  }
+
+  // Indicadores: os meses escolhidos e o período (resultado somado nos meses, balanço do último mês).
+  function folhaIndicadores() {
+    const ind = indicadoresVisiveis();
+    const larg = larguraValor([ind.linhas.find((l) => l.id === 'ccl').valores], 14);
+    const f = novaFolha('Indicadores', [44, 72].concat(ind.colunas.map(() => larg)));
+    f.titulo('Indicadores financeiros e patrimoniais', E.ano + ' · balanço pelo saldo do fim do mês; resultado pelo movimento do mês · Período: resultado somado nos meses e balanço do último mês' +
+      ' · PL* = ativo total − passivo circulante − passivo não circulante');
+    const r1 = f.add([{ v: 'Indicador', e: 'cabEsq' }, { v: 'Fórmula', e: 'cabEsq' }].concat(ind.colunas.map((c) => ({ v: c.rotulo, e: c.acumulado ? 'cabAcum' : 'cab' }))), { altura: 30 });
+    const ESTILO = { x: 'ind.x', '%': 'ind.pct', 'R$': 'ind.val', dias: 'ind.dias' };
+    let grupo = null;
+    ind.linhas.forEach((l) => {
+      if (l.grupo !== grupo) {
+        grupo = l.grupo;
+        f.add([{ v: grupo.toUpperCase(), e: 'cat' }].concat(Array.from({ length: ind.colunas.length + 1 }, () => ({ v: '', e: 'cat' }))), { altura: 16 });
+      }
+      f.add([{ v: l.rotulo, e: 'ana.rot0' }, { v: l.formula, e: 'ind.formula' }].concat(l.valores.map((v, k) => ({ v: l.tipo === 'R$' ? R(v) : P(v), e: ESTILO[l.tipo] + (ind.colunas[k].acumulado ? '.acum' : '') }))));
+    });
+    f.vazia();
+    f.add([{ v: 'Contas usadas (achadas pelo nome no plano de contas):', e: 'subtitulo' }]);
+    ind.contas.forEach((c) => f.add([{ v: c.nome, e: 'ind.formula' }, { v: c.conta ? c.conta + ' ' + c.titulo : 'não achada', e: 'ind.formula' }]));
+    f.congelar = { linhas: r1, colunas: 1 };
+    f.repetir = [r1, r1];
+    return f;
   }
 
   function folhaResumo() {
@@ -915,6 +1251,7 @@
     const escolha = E.selecao ? ' · meses escolhidos: ' + rotuloSelecao(mesesVisiveis()) : '';
     const planilhas = [
       folhaResumo(),
+      folhaIndicadores(),
       folhaDre('DRE mensal', 'DRE CPC 51 mensal detalhada', E.ano + ' · valores em R$ · receitas positivas, custos e despesas entre parênteses · AV % sobre a receita líquida · AH % sobre o mês anterior' + escolha +
         ' · clique no + à esquerda para abrir as contas de um subtotal', dreMensalVisivel()),
       folhaDre('DRE trimestral', 'DRE CPC 51 trimestral detalhada', E.ano + ' · valores em R$ · AV % sobre a receita líquida · AH % sobre o trimestre anterior · clique no + à esquerda para abrir as contas',
@@ -923,7 +1260,7 @@
         ' · use os números 1 a 5 no canto esquerdo do Excel para abrir ou fechar os níveis', balanceteMensalVisivel()),
       folhaBalancete('Balancete trimestral', 'Balancete analítico trimestral', E.ano + ' · contas 1 e 2: saldo no fim do trimestre · 3, 4 e 5: soma dos meses · AV % sobre a conta-mãe', E.rel.trimestral),
     ].concat(folhasLalur(), [folhaBase()]);
-    const ordem = { resumo: 0, 'dre-mensal': 1, 'dre-trimestral': 2, 'balancete-mensal': 3, 'balancete-trimestral': 4, lalur: 5 };
+    const ordem = { resumo: 0, indicadores: 1, 'dre-mensal': 2, 'dre-trimestral': 3, 'balancete-mensal': 4, 'balancete-trimestral': 5, lalur: 6 };
     return raiz.ExcelBonito.gerar({ planilhas, estilos: estilosDoExcel(), ativa: ordem[E.aba] || 0 });
   }
 

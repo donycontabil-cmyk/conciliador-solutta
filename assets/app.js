@@ -10,7 +10,7 @@
   // Armadilha 23: lista de <script> alterada sem conferir -> módulo não carrega, calado.
   // Aqui se confere: faltando algum, a tela diz qual.
   const MODULOS = ['CONFIG', 'XLSX', 'Util', 'LerPlanilha', 'LerRazao', 'LerFinanceiro', 'LerBalancete', 'Familias', 'Leitor', 'MotorNomes',
-    'MotorReclass', 'MotorFechamento', 'MotorTerceiro', 'MotorApresentacao', 'ExcelBonito', 'LayoutAjustes', 'Demonstracao', 'Diagnostico', 'Armazenamento', 'ArmazenamentoPasta', 'ArmazenamentoMemoria',
+    'MotorReclass', 'MotorFechamento', 'MotorTerceiro', 'MotorApresentacao', 'ExcelBonito', 'RelatorioCliente', 'LayoutAjustes', 'Demonstracao', 'Diagnostico', 'Armazenamento', 'ArmazenamentoPasta', 'ArmazenamentoMemoria',
     'Tela', 'TelaPasta', 'TelaCarteira', 'TelaEmpresa', 'TelaFamilia', 'TelaSubir', 'TelaPasso1', 'TelaPasso3', 'TelaRelatorio3', 'TelaApresentacao', 'TelaSuporte'];
 
   const CHAVE_USUARIO = 'conciliador-solutta.usuario';

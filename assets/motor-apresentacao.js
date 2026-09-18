@@ -501,6 +501,110 @@
   }
 
   // ------------------------------------------------------------------
+  // INDICADORES financeiros e patrimoniais (Dony, 18/09/2026: "uma tela de índices — liquidez, ROI,
+  // investidores, endividamento, essas coisas"). Balanço: saldo do fim do mês; resultado: movimento do mês.
+  // As contas do balanço são achadas pelo NOME (ativo circulante, estoques…), com o código de sempre como
+  // reserva — outro plano de contas também funciona, e a tela mostra quais contas foram usadas.
+  // PL* = ativo total − passivo circulante − passivo não circulante: inclui o resultado do ano que ainda não
+  // foi encerrado no balancete (sem isso o ROE e o capital de terceiros ÷ próprio sairiam errados no meio do ano).
+  // ------------------------------------------------------------------
+  const INDICADORES = [
+    { id: 'liquidezCorrente', grupo: 'Liquidez', rotulo: 'Liquidez corrente', formula: 'Ativo circulante ÷ passivo circulante', tipo: 'x', melhor: 'maior' },
+    { id: 'liquidezSeca', grupo: 'Liquidez', rotulo: 'Liquidez seca', formula: '(Ativo circulante − estoques) ÷ passivo circulante', tipo: 'x', melhor: 'maior' },
+    { id: 'liquidezImediata', grupo: 'Liquidez', rotulo: 'Liquidez imediata', formula: 'Disponível ÷ passivo circulante', tipo: 'x', melhor: 'maior' },
+    { id: 'liquidezGeral', grupo: 'Liquidez', rotulo: 'Liquidez geral', formula: '(Ativo circulante + realizável a longo prazo) ÷ (passivo circulante + não circulante)', tipo: 'x', melhor: 'maior' },
+    { id: 'ccl', grupo: 'Liquidez', rotulo: 'Capital circulante líquido', formula: 'Ativo circulante − passivo circulante', tipo: 'R$', melhor: 'maior' },
+    { id: 'endividamento', grupo: 'Endividamento e estrutura', rotulo: 'Endividamento sobre o ativo', formula: '(Passivo circulante + não circulante) ÷ ativo total', tipo: '%', melhor: 'menor' },
+    { id: 'composicao', grupo: 'Endividamento e estrutura', rotulo: 'Composição do endividamento (curto prazo)', formula: 'Passivo circulante ÷ (passivo circulante + não circulante)', tipo: '%', melhor: 'menor' },
+    { id: 'terceiros', grupo: 'Endividamento e estrutura', rotulo: 'Capital de terceiros ÷ capital próprio', formula: '(Passivo circulante + não circulante) ÷ PL*', tipo: 'x', melhor: 'menor' },
+    { id: 'imobilizacao', grupo: 'Endividamento e estrutura', rotulo: 'Imobilização do patrimônio líquido', formula: '(Ativo não circulante − realizável a longo prazo) ÷ PL*', tipo: '%', melhor: 'menor' },
+    { id: 'margemBruta', grupo: 'Rentabilidade e retorno', rotulo: 'Margem bruta', formula: 'Lucro bruto ÷ receita líquida', tipo: '%', melhor: 'maior' },
+    { id: 'margemEbitda', grupo: 'Rentabilidade e retorno', rotulo: 'Margem EBITDA', formula: 'EBITDA gerencial ÷ receita líquida', tipo: '%', melhor: 'maior' },
+    { id: 'margemOperacional', grupo: 'Rentabilidade e retorno', rotulo: 'Margem operacional', formula: 'Lucro operacional ÷ receita líquida', tipo: '%', melhor: 'maior' },
+    { id: 'margemLiquida', grupo: 'Rentabilidade e retorno', rotulo: 'Margem líquida', formula: 'Lucro líquido ÷ receita líquida', tipo: '%', melhor: 'maior' },
+    { id: 'roi', grupo: 'Rentabilidade e retorno', rotulo: 'ROI — retorno sobre o ativo', formula: 'Lucro líquido ÷ ativo total', tipo: '%', melhor: 'maior' },
+    { id: 'roe', grupo: 'Rentabilidade e retorno', rotulo: 'ROE — retorno do investidor (sobre o PL)', formula: 'Lucro líquido ÷ PL*', tipo: '%', melhor: 'maior' },
+    { id: 'giro', grupo: 'Rentabilidade e retorno', rotulo: 'Giro do ativo', formula: 'Receita líquida ÷ ativo total', tipo: 'x', melhor: 'maior' },
+    { id: 'pmr', grupo: 'Prazos médios', rotulo: 'Prazo médio de recebimento', formula: 'Clientes ÷ receita bruta do mês × 30', tipo: 'dias', melhor: 'menor' },
+    { id: 'pme', grupo: 'Prazos médios', rotulo: 'Prazo médio de estocagem', formula: 'Estoques ÷ custo das mercadorias do mês × 30', tipo: 'dias', melhor: 'menor' },
+  ];
+
+  // As contas do balanço que os indicadores usam: pelo nome, com o código de sempre como reserva.
+  function contasDoBalanco(contas) {
+    const porConta = new Map(contas.map((c) => [c.conta, c]));
+    const filhas = (pai) => (pai ? contas.filter((c) => c.pai === pai.conta) : []);
+    const nome = (c) => String(c.titulo || '').toUpperCase();
+    const achar = (lista, sim, nao, reserva) => lista.find((c) => sim.test(nome(c)) && !(nao && nao.test(nome(c)))) || porConta.get(reserva) || null;
+    const NAO_CIRC = /N[AÃ]O[\s-]*CIRCULANTE|LONGO PRAZO/;
+    const ativo = porConta.get('1') || null, passivo = porConta.get('2') || null;
+    const ac = achar(filhas(ativo), /CIRCULANTE/, NAO_CIRC, '1.1');
+    const anc = achar(filhas(ativo), NAO_CIRC, null, '1.2');
+    const pc = achar(filhas(passivo), /CIRCULANTE/, NAO_CIRC, '2.1');
+    return {
+      ativo, ac, anc, pc,
+      disponivel: achar(filhas(ac), /DISPON[IÍ]VE|CAIXA/, null, '1.1.1'),
+      clientes: achar(filhas(ac), /CLIENTE|RECEBER/, null, '1.1.2'),
+      estoques: achar(filhas(ac), /ESTOQUE/, null, '1.1.4'),
+      rlp: achar(filhas(anc), /REALIZ[AÁ]VEL/, null, '1.2.1'),
+      pnc: achar(filhas(passivo), NAO_CIRC, null, '2.2'),
+      pl: achar(filhas(passivo), /PATRIM[OÔ]NIO/, null, '2.3'),
+    };
+  }
+  const NOMES_CONTAS_BALANCO = { ativo: 'Ativo total', ac: 'Ativo circulante', disponivel: 'Disponível', clientes: 'Clientes', estoques: 'Estoques', anc: 'Ativo não circulante',
+    rlp: 'Realizável a longo prazo', pc: 'Passivo circulante', pnc: 'Passivo não circulante', pl: 'Patrimônio líquido (contábil)' };
+
+  // ks: índices dos meses (padrão: todos com balancete). acumulado: acrescenta a coluna do período
+  // (resultado somado nos meses; balanço no último mês).
+  function indicadores(rel, ks, op) {
+    const opc = op || {};
+    const meses = rel.meses;
+    const idx = (ks || meses.map((m, k) => (m.tem ? k : -1)).filter((k) => k >= 0)).slice();
+    const contas = contasDoBalanco(rel.contas);
+    const saldo = new Map(rel.mensal.linhas.map((l) => [l.conta, l.valores]));
+    const dre = new Map(rel.dre.mensal.linhas.filter((l) => l.tipo !== 'analitica').map((l) => [l.id, l.valores]));
+    const bal = (qual, k) => { const c = contas[qual]; if (!c || !meses[k] || !meses[k].tem) return null; const v = (saldo.get(c.conta) || [])[k]; return v === null || v === undefined ? 0 : v; };
+    const fluxo = (id, k) => { const v = (dre.get(id) || [])[k]; return v === null || v === undefined ? null : v; };
+    const div = (a, b) => (a === null || b === null || !b ? null : a / b);
+    // Componentes de um mês (ou do período: fluxos somados, balanço do último mês).
+    function componentes(lista) {
+      const ult = lista[lista.length - 1];
+      if (ult === undefined || !meses[ult] || !meses[ult].tem) return null;
+      const soma = (id) => { let s = 0, tem = false; lista.forEach((k) => { const v = fluxo(id, k); if (v !== null) { s += v; tem = true; } }); return tem ? s : null; };
+      const ativo = bal('ativo', ult), ac = bal('ac', ult), anc = bal('anc', ult);
+      const pc = -bal('pc', ult), pnc = contas.pnc ? -bal('pnc', ult) : 0; // passivo: saldo credor vem negativo
+      return { n: lista.length, ativo, ac, anc, pc, pnc, disponivel: bal('disponivel', ult), clientes: bal('clientes', ult), estoques: bal('estoques', ult), rlp: contas.rlp ? bal('rlp', ult) : 0,
+        pl: ativo - pc - pnc, rb: soma('receitaBruta'), rl: soma('receitaLiquida'), lb: soma('lucroBruto'), ebitda: soma('ebitda'), lo: soma('lucroOperacional'), ll: soma('lucroLiquido'),
+        cmv: soma('cmv') === null ? null : -soma('cmv') };
+    }
+    const CALCULO = {
+      liquidezCorrente: (x) => div(x.ac, x.pc), liquidezSeca: (x) => div(x.ac - x.estoques, x.pc), liquidezImediata: (x) => div(x.disponivel, x.pc),
+      liquidezGeral: (x) => div(x.ac + x.rlp, x.pc + x.pnc), ccl: (x) => x.ac - x.pc,
+      endividamento: (x) => div(x.pc + x.pnc, x.ativo), composicao: (x) => div(x.pc, x.pc + x.pnc), terceiros: (x) => (x.pl > 0 ? div(x.pc + x.pnc, x.pl) : null),
+      imobilizacao: (x) => (x.pl > 0 ? div(x.anc - x.rlp, x.pl) : null),
+      margemBruta: (x) => div(x.lb, x.rl), margemEbitda: (x) => div(x.ebitda, x.rl), margemOperacional: (x) => div(x.lo, x.rl), margemLiquida: (x) => div(x.ll, x.rl),
+      roi: (x) => div(x.ll, x.ativo), roe: (x) => (x.pl > 0 ? div(x.ll, x.pl) : null), giro: (x) => div(x.rl, x.ativo),
+      pmr: (x) => (x.rb > 0 ? x.clientes / (x.rb / x.n) * 30 : null), pme: (x) => (x.cmv > 0 ? x.estoques / (x.cmv / x.n) * 30 : null),
+    };
+    // Sem a conta de que o indicador precisa, ele fica vazio (não inventa zero).
+    const PRECISA = { liquidezCorrente: ['ac', 'pc'], liquidezSeca: ['ac', 'pc', 'estoques'], liquidezImediata: ['disponivel', 'pc'], liquidezGeral: ['ac', 'pc'], ccl: ['ac', 'pc'],
+      endividamento: ['ativo', 'pc'], composicao: ['pc'], terceiros: ['ativo', 'pc'], imobilizacao: ['ativo', 'anc', 'pc'], roi: ['ativo'], roe: ['ativo', 'pc'], giro: ['ativo'],
+      pmr: ['clientes'], pme: ['estoques'] };
+    const temContas = (id) => (PRECISA[id] || []).every((q) => contas[q]);
+    const porMes = idx.map((k) => componentes([k]));
+    const doPeriodo = opc.acumulado ? componentes(idx.filter((k) => meses[k].tem)) : null;
+    const linhas = INDICADORES.map((ind) => {
+      const calc = (x) => (x && temContas(ind.id) ? CALCULO[ind.id](x) : null);
+      const valores = porMes.map(calc);
+      if (opc.acumulado) valores.push(calc(doPeriodo));
+      return Object.assign({}, ind, { valores: valores.map((v) => (v === null || !isFinite(v) ? null : v)) });
+    });
+    const colunas = idx.map((k) => ({ k, id: meses[k].comp, rotulo: meses[k].rotulo, falta: !meses[k].tem }));
+    if (opc.acumulado) colunas.push({ acumulado: true, rotulo: 'Período ' + (idx.length ? meses[idx[0]].rotulo.slice(0, 3) + '–' + meses[idx[idx.length - 1]].rotulo.slice(0, 3) : '') });
+    const usadas = Object.keys(NOMES_CONTAS_BALANCO).map((q) => ({ qual: q, nome: NOMES_CONTAS_BALANCO[q], conta: contas[q] ? contas[q].conta : null, titulo: contas[q] ? contas[q].titulo : null }));
+    return { colunas, linhas, contas: usadas, faltam: usadas.filter((u) => !u.conta).map((u) => u.nome), componentes: porMes };
+  }
+
+  // ------------------------------------------------------------------
   // Versões de um balancete: contas que entraram, saíram e mudaram (mesmo formato do compararVersoes
   // do razão e do aging: entraram e saíram trazem também as que mudaram).
   // ------------------------------------------------------------------
@@ -519,5 +623,5 @@
     return { tipo: 'balancete', iguais: la.length - sairam.length, entraram, sairam, mudaram, qtdAntes: la.length, qtdDepois: ld.length, antes: totais(la), depois: totais(ld) };
   }
 
-  return { montar, compararBalancetes, MODELO_DRE, FORA_DA_DRE, PARAMETROS, AJUSTES_MODELO, CONTA_PAT_MODELO, PREMISSAS, rotuloMes, compararContas, valorUsado };
+  return { montar, compararBalancetes, indicadores, INDICADORES, contasDoBalanco, MODELO_DRE, FORA_DA_DRE, PARAMETROS, AJUSTES_MODELO, CONTA_PAT_MODELO, PREMISSAS, rotuloMes, compararContas, valorUsado };
 });
