@@ -40,7 +40,7 @@
 
   // Estado da tela (continua entre redesenhos).
   const E = { codigo: null, ano: null, emp: null, rel: null, registro: null, config: {}, lugares: [], metas: [],
-    aba: 'dre-mensal', avah: true, nivel: 5, semZeradas: false, abertos: new Set(), selecao: null, marcarLalur: false, balancetes: [], fila: null, clienteMes: null, cacheCliente: null, ultimoCliente: null };
+    aba: 'dre-mensal', avah: true, nivel: 5, semZeradas: false, abertos: new Set(), selecao: null, marcarLalur: false, balancetes: [], fila: null, clienteMes: null, cacheCliente: null, ultimoCliente: null, casas: 2, milhar: false };
   (function lerPreferencias() {
     try {
       const p = JSON.parse((raiz.localStorage && raiz.localStorage.getItem(CHAVE_PREF)) || '{}') || {};
@@ -48,21 +48,44 @@
       if (typeof p.avah === 'boolean') E.avah = p.avah;
       if (p.nivel >= 1 && p.nivel <= 9) E.nivel = p.nivel;
       if (typeof p.semZeradas === 'boolean') E.semZeradas = p.semZeradas;
+      if (p.casas === 0 || p.casas === 1 || p.casas === 2) E.casas = p.casas;
+      if (typeof p.milhar === 'boolean') E.milhar = p.milhar;
     } catch (e) { /* sem preferências guardadas */ }
   })();
   function guardarPreferencias() {
-    try { raiz.localStorage.setItem(CHAVE_PREF, JSON.stringify({ aba: E.aba, avah: E.avah, nivel: E.nivel, semZeradas: E.semZeradas })); } catch (e) { /* navegador sem armazenamento */ }
+    try { raiz.localStorage.setItem(CHAVE_PREF, JSON.stringify({ aba: E.aba, avah: E.avah, nivel: E.nivel, semZeradas: E.semZeradas, casas: E.casas, milhar: E.milhar })); } catch (e) { /* navegador sem armazenamento */ }
   }
 
   // ------------------------------------------------------------------
   // Números no formato da planilha: negativo em vermelho entre parênteses, zero como "–".
+  // Como os valores aparecem (Dony, 18/09/2026: "um botão para arredondar, eliminar os zeros, e para
+  // mostrar por milhar: 100 mil vira 100"): casas depois da vírgula (2, 1 ou 0) e escala (R$ ou R$ mil).
+  // Vale para a tela, a impressão, o Excel (a célula guarda o valor inteiro, só o formato muda) e o
+  // relatório do cliente. Valor que arredonda para zero sai "0"; zero de verdade continua "–".
   // ------------------------------------------------------------------
+  const FORMATADORES = {};
+  function numeroNaEscala(centavos) {
+    const casas = E.casas;
+    const f = FORMATADORES[casas] || (FORMATADORES[casas] = new Intl.NumberFormat('pt-BR', { minimumFractionDigits: casas, maximumFractionDigits: casas }));
+    return f.format(Math.abs(centavos) / 100 / (E.milhar ? 1000 : 1));
+  }
   function dinheiro(c) {
     if (c === null || c === undefined || !isFinite(c)) return '';
     const n = Math.round(c);
     if (n === 0) return '<span class="zero">–</span>';
-    const t = U.formatarCentavos(Math.abs(n));
+    const t = E.casas === 2 && !E.milhar ? U.formatarCentavos(Math.abs(n)) : numeroNaEscala(n);
     return n < 0 ? '<span class="neg">(' + t + ')</span>' : t;
+  }
+  function valoresEm() { return 'valores em ' + (E.milhar ? 'R$ mil' : 'R$') + (E.casas === 0 ? ', arredondados' : E.casas === 1 ? ', com uma casa decimal' : ''); }
+  const numerosPadrao = () => E.casas === 2 && !E.milhar;
+  // Os botões (em todas as abas): 1.234,56 · 1.234,6 · 1.235 e R$ · R$ mil.
+  function opcoesNumeros() {
+    const casas = [[2, '1.234,56', 'Com centavos'], [1, '1.234,6', 'Uma casa depois da vírgula'], [0, '1.235', 'Arredondado, sem casas depois da vírgula']]
+      .map(([n, ex, dica]) => '<button type="button" class="seg' + (E.casas === n ? ' ativo' : '') + '" data-casas="' + n + '" title="' + dica + '" aria-pressed="' + (E.casas === n) + '">' + ex + '</button>').join('');
+    const escala = [[false, 'R$', 'Valores em reais'], [true, 'R$ mil', 'Valores em milhares: 100.000 vira 100']]
+      .map(([m, ex, dica]) => '<button type="button" class="seg' + (E.milhar === m ? ' ativo' : '') + '" data-milhar="' + (m ? 1 : 0) + '" title="' + dica + '" aria-pressed="' + (E.milhar === m) + '">' + ex + '</button>').join('');
+    return '<span class="grupo-seg" title="Como os valores aparecem na tela, na impressão, no Excel e no relatório do cliente"><span class="seg-rotulo">Números</span>' + casas + '</span>' +
+      '<span class="grupo-seg">' + escala + '</span>';
   }
   function pct(x) {
     if (x === null || x === undefined || !isFinite(x)) return '';
@@ -163,7 +186,8 @@
       '<div class="apres-folha" id="apres-folha">' + secao(E.aba, {}) + '</div>';
   }
 
-  function opcoesDaAba() {
+  function opcoesDaAba() { return opcoesNumeros() + opcoesDaAbaSo(); }
+  function opcoesDaAbaSo() {
     const avah = '<label class="caixa-opcao"><input type="checkbox" data-opcao="avah"' + (E.avah ? ' checked' : '') + '> AV % e AH %</label>';
     const marcar = '<label class="caixa-opcao lalur-opcao' + (E.marcarLalur ? ' ligada' : '') + '" title="Mostra, em cada conta, os botões para marcar adição ou exclusão do LALUR">' +
       '<input type="checkbox" data-opcao="marcar-lalur"' + (E.marcarLalur ? ' checked' : '') + '> ✎ Marcar adições e exclusões do LALUR</label>';
@@ -305,7 +329,8 @@
   }
 
   function tituloSecao(titulo, sub) {
-    return '<div class="apres-titulo"><h2>' + T.esc(E.emp.nome) + ' — ' + T.esc(titulo) + '</h2>' + (sub ? '<p>' + sub + '</p>' : '') + '</div>';
+    const nota = !numerosPadrao() && String(sub || '').indexOf('valores em') < 0 ? (sub ? ' · ' : '') + valoresEm() : '';
+    return '<div class="apres-titulo"><h2>' + T.esc(E.emp.nome) + ' — ' + T.esc(titulo) + '</h2>' + (sub || nota ? '<p>' + (sub || '') + nota + '</p>' : '') + '</div>';
   }
 
   // Cabeçalho das tabelas com períodos: com AV/AH, cada período ocupa 3 colunas (Valor, AV %, AH %).
@@ -379,7 +404,7 @@
     const nota = E.rel.dre.naoMapeadas.length ? '<p class="apres-nota">⚠️ "Outras contas de resultado" reúne conta(s) de resultado que nenhuma linha do modelo pega: ' +
       E.rel.dre.naoMapeadas.map((x) => T.esc(x.conta + ' ' + x.titulo)).join('; ') + '. Diga em que linha ela(s) entra(m) para ficar certo na apresentação.</p>' : '';
     const fora = E.rel.dre.foraDaDre.length ? '<p class="apres-nota suave">Fora da DRE, como na planilha: ' + E.rel.dre.foraDaDre.length + ' conta(s) de compras e estoque (4.2), que somam zero no mês.</p>' : '';
-    return tituloSecao(titulo, T.esc(E.ano) + ' · valores em R$ · receitas positivas, custos e despesas entre parênteses') +
+    return tituloSecao(titulo, T.esc(E.ano) + ' · ' + valoresEm() + ' · receitas positivas, custos e despesas entre parênteses') +
       '<div class="apres-caixa"><table class="apres dre' + (avah ? ' com-avah' : '') + (E.marcarLalur ? ' marcando' : '') + '">' + cabecalhoPeriodos([{ titulo: 'Linha / Conta analítica' }], colunas, avah) +
       '<tbody>' + corpo + '</tbody></table></div>' + nota + fora;
   }
@@ -469,6 +494,10 @@
       if (lt) { marcarConta(el, lt.getAttribute('data-lalur-tirar'), null); return; }
       const g = ev.target.closest('tr.grupo[data-grupo]');
       if (g) { const id = g.getAttribute('data-grupo'); if (E.abertos.has(id)) E.abertos.delete(id); else E.abertos.add(id); redesenharFolha(el); return; }
+      const casas = ev.target.closest('button[data-casas]');
+      if (casas) { E.casas = Number(casas.getAttribute('data-casas')); guardarPreferencias(); redesenharConteudo(el); return; }
+      const milhar = ev.target.closest('button[data-milhar]');
+      if (milhar) { E.milhar = milhar.getAttribute('data-milhar') === '1'; guardarPreferencias(); redesenharConteudo(el); return; }
       const rc = ev.target.closest('button[data-rc]');
       if (rc) { await acaoCliente(el, rc.getAttribute('data-rc')); return; }
       const mais = ev.target.closest('button[data-rc-mais]');
@@ -661,7 +690,7 @@
   function montarCliente(editavel) {
     const comp = compDoCliente();
     const r = raiz.RelatorioCliente.montar({ rel: relDoCliente(comp), comp, emp: { nome: E.emp.nome, cnpj: E.emp.cnpj, logo: E.emp.logo }, cor: corDoCliente(),
-      textos: textosDoCliente(comp), editavel, emissao: U.dataHoraLocal(U.agoraISO()).slice(0, 10) });
+      textos: textosDoCliente(comp), editavel, emissao: U.dataHoraLocal(U.agoraISO()).slice(0, 10), formato: { casas: E.casas, milhar: E.milhar } });
     if (editavel) E.ultimoCliente = r.textos;
     return r;
   }
@@ -945,7 +974,7 @@
     alvo.innerHTML = '<div class="apres-capa"><div class="rel-marca"><span class="selo-marca">S</span> ' + T.esc(app().config.programa) + '</div>' +
       '<h1>Relatório de apresentação · ' + E.ano + '</h1><p>' + T.esc(E.emp.nome) + (E.emp.cnpj ? ' · CNPJ ' + T.esc(U.formatarCnpj(E.emp.cnpj)) : '') + '</p>' +
       '<p class="suave">' + (carregados.length ? T.esc(carregados[0].rotulo + ' a ' + carregados[carregados.length - 1].rotulo) + ' · ' : '') +
-      (E.selecao ? 'visões mensais com os meses escolhidos: ' + T.esc(rotuloSelecao(mesesVisiveis())) + ' · ' : '') +
+      (E.selecao ? 'visões mensais com os meses escolhidos: ' + T.esc(rotuloSelecao(mesesVisiveis())) + ' · ' : '') + T.esc(valoresEm()) + ' · ' +
       'emitido por ' + T.esc(app().usuario.nome || '') + ' em ' + U.dataHoraLocal(U.agoraISO()) + '</p></div>' +
       escolha.partes.map((p) => '<section class="apres-parte">' + secao(p, { impressao: true, abrirTudo: escolha.abrirTudo }) + '</section>').join('');
     document.body.classList.add('imprimindo-apresentacao');
@@ -970,7 +999,13 @@
   const COR = { azul: 'FF1F4E78', azulSub: 'FF2B5D8A', azulAcum: 'FF0F2C46', azulAcumSub: 'FF16395A', azulTri: 'FF173B5C', ambar: 'FF7A5A16',
     branco: 'FFFFFFFF', texto: 'FF1D2733', suave: 'FF5F6B7A', fraco: 'FF8A94A1', linha: 'FFE6EAEF', divisa: 'FF2D6190' };
 
+  // "#,##0.00" com as casas escolhidas; em R$ mil, a vírgula no fim do formato faz o Excel mostrar o valor ÷ 1.000.
+  function formatoDinheiroExcel() {
+    const p = '#,##0' + (E.casas ? '.' + '0'.repeat(E.casas) : '') + (E.milhar ? ',' : '');
+    return p + ';[Red]\\(' + p + '\\);"–"';
+  }
   function estilosDoExcel() {
+    const FMT_DIN = formatoDinheiroExcel();
     const e = {
       titulo: { negrito: true, tam: 14, cor: COR.azul },
       subtitulo: { italico: true, tam: 9, cor: COR.suave },
@@ -997,13 +1032,13 @@
       e[t + '.cod'] = Object.assign({}, base, { tam: 9, cor: COR.fraco, negrito: false, borda: borda() });
       e[t + '.txt'] = Object.assign({}, base, { borda: borda(), vert: 'top' });
       e[t + '.txtq'] = Object.assign({}, base, { borda: borda(), quebra: true, vert: 'top' });
-      e[t + '.val'] = Object.assign({}, base, { formato: 'dinheiro', borda: borda() });
+      e[t + '.val'] = Object.assign({}, base, { formato: FMT_DIN, borda: borda() });
       e[t + '.pct'] = Object.assign({}, base, { formato: 'porcento', tam: 9, cor: b.cor || COR.suave, borda: borda() });
-      e[t + '.val.acum'] = Object.assign({}, base, { formato: 'dinheiro', negrito: true, fundo: ACUM[t], borda: borda({ esq: { estilo: 'medium', cor: COR.azul } }) });
+      e[t + '.val.acum'] = Object.assign({}, base, { formato: FMT_DIN, negrito: true, fundo: ACUM[t], borda: borda({ esq: { estilo: 'medium', cor: COR.azul } }) });
       e[t + '.pct.acum'] = Object.assign({}, base, { formato: 'porcento', tam: 9, cor: b.cor || COR.suave, fundo: ACUM[t], borda: borda() });
     });
     // Indicadores: "1,56x", "12,5%", R$ e "38 dias"; o período com fundo e a linha à esquerda.
-    const FMT_IND = { x: '0.00"x";[Red]-0.00"x";"–"', pct: 'porcento', val: 'dinheiro', dias: '0" dias";[Red]-0" dias";"–"' };
+    const FMT_IND = { x: '0.00"x";[Red]-0.00"x";"–"', pct: 'porcento', val: FMT_DIN, dias: '0" dias";[Red]-0" dias";"–"' };
     Object.keys(FMT_IND).forEach((k) => {
       e['ind.' + k] = { formato: FMT_IND[k], cor: COR.texto, borda: { baixo: { cor: COR.linha } } };
       e['ind.' + k + '.acum'] = { formato: FMT_IND[k], negrito: true, cor: COR.texto, fundo: 'FFEEF3F8', borda: { baixo: { cor: COR.linha }, esq: { estilo: 'medium', cor: COR.azul } } };
@@ -1046,7 +1081,10 @@
     f.add = (celulas, extra) => { f.linhas.push(Object.assign({ celulas }, extra || {})); return f.linhas.length; };
     f.vazia = () => { f.linhas.push(null); return f.linhas.length; };
     f.mesclar = (c1, r1, c2, r2) => f.mesclas.push(raiz.ExcelBonito.coluna(c1) + r1 + ':' + raiz.ExcelBonito.coluna(c2) + r2);
-    f.titulo = (titulo, sub) => { f.add([{ v: E.emp.nome + ' — ' + titulo, e: 'titulo' }], { altura: 22 }); f.add([{ v: sub || '', e: 'subtitulo' }]); f.vazia(); };
+    f.titulo = (titulo, sub) => {
+      const nota = !numerosPadrao() && String(sub || '').indexOf('valores em') < 0 ? (sub ? ' · ' : '') + valoresEm() : '';
+      f.add([{ v: E.emp.nome + ' — ' + titulo, e: 'titulo' }], { altura: 22 }); f.add([{ v: (sub || '') + nota, e: 'subtitulo' }]); f.vazia();
+    };
     return f;
   }
 
@@ -1109,7 +1147,7 @@
     const iAcum = dre.colunas.findIndex((c) => c.acumulado);
     const larg = larguraValor(r.linhas.map((l) => l.valores).concat([dre.linhas.map((l) => l.valores[iAcum])]), 16);
     const f = novaFolha('Resumo', [14, 44].concat(r.colunas.map(() => larg)));
-    f.titulo('Resumo executivo', 'Contas de 1º nível, mês a mês, acumulado e por trimestre' + (E.selecao ? ' · meses escolhidos: ' + rotuloSelecao(mesesVisiveis()) : '') + ' · valores em R$');
+    f.titulo('Resumo executivo', 'Contas de 1º nível, mês a mês, acumulado e por trimestre' + (E.selecao ? ' · meses escolhidos: ' + rotuloSelecao(mesesVisiveis()) : '') + ' · ' + valoresEm());
     // Os indicadores do período (as fichas do topo da tela).
     let n = f.add([{ v: 'Indicador', e: 'cabEsq' }, { v: '', e: 'cabEsq' }, { v: dre.colunas[iAcum].rotulo, e: 'cabAcum' }, { v: '% da receita líquida', e: 'cab' }], { altura: 30 });
     f.mesclar(0, n, 1, n);
@@ -1182,7 +1220,7 @@
     // Parte A
     let larg = larguraValor(L.parteA.linhas.map((l) => l.valores), 17);
     let f = novaFolha('LALUR Parte A', [44, 16].concat(L.parteA.colunas.map(() => larg)));
-    f.titulo('LALUR Parte A: apuração do lucro real e da CSLL', 'Apuração trimestral a partir da DRE; adições e exclusões pela lista de ajustes; incentivo PAT e Parte B · valores em R$');
+    f.titulo('LALUR Parte A: apuração do lucro real e da CSLL', 'Apuração trimestral a partir da DRE; adições e exclusões pela lista de ajustes; incentivo PAT e Parte B · ' + valoresEm());
     let r1 = f.add([{ v: 'Linha', e: 'cabEsq' }, { v: 'Bloco', e: 'cabEsq' }].concat(L.parteA.colunas.map((c) => ({ v: c.rotulo, e: c.soma ? 'cabAcum' : 'cab' }))), { altura: 30 });
     L.parteA.linhas.forEach((l) => {
       const t = l.destaque ? 'tot' : 'ana';
@@ -1194,7 +1232,7 @@
     // Ajustes
     larg = larguraValor(L.ajustes.linhas.map((a) => a.valores).concat([L.ajustes.adicoes, L.ajustes.exclusoes]), 14);
     f = novaFolha('LALUR Ajustes', [46, 18, 10].concat(L.ajustes.colunas.map(() => larg)));
-    f.titulo('LALUR: ajustes mensais e trimestrais', 'Valor positivo = adição · valor negativo = exclusão · valores em R$');
+    f.titulo('LALUR: ajustes mensais e trimestrais', 'Valor positivo = adição · valor negativo = exclusão · ' + valoresEm());
     r1 = f.add([{ v: 'Descrição', e: 'cabEsq' }, { v: 'Conta', e: 'cab' }, { v: 'Tipo', e: 'cab' }].concat(L.ajustes.colunas.map((c) => ({ v: c.rotulo, e: c.trimestre ? 'cabTri' : 'cab' }))), { altura: 20 });
     if (!L.ajustes.linhas.length) f.add([{ v: 'Nenhuma conta marcada como adição ou exclusão.', e: 'ana.txt' }]);
     L.ajustes.linhas.forEach((a) => f.add([{ v: a.titulo || a.conta, e: 'ana.rot0' }, { v: a.conta, e: 'ana.cod' }, { v: a.tipo, e: 'ana.txt' }]
@@ -1207,7 +1245,7 @@
     // PAT
     larg = larguraValor(L.pat.linhas.map((l) => l.valores), 14);
     f = novaFolha('LALUR PAT', [58, 8].concat(L.pat.colunas.map(() => larg)));
-    f.titulo('Incentivo fiscal PAT', 'Conta ' + (L.contaPAT || '—') + (L.pat.titulo ? ' · ' + L.pat.titulo : '') + ' · menor entre o incentivo potencial e 3,6% do IRPJ principal (15%) · valores em R$');
+    f.titulo('Incentivo fiscal PAT', 'Conta ' + (L.contaPAT || '—') + (L.pat.titulo ? ' · ' + L.pat.titulo : '') + ' · menor entre o incentivo potencial e 3,6% do IRPJ principal (15%) · ' + valoresEm());
     r1 = f.add([{ v: 'Descrição', e: 'cabEsq' }, { v: 'Linha', e: 'cab' }].concat(L.pat.colunas.map((c) => ({ v: c.rotulo, e: c.lalur ? 'cabAcum' : 'cab' }))), { altura: 30 });
     L.pat.linhas.forEach((l) => f.add([{ v: l.rotulo, e: 'ana.rot0' }, { v: l.letra, e: 'ana.cod' }].concat(l.valores.map((v, k) => ({ v: R(v), e: 'ana.val' + (L.pat.colunas[k].lalur ? '.acum' : '') })))));
     f.congelar = { linhas: r1, colunas: 1 };
@@ -1216,7 +1254,7 @@
     // Parte B
     larg = larguraValor(L.parteB.linhas.map((l) => l.valores), 16);
     f = novaFolha('LALUR Parte B', [46].concat(L.parteB.colunas.map(() => larg), [80]));
-    f.titulo('LALUR Parte B: controles fiscais', 'Saldos de prejuízo fiscal e base negativa (zerados até serem informados) e IR retido · valores em R$');
+    f.titulo('LALUR Parte B: controles fiscais', 'Saldos de prejuízo fiscal e base negativa (zerados até serem informados) e IR retido · ' + valoresEm());
     r1 = f.add([{ v: 'Controle', e: 'cabEsq' }].concat(L.parteB.colunas.map((c) => ({ v: c.rotulo, e: 'cab' })), [{ v: 'Observação', e: 'cabEsq' }]), { altura: 20 });
     L.parteB.linhas.forEach((l) => {
       const t = l.editavel ? 'inp' : 'ana';
@@ -1252,9 +1290,9 @@
     const planilhas = [
       folhaResumo(),
       folhaIndicadores(),
-      folhaDre('DRE mensal', 'DRE CPC 51 mensal detalhada', E.ano + ' · valores em R$ · receitas positivas, custos e despesas entre parênteses · AV % sobre a receita líquida · AH % sobre o mês anterior' + escolha +
+      folhaDre('DRE mensal', 'DRE CPC 51 mensal detalhada', E.ano + ' · ' + valoresEm() + ' · receitas positivas, custos e despesas entre parênteses · AV % sobre a receita líquida · AH % sobre o mês anterior' + escolha +
         ' · clique no + à esquerda para abrir as contas de um subtotal', dreMensalVisivel()),
-      folhaDre('DRE trimestral', 'DRE CPC 51 trimestral detalhada', E.ano + ' · valores em R$ · AV % sobre a receita líquida · AH % sobre o trimestre anterior · clique no + à esquerda para abrir as contas',
+      folhaDre('DRE trimestral', 'DRE CPC 51 trimestral detalhada', E.ano + ' · ' + valoresEm() + ' · AV % sobre a receita líquida · AH % sobre o trimestre anterior · clique no + à esquerda para abrir as contas',
         E.rel.dre.trimestral),
       folhaBalancete('Balancete mensal', 'Balancete analítico mensal', E.ano + ' · contas 1 e 2: saldo final do mês · 3, 4 e 5: movimento do mês · AV % sobre a conta-mãe' + escolha +
         ' · use os números 1 a 5 no canto esquerdo do Excel para abrir ou fechar os níveis', balanceteMensalVisivel()),
@@ -1274,5 +1312,5 @@
   }
 
   // _teste: para as provas montarem o Excel sem a tela (estado = os mesmos campos de E).
-  raiz.TelaApresentacao = { mostrar, _teste: { definirEstado: (x) => Object.assign(E, x), montarExcel } };
+  raiz.TelaApresentacao = { mostrar, _teste: { definirEstado: (x) => Object.assign(E, x), montarExcel, dinheiro } };
 })(self);

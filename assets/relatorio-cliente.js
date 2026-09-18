@@ -51,6 +51,16 @@
     if (v >= 1e3) return 'R$ ' + decimal(v / 1e3, 1) + ' mil';
     return 'R$ ' + decimal(v, 2);
   }
+  // Nas tabelas, cartões e leituras: com as casas e a escala escolhidas (R$ 1.235 · R$ 1.234,6 mil).
+  function rsFormato(c, fmt) {
+    if (vazio(c)) return '—';
+    const casas = fmt && (fmt.casas === 0 || fmt.casas === 1) ? fmt.casas : 2;
+    const milhar = !!(fmt && fmt.milhar);
+    const v = Math.round(c) / 100 / (milhar ? 1000 : 1);
+    const numero = decimal(Math.abs(v), casas);
+    const t = 'R$ ' + numero + (milhar ? ' mil' : '');
+    return v < 0 && numero !== decimal(0, casas) ? '(' + t + ')' : t;
+  }
   const rsCurtoS = (c) => (Math.round(c) < 0 ? '−' : '') + rsCurto(c);
   // +2,2% / −16,1% / n/a
   function pctSinal(x) {
@@ -336,6 +346,9 @@
     const T = {};
     Object.keys(auto).forEach((c) => { T[c] = dados[c] !== undefined && dados[c] !== null ? dados[c] : auto[c]; });
     const ed = !!op.editavel;
+    const rsV = (c) => rsFormato(c, op.formato);
+    const fmtNota = op.formato && (op.formato.milhar || op.formato.casas === 0 || op.formato.casas === 1)
+      ? 'Valores em ' + (op.formato.milhar ? 'R$ mil' : 'R$') + (op.formato.casas === 0 ? ', arredondados' : op.formato.casas === 1 ? ', com uma casa decimal' : '') : '';
     const cor = corValida(op.cor);
     const logo = emp.logo ? '<img class="rc-logo" src="' + esc(emp.logo) + '" alt="">' : '';
     const nk = mesNome(D.mesK), na = D.mesA ? mesNome(D.mesA) : null;
@@ -369,8 +382,8 @@
     const leitura = (id) => {
       const agora = D.val(id, D.k), antes = D.a >= 0 ? D.val(id, D.a) : null;
       const vv = variacao(agora, antes);
-      return '<p class="rc-leitura">Leitura: ' + (D.mesA ? na + ' ' + rs(antes) + '; ' : '') + nk + ' ' + rs(agora) + '.' +
-        (vv ? ' Variação ' + rs(vv.d) + ' (' + (vv.p === null ? 'n/a' : pctSinal(vv.p)) + ').' : '') + '</p>';
+      return '<p class="rc-leitura">Leitura: ' + (D.mesA ? na + ' ' + rsV(antes) + '; ' : '') + nk + ' ' + rsV(agora) + '.' +
+        (vv ? ' Variação ' + rsV(vv.d) + ' (' + (vv.p === null ? 'n/a' : pctSinal(vv.p)) + ').' : '') + '</p>';
     };
     const graficoDe = (id, titulo, tamanho) => {
       const serie = D.serie(id);
@@ -384,13 +397,13 @@
       (emp.logo ? '<img class="rc-capa-logo" src="' + esc(emp.logo) + '" alt="">' : '') + '</div>' + texto('titulo', 'h1', 'rc-capa-titulo') + texto('subtitulo', 'p', 'rc-capa-sub') +
       '<div class="rc-empurra"></div><div class="rc-caixa rc-capa-escopo"><div class="rc-caixa-titulo">Escopo</div>' + texto('escopo', 'div', '') + '</div>' +
       '<div class="rc-capa-base"><div><b>' + esc(emp.nome || '') + '</b>' + (emp.cnpj ? ' · CNPJ ' + esc(Util.formatarCnpj(emp.cnpj)) : '') + '</div>' +
-      '<div>Base: DRE CPC 51 detalhada, balancete e LALUR</div><div>Emissão: ' + esc(op.emissao || '') + '</div></div><div class="rc-numero">Página {{N}} de {{T}}</div></section>');
+      '<div>Base: DRE CPC 51 detalhada, balancete e LALUR' + (fmtNota ? ' · ' + fmtNota : '') + '</div><div>Emissão: ' + esc(op.emissao || '') + '</div></div><div class="rc-numero">Página {{N}} de {{T}}</div></section>');
 
     // 1. Sumário executivo
     const cartao = (id, rotulo) => {
       const agora = D.val(id, D.k), antes = D.a >= 0 ? D.val(id, D.a) : null, vv = variacao(agora, antes);
-      return '<div class="rc-cartao"><span>' + esc(rotulo) + '</span><b>' + rs(agora) + '</b>' +
-        (vv ? '<small class="' + classeVar(vv.d) + '">' + rs(vv.d) + ' | ' + (vv.p === null ? 'n/a' : pctSinal(vv.p)) + '</small>' : '<small class="rc-neutro">sem mês anterior</small>') + '</div>';
+      return '<div class="rc-cartao"><span>' + esc(rotulo) + '</span><b>' + rsV(agora) + '</b>' +
+        (vv ? '<small class="' + classeVar(vv.d) + '">' + rsV(vv.d) + ' | ' + (vv.p === null ? 'n/a' : pctSinal(vv.p)) + '</small>' : '<small class="rc-neutro">sem mês anterior</small>') + '</div>';
     };
     secao++;
     pagina(secao + '. Sumário executivo', '<div class="rc-cartoes">' + cartao('receitaBruta', 'Receita bruta de vendas') + cartao('receitaLiquida', 'Receita líquida') +
@@ -428,10 +441,10 @@
     const linhaInd = (id) => {
       const x = D.indicador(id);
       if (!x.l) return '';
-      const fmt = x.l.tipo === 'x' ? vezes : x.l.tipo === '%' ? pct : x.l.tipo === 'dias' ? (y) => (vazio(y) ? '—' : Math.round(y) + ' dias') : rs;
+      const fmt = x.l.tipo === 'x' ? vezes : x.l.tipo === '%' ? pct : x.l.tipo === 'dias' ? (y) => (vazio(y) ? '—' : Math.round(y) + ' dias') : rsV;
       const d = x.agora === null || x.antes === null ? null : x.agora - x.antes;
       const limite = x.l.tipo === 'x' ? 0.005 : x.l.tipo === '%' ? 0.0005 : x.l.tipo === 'dias' ? 0.5 : 100;
-      const dTxt = d === null ? '—' : (d > 0 ? '+' : d < 0 ? '−' : '') + (x.l.tipo === 'x' ? decimal(Math.abs(d), 2) + 'x' : x.l.tipo === '%' ? decimal(Math.abs(d) * 100, 1) + ' p.p.' : x.l.tipo === 'dias' ? Math.round(Math.abs(d)) + ' dias' : rs(Math.abs(d)));
+      const dTxt = d === null ? '—' : (d > 0 ? '+' : d < 0 ? '−' : '') + (x.l.tipo === 'x' ? decimal(Math.abs(d), 2) + 'x' : x.l.tipo === '%' ? decimal(Math.abs(d) * 100, 1) + ' p.p.' : x.l.tipo === 'dias' ? Math.round(Math.abs(d)) + ' dias' : rsV(Math.abs(d)));
       const bom = d === null || Math.abs(d) < limite ? null : (d > 0) === (x.l.melhor === 'maior');
       return '<tr><td><b>' + esc(x.l.rotulo) + '</b></td>' + (D.mesA ? '<td class="num">' + fmt(x.antes) + '</td>' : '') + '<td class="num">' + fmt(x.agora) + '</td><td class="num">' + dTxt + '</td>' +
         '<td class="rc-centro"><b class="' + (bom === null ? 'rc-neutro' : bom ? 'rc-bom' : 'rc-ruim') + '">' + (d === null ? '—' : bom === null ? 'Estável' : bom ? 'Melhora' : 'Piora') + '</b></td></tr>';
@@ -444,8 +457,8 @@
     // 6 e 7. Maiores variações por conta
     const tabelaContas = (xs) => '<table class="rc-tabela rc-tabela-contas"><thead><tr><th>Conta</th><th>Descrição</th>' + (D.mesA ? '<th class="num">' + esc(D.mesA.rotulo) + '</th>' : '') +
       '<th class="num">' + esc(D.mesK.rotulo) + '</th><th class="num">Variação</th></tr></thead><tbody>' +
-      (xs.length ? xs.map((x) => '<tr><td>' + esc(x.conta) + '</td><td>' + esc(x.titulo) + '</td>' + (D.mesA ? '<td class="num">' + rs(x.antes) + '</td>' : '') + '<td class="num">' + rs(x.agora) + '</td>' +
-        '<td class="num"><b class="' + classeVar(x.d) + '">' + rs(x.d) + '</b></td></tr>').join('') : '<tr><td colspan="5" class="rc-neutro">Nenhuma conta nesta situação.</td></tr>') + '</tbody></table>';
+      (xs.length ? xs.map((x) => '<tr><td>' + esc(x.conta) + '</td><td>' + esc(x.titulo) + '</td>' + (D.mesA ? '<td class="num">' + rsV(x.antes) + '</td>' : '') + '<td class="num">' + rsV(x.agora) + '</td>' +
+        '<td class="num"><b class="' + classeVar(x.d) + '">' + rsV(x.d) + '</b></td></tr>').join('') : '<tr><td colspan="5" class="rc-neutro">Nenhuma conta nesta situação.</td></tr>') + '</tbody></table>';
     if (D.mesA) {
       secao++;
       pagina(secao + '. Maiores variações favoráveis por conta', tabelaContas(D.favoraveis) + '<div class="rc-empurra"></div><div class="rc-caixa">' + texto('favoraveis', 'div', '') + '</div>');
