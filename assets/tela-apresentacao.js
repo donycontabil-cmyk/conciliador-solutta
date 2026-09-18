@@ -89,6 +89,33 @@
     return '<span class="grupo-seg" title="Como os valores aparecem na tela, na impressão, no Excel e no relatório do cliente"><span class="seg-rotulo">Números</span>' + casas + '</span>' +
       '<span class="grupo-seg">' + escala + '</span>';
   }
+
+  // Contas zeradas (Dony, 18/09/2026: "um botão para eu selecionar se visualizo as contas que não possuem saldo
+  // nem movimento; se tiver saldo, logo tem movimento"): Todas · Sem as zeradas. Vale no balanço, na DRE, no
+  // balancete e nas linhas da DRE (tela, impressão e Excel). Esconder não muda nenhum total: a conta escondida
+  // é zero em todas as colunas.
+  const ABAS_COM_CONTAS = { balanco: true, 'dre-mensal': true, 'dre-trimestral': true, 'balancete-mensal': true, 'balancete-trimestral': true };
+  function opcoesContas() {
+    const bt = [[false, 'Todas', 'Mostra todas as contas do plano'], [true, 'Sem as zeradas', 'Esconde as contas sem saldo e sem movimento nos meses da tela (conta com saldo continua aparecendo)']]
+      .map(([z, texto, dica]) => '<button type="button" class="seg' + (E.semZeradas === z ? ' ativo' : '') + '" data-zeradas="' + (z ? 1 : 0) + '" title="' + dica + '" aria-pressed="' + (E.semZeradas === z) + '">' + texto + '</button>').join('');
+    return '<span class="grupo-seg" title="Contas sem saldo e sem movimento"><span class="seg-rotulo">Contas</span>' + bt + '</span>';
+  }
+  // As contas que ficam com "Sem as zeradas": têm saldo ou movimento em alguma coluna da tela (e todas as de
+  // cima delas, para a árvore não quebrar). linhas: linhas do balancete do motor (com .ativa por coluna);
+  // idx: as colunas que contam (todas, se não vier). null = mostrar todas.
+  const semZeradasTexto = () => (E.semZeradas ? ' · sem as contas zeradas (sem saldo e sem movimento)' : '');
+  function contasComSaldoOuMovimento(linhas, idx) {
+    if (!E.semZeradas) return null;
+    const porConta = new Map(linhas.map((l) => [l.conta, l]));
+    const ficam = new Set();
+    linhas.forEach((l) => {
+      const ativa = l.ativa || [];
+      if (!(idx ? idx.some((k) => ativa[k]) : ativa.some(Boolean))) return;
+      let x = l;
+      while (x && !ficam.has(x.conta)) { ficam.add(x.conta); x = x.pai ? porConta.get(x.pai) : null; }
+    });
+    return ficam;
+  }
   function pct(x) {
     if (x === null || x === undefined || !isFinite(x)) return '';
     const v = Math.round(x * 1000) / 10;
@@ -196,7 +223,7 @@
       '<div class="apres-folha" id="apres-folha">' + secao(E.aba, {}) + '</div>';
   }
 
-  function opcoesDaAba() { return opcoesNumeros() + opcoesDaAbaSo(); }
+  function opcoesDaAba() { return opcoesNumeros() + (ABAS_COM_CONTAS[E.aba] ? opcoesContas() : '') + opcoesDaAbaSo(); }
   function opcoesDaAbaSo() {
     const avah = '<label class="caixa-opcao"><input type="checkbox" data-opcao="avah"' + (E.avah ? ' checked' : '') + '> AV % e AH %</label>';
     const marcar = '<label class="caixa-opcao lalur-opcao' + (E.marcarLalur ? ' ligada' : '') + '" title="Mostra, em cada conta, os botões para marcar adição ou exclusão do LALUR">' +
@@ -214,7 +241,7 @@
     }
     if (E.aba === 'balancete-mensal' || E.aba === 'balancete-trimestral') {
       return '<span class="suave pequeno">Mostrar até o nível</span>' + [1, 2, 3, 4, 5].map((n) => '<button type="button" class="botao pequeno' + (E.nivel === n ? ' primario' : '') + '" data-nivel="' + n + '">' + n + '</button>').join('') +
-        '<label class="caixa-opcao"><input type="checkbox" data-opcao="sem-zeradas"' + (E.semZeradas ? ' checked' : '') + '> Esconder contas zeradas</label>' + avah + marcar +
+        avah + marcar +
         (E.marcarLalur ? ajudaMarcar : '<span class="suave pequeno">' + (E.aba === 'balancete-mensal' ? 'Contas 1 e 2: saldo final do mês; 3, 4 e 5: movimento do mês.' : 'Contas 1 e 2: saldo no fim do trimestre; 3, 4 e 5: soma dos meses.') + ' AV % sobre a conta-mãe.</span>');
     }
     if (E.aba === 'lalur') {
@@ -277,7 +304,7 @@
     const tab = E.rel.mensal;
     const ks = indicesVisiveis();
     return { colunas: ks.map((k) => tab.colunas[k]),
-      linhas: tab.linhas.map((l) => Object.assign({}, l, { valores: ks.map((k) => l.valores[k]), av: ks.map((k) => l.av[k]), ah: ks.map((k) => l.ah[k]) })) };
+      linhas: tab.linhas.map((l) => Object.assign({}, l, { valores: ks.map((k) => l.valores[k]), av: ks.map((k) => l.av[k]), ah: ks.map((k) => l.ah[k]), ativa: ks.map((k) => l.ativa[k]) })) };
   }
   // Resumo (Dony, 18/09/2026: "somando ativo, passivo, receitas, custos e despesas tem que dar zero"): o saldo
   // de 1º nível no fim de cada mês escolhido e de cada trimestre, como no balancete; a soma de cada coluna = 0.
@@ -344,8 +371,8 @@
     if (aba === 'cliente') return dreFechada() ? (impressao ? '' : avisoDreFechada('O relatório do cliente fica fechado')) : secaoCliente(op);
     if (/^dre-/.test(aba) && dreFechada() && impressao) return '';
     if (/^dre-/.test(aba) && (dreFechada() || E.dreEdicao) && !impressao) return secaoLinhasDre();
-    if (aba === 'dre-mensal') return secaoDre(dreMensalVisivel(), 'DRE CPC 51 mensal detalhada', op);
-    if (aba === 'dre-trimestral') return secaoDre(rel.dre.trimestral, 'DRE CPC 51 trimestral detalhada', op);
+    if (aba === 'dre-mensal') return secaoDre(dreMensalVisivel(), 'DRE CPC 51 mensal detalhada', op, ficamNaDre('mensal'));
+    if (aba === 'dre-trimestral') return secaoDre(rel.dre.trimestral, 'DRE CPC 51 trimestral detalhada', op, ficamNaDre('trimestral'));
     if (aba === 'balancete-mensal') return secaoBalancete(balanceteMensalVisivel(), 'Balancete analítico mensal');
     if (aba === 'balancete-trimestral') return secaoBalancete(rel.trimestral, 'Balancete analítico trimestral');
     if (aba === 'lalur') return secaoLalur(op);
@@ -405,7 +432,9 @@
     const b = E.rel.balanco;
     const ks = indicesVisiveis();
     const conf = b.conferencia;
+    const ficam = contasComSaldoOuMovimento(E.rel.mensal.linhas, ks);
     const linha = (l) => {
+      if (ficam && l.conta && !ficam.has(l.conta)) return '';
       const cls = l.tipo === 'total' ? 'total' + (l.destaque ? ' destaque' : '') : l.tipo === 'grupo' ? 'bal-grupo' : l.tipo === 'resultado' ? 'bal-resultado' : 'bal-conta';
       const rot = (l.conta ? '<span class="cod">' + T.esc(l.conta) + '</span> ' : '') + T.esc(l.rotulo);
       return '<tr class="' + cls + '"><td class="fixa" style="padding-left:' + (8 + ((l.nivel || 1) - 1) * 16) + 'px">' + rot + '</td>' +
@@ -426,12 +455,14 @@
       : '<div class="aviso verde" style="margin:0 0 10px"><span class="icone-aviso">✓</span><div>O balanço <b>fecha em todos os meses</b>: ativo = passivo + patrimônio líquido + resultado do exercício pela DRE, ' +
         'e o resultado pela DRE é igual ao das contas de resultado ainda abertas no balancete.</div></div>';
     return tituloSecao('Balanço patrimonial (conferência)', T.esc(E.ano) + ' · saldo do fim de cada mês · passivo e PL com o saldo credor positivo · o resultado do exercício vem da DRE ' +
-      '(o lucro dos meses desde o último encerramento, que no balancete ainda está nas contas de resultado)') + selo +
+      '(o lucro dos meses desde o último encerramento, que no balancete ainda está nas contas de resultado)' + semZeradasTexto()) + selo +
       '<div class="apres-caixa"><table class="apres balanco">' + cab + '<tbody>' + b.linhas.map(linha).join('') + conferencia + '</tbody></table></div>';
   }
 
   // ---------- DRE
-  function secaoDre(dre, titulo, op) {
+  // ficam: as contas analíticas que aparecem com "Sem as zeradas" (null = todas).
+  function ficamNaDre(qual) { return qual === 'mensal' ? contasComSaldoOuMovimento(E.rel.mensal.linhas, indicesVisiveis()) : contasComSaldoOuMovimento(E.rel.trimestral.linhas); }
+  function secaoDre(dre, titulo, op, ficam) {
     const avah = E.avah;
     const n = 1 + dre.colunas.length * (avah ? 3 : 1);
     let categoria = null;
@@ -447,7 +478,7 @@
       }
       const aberto = (op && op.abrirTudo) || E.abertos.has(l.grupo || l.id);
       if (l.tipo === 'analitica') {
-        if (!aberto) return faixa;
+        if (!aberto || (ficam && !ficam.has(l.conta))) return faixa;
         return faixa + '<tr class="analitica" data-de="' + T.esc(l.grupo) + '"><td class="fixa">' + marcaLalur(l.conta, false) + '<span class="cod">' + T.esc(l.conta) + '</span> ' + T.esc(l.rotulo) + '</td>' + celulasPeriodos(l, avah, dre.colunas) + '</tr>';
       }
       if (l.tipo === 'grupo') {
@@ -468,7 +499,7 @@
     const origem = d.situacao === 'mapa'
       ? 'linhas da DRE desta empresa' + (salvo && salvo.conferidoEm ? ', conferidas em ' + T.esc(U.dataHoraLocal(salvo.conferidoEm).slice(0, 10)) : '')
       : 'linhas da DRE pelo modelo da planilha (os nomes das contas batem com ele)';
-    return tituloSecao(titulo, T.esc(E.ano) + ' · ' + valoresEm() + ' · receitas positivas, custos e despesas entre parênteses · <span class="nao-imprimir">' + origem + '</span>') +
+    return tituloSecao(titulo, T.esc(E.ano) + ' · ' + valoresEm() + ' · receitas positivas, custos e despesas entre parênteses' + semZeradasTexto() + ' · <span class="nao-imprimir">' + origem + '</span>') +
       '<div class="apres-caixa"><table class="apres dre' + (avah ? ' com-avah' : '') + (E.marcarLalur ? ' marcando' : '') + '">' + cabecalhoPeriodos([{ titulo: 'Linha / Conta analítica' }], colunas, avah) +
       '<tbody>' + corpo + '</tbody></table></div>' + nota + fora;
   }
@@ -477,7 +508,8 @@
   // planilha saiu com despesa no custo). Em que linha da DRE entra cada conta de resultado: a linha de uma
   // conta vale para todas as de baixo, a não ser que uma de baixo tenha a sua. O programa sugere pelos nomes,
   // quem usa confere e confirma; fica guardado na empresa (todos os anos). A prévia da DRE ao lado muda na hora.
-  // E.dreEdicao = { contas: { conta: linha }, rotulos: { linha: nome na DRE }, abertos: Set, soMovimento }.
+  // E.dreEdicao = { contas: { conta: linha }, rotulos: { linha: nome na DRE }, abertos: Set }. O botão "Contas" (Todas ·
+  // Sem as zeradas) vale também aqui.
   function avisoDreFechada(oque) {
     return '<div class="aviso ambar" style="margin:0 0 12px"><span class="icone-aviso">🔒</span><div><b>' + oque + ' até as linhas da DRE desta empresa serem conferidas.</b> ' +
       'O plano de contas dela é diferente do modelo da planilha; o programa já sugeriu a linha de cada grupo de contas pelos nomes. ' +
@@ -498,7 +530,7 @@
     const d = E.rel.dre;
     const salvo = mapaDaEmpresa();
     const contas = salvo ? Object.assign({}, salvo.contas) : d.situacao === 'modelo' ? motor().mapaDoModelo(E.rel.contas) : Object.assign({}, d.mapa || {});
-    E.dreEdicao = { contas, rotulos: Object.assign({}, (salvo && salvo.rotulos) || {}), abertos: new Set(), soMovimento: true };
+    E.dreEdicao = { contas, rotulos: Object.assign({}, (salvo && salvo.rotulos) || {}), abertos: new Set() };
     const indice = indiceDoPlano();
     abrirAte(E.dreEdicao.abertos, Object.keys(contas).concat(pendentesDre().map((c) => c.conta)), indice);
   }
@@ -541,7 +573,7 @@
     const ed = E.dreEdicao;
     const d = E.rel.dre;
     const indice = indiceDoPlano();
-    const { mov, comMov } = movimentosDre();
+    const { mov } = movimentosDre();
     const resultado = E.rel.contas.filter((c) => !c.patrimonial);
     const temConta = new Set(resultado.map((c) => c.conta));
     const visivel = (c) => { let p = c.pai; while (p && temConta.has(p)) { if (!ed.abertos.has(p)) return false; p = indice.get(p).pai; } return true; };
@@ -551,7 +583,8 @@
     pend.forEach((p) => { let x = indice.get(p.pai); while (x) { pendentes.add(x.conta); x = x.pai ? indice.get(x.pai) : null; } });
     const com = E.rel.meses.filter((m) => m.tem);
     const periodo = com.length ? (com.length === 1 ? com[0].rotulo : com[0].rotulo.slice(0, 3) + '–' + com[com.length - 1].rotulo) : '';
-    const linhas = resultado.filter((c) => visivel(c) && (!ed.soMovimento || comMov.has(c.conta))).map((c) => {
+    const ficam = contasComSaldoOuMovimento(E.rel.mensal.linhas);
+    const linhas = resultado.filter((c) => visivel(c) && (!ficam || ficam.has(c.conta))).map((c) => {
       const propria = ed.contas[c.conta] || '';
       const herdada = c.pai ? motor().linhaNoMapa(ed.contas, indice, c.pai) : null;
       const aberto = ed.abertos.has(c.conta);
@@ -599,7 +632,7 @@
       '<button type="button" class="botao pequeno" data-dre="sugestao" title="Refaz tudo pela sugestão dos nomes das contas">↺ Sugestão pelos nomes</button>' +
       '<button type="button" class="botao pequeno" data-dre="modelo" title="Refaz tudo pelos códigos do modelo da planilha">↺ Modelo da planilha</button>' +
       '<button type="button" class="botao pequeno" data-dre="abrir-tudo">＋ Abrir todas</button><button type="button" class="botao pequeno" data-dre="fechar-tudo">－ Fechar todas</button>' +
-      '<label class="caixa-opcao"><input type="checkbox" data-dre="so-movimento"' + (ed.soMovimento ? ' checked' : '') + '> Só contas com movimento</label>' + estado + '</div>' +
+      estado + '</div>' +
       '<div class="md-grade"><div class="apres-caixa md-arvore"><table class="apres md-tabela"><thead><tr><th class="fixa">Conta de resultado</th><th class="num md-c-valor">' + T.esc(periodo) + '</th><th class="md-c-linha">Linha da DRE</th></tr></thead><tbody>' +
       (linhas || '<tr><td colspan="3" class="suave">Nenhuma conta de resultado com movimento.</td></tr>') + '</tbody></table></div>' +
       '<div class="md-lado"><h3 class="apres-sub">Prévia da DRE <small>' + T.esc(periodo) + ' · muda na hora · clique no nome de uma linha para mudar como ela aparece</small></h3>' +
@@ -668,10 +701,11 @@
   // ---------- Balancete mensal / trimestral
   function secaoBalancete(tab, titulo) {
     const avah = E.avah;
-    const linhas = tab.linhas.filter((l) => l.nivel <= E.nivel && !(E.semZeradas && l.valores.every((v) => !v)));
+    const ficam = contasComSaldoOuMovimento(tab.linhas);
+    const linhas = tab.linhas.filter((l) => l.nivel <= E.nivel && (!ficam || ficam.has(l.conta)));
     const corpo = linhas.map((l) => '<tr class="nivel-' + Math.min(l.nivel, 5) + (l.analitica ? ' analitica' : ' sintetica') + '"><td class="fixa" style="padding-left:' + (8 + (l.nivel - 1) * 14) + 'px">' +
       (l.analitica ? marcaLalur(l.conta, l.patrimonial) : '') + '<span class="cod">' + T.esc(l.conta) + '</span> ' + T.esc(l.titulo) + '</td>' + celulasPeriodos(l, avah) + '</tr>').join('');
-    return tituloSecao(titulo, T.esc(E.ano) + ' · ' + linhas.length + ' de ' + tab.linhas.length + ' contas · saldos devedores positivos, credores entre parênteses') +
+    return tituloSecao(titulo, T.esc(E.ano) + ' · ' + linhas.length + ' de ' + tab.linhas.length + ' contas · saldos devedores positivos, credores entre parênteses' + semZeradasTexto()) +
       '<div class="apres-caixa"><table class="apres balancete' + (avah ? ' com-avah' : '') + (E.marcarLalur ? ' marcando' : '') + '">' + cabecalhoPeriodos([{ titulo: 'Conta' }], tab.colunas, avah) + '<tbody>' + corpo + '</tbody></table></div>';
   }
 
@@ -770,6 +804,8 @@
       if (g) { const id = g.getAttribute('data-grupo'); if (E.abertos.has(id)) E.abertos.delete(id); else E.abertos.add(id); redesenharFolha(el); return; }
       const casas = ev.target.closest('button[data-casas]');
       if (casas) { E.casas = Number(casas.getAttribute('data-casas')); guardarPreferencias(); redesenharConteudo(el); return; }
+      const zeradas = ev.target.closest('button[data-zeradas]');
+      if (zeradas) { E.semZeradas = zeradas.getAttribute('data-zeradas') === '1'; guardarPreferencias(); redesenharConteudo(el); return; }
       const milhar = ev.target.closest('button[data-milhar]');
       if (milhar) { E.milhar = milhar.getAttribute('data-milhar') === '1'; guardarPreferencias(); redesenharConteudo(el); return; }
       // Relatório do cliente: tirar uma parte (✕ na folha) ou pôr de volta (↺ na barra); vale para o mês.
@@ -819,7 +855,6 @@
     el.addEventListener('change', (ev) => {
       const sd = ev.target.closest('select[data-dre-conta]');
       if (sd) { mudarLinhaDre(el, sd.getAttribute('data-dre-conta'), sd.value); return; }
-      if (ev.target.matches('input[data-dre="so-movimento"]') && E.dreEdicao) { E.dreEdicao.soMovimento = ev.target.checked; redesenharFolha(el); return; }
       const rot = ev.target.closest('input[data-dre-rotulo]');
       if (rot && E.dreEdicao) { E.dreEdicao.rotulos[rot.getAttribute('data-dre-rotulo')] = rot.value.replace(/\s+/g, ' ').trim(); redesenharFolha(el); return; }
       if (ev.target.id === 'rc-mes') { E.clienteMes = ev.target.value; redesenharFolha(el); return; }
@@ -835,7 +870,6 @@
         return;
       }
       if (c.getAttribute('data-opcao') === 'avah') E.avah = c.checked;
-      if (c.getAttribute('data-opcao') === 'sem-zeradas') E.semZeradas = c.checked;
       guardarPreferencias();
       redesenharFolha(el);
     });
@@ -1443,9 +1477,11 @@
     const ks = indicesVisiveis();
     const larg = larguraValor(b.linhas.map((l) => ks.map((k) => l.valores[k])), 16);
     const f = novaFolha('Balanço patrimonial', [62].concat(ks.map(() => larg)));
-    f.titulo('Balanço patrimonial (conferência)', E.ano + ' · saldo do fim de cada mês · passivo e PL com o saldo credor positivo · resultado do exercício pela DRE (o lucro dos meses desde o último encerramento) · ' + valoresEm());
+    f.titulo('Balanço patrimonial (conferência)', E.ano + ' · saldo do fim de cada mês · passivo e PL com o saldo credor positivo · resultado do exercício pela DRE (o lucro dos meses desde o último encerramento) · ' + valoresEm() + semZeradasTexto());
+    const ficam = contasComSaldoOuMovimento(E.rel.mensal.linhas, ks);
     const r1 = f.add([{ v: 'Balanço patrimonial', e: 'cabEsq' }].concat(ks.map((k) => ({ v: b.colunas[k].rotulo + (b.colunas[k].desde ? '\n(resultado desde ' + b.colunas[k].desde + ')' : ''), e: 'cab' }))), { altura: 44 });
     b.linhas.forEach((l) => {
+      if (ficam && l.conta && !ficam.has(l.conta)) return;
       const est = l.tipo === 'total' ? (l.destaque ? 'des' : 'tot') : l.tipo === 'grupo' ? 'sin' : l.tipo === 'resultado' ? 'inp' : 'ana';
       f.add([{ v: (l.conta ? l.conta + '  ' : '') + l.rotulo, e: est + '.rot' + Math.min(5, (l.nivel || 1) - 1) }].concat(ks.map((k) => ({ v: R(l.valores[k]), e: est + '.val' }))));
     });
@@ -1491,7 +1527,8 @@
   }
 
   // DRE (mensal ou trimestral): faixa da categoria, subtotal com as contas agrupadas embaixo (+/−) e totais.
-  function folhaDre(nome, titulo, sub, dre) {
+  // ficam: as contas analíticas que entram com "Sem as zeradas" (null = todas).
+  function folhaDre(nome, titulo, sub, dre, ficam) {
     const avah = E.avah;
     const f = novaFolha(nome, [52, 18].concat(largurasDePeriodos(dre.linhas, dre.colunas, avah)), { resumoAcima: true });
     f.titulo(titulo, sub);
@@ -1506,6 +1543,7 @@
       }
       const aberto = E.abertos.has(l.grupo || l.id);
       if (l.tipo === 'analitica') {
+        if (ficam && !ficam.has(l.conta)) return;
         f.add([{ v: l.rotulo, e: 'ana.rot2' }, { v: l.conta, e: 'ana.cod' }].concat(celulasDePeriodos('ana', l, dre.colunas, avah)), { nivel: 1, escondida: !aberto });
       } else if (l.tipo === 'grupo') {
         f.add([{ v: l.rotulo, e: 'grp.rot0' }, { v: '', e: 'grp.cod' }].concat(celulasDePeriodos('grp', l, dre.colunas, avah)), { recolhida: !aberto && l.filhas > 0 });
@@ -1523,9 +1561,10 @@
   function folhaBalancete(nome, titulo, sub, tab) {
     const avah = E.avah;
     const f = novaFolha(nome, [18, 50].concat(largurasDePeriodos(tab.linhas, tab.colunas, avah)), { resumoAcima: true });
-    f.titulo(titulo, sub);
+    f.titulo(titulo, sub + semZeradasTexto());
     const cab = cabecalhoComPeriodos(f, ['Conta', 'Título da conta'], tab.colunas, avah);
-    const linhas = tab.linhas.filter((l) => !(E.semZeradas && l.valores.every((v) => !v)));
+    const ficam = contasComSaldoOuMovimento(tab.linhas);
+    const linhas = tab.linhas.filter((l) => !ficam || ficam.has(l.conta));
     linhas.forEach((l, i) => {
       const t = l.nivel === 1 ? 'n1' : (!l.analitica && l.nivel <= 4) ? 'sin' : 'ana';
       const proxima = linhas[i + 1];
@@ -1618,9 +1657,9 @@
       ['balanco', () => folhaBalanco()],
       ['indicadores', () => folhaIndicadores(), fechada],
       ['dre-mensal', () => folhaDre('DRE mensal', 'DRE CPC 51 mensal detalhada', E.ano + ' · ' + valoresEm() + ' · receitas positivas, custos e despesas entre parênteses · AV % sobre a receita líquida · AH % sobre o mês anterior' + escolha +
-        ' · clique no + à esquerda para abrir as contas de um subtotal', dreMensalVisivel()), fechada],
-      ['dre-trimestral', () => folhaDre('DRE trimestral', 'DRE CPC 51 trimestral detalhada', E.ano + ' · ' + valoresEm() + ' · AV % sobre a receita líquida · AH % sobre o trimestre anterior · clique no + à esquerda para abrir as contas',
-        E.rel.dre.trimestral), fechada],
+        ' · clique no + à esquerda para abrir as contas de um subtotal' + semZeradasTexto(), dreMensalVisivel(), ficamNaDre('mensal')), fechada],
+      ['dre-trimestral', () => folhaDre('DRE trimestral', 'DRE CPC 51 trimestral detalhada', E.ano + ' · ' + valoresEm() + ' · AV % sobre a receita líquida · AH % sobre o trimestre anterior · clique no + à esquerda para abrir as contas' + semZeradasTexto(),
+        E.rel.dre.trimestral, ficamNaDre('trimestral')), fechada],
       ['balancete-mensal', () => folhaBalancete('Balancete mensal', 'Balancete analítico mensal', E.ano + ' · contas 1 e 2: saldo final do mês · 3, 4 e 5: movimento do mês · AV % sobre a conta-mãe' + escolha +
         ' · use os números 1 a 5 no canto esquerdo do Excel para abrir ou fechar os níveis', balanceteMensalVisivel())],
       ['balancete-trimestral', () => folhaBalancete('Balancete trimestral', 'Balancete analítico trimestral', E.ano + ' · contas 1 e 2: saldo no fim do trimestre · 3, 4 e 5: soma dos meses · AV % sobre a conta-mãe', E.rel.trimestral)],

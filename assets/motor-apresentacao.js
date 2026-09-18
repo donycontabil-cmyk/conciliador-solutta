@@ -409,7 +409,12 @@
       }
       return somaDe(t.meses.map((m) => valor(conta, m)));
     };
-    function tabelaDeContas(colunas, valorDe) {
+    // Conta com saldo ou movimento no período (Dony, 18/09/2026: "esconder as contas que não possuem saldo nem
+    // movimento; se tiver saldo, logo tem movimento"): saldo anterior, débitos, créditos ou saldo atual ≠ 0.
+    const ativaNoMes = (conta, m) => { const l = linhaDoMes(conta, m); return !!l && !!(l.saldoAnterior || l.debitos || l.creditos || l.saldoAtual); };
+    const ativaNoTrimestre = (conta, t) => t.meses.some((m) => ativaNoMes(conta, m));
+    // ativa: por coluna, se a conta tem saldo ou movimento (a tela esconde as que não têm em nenhuma coluna).
+    function tabelaDeContas(colunas, valorDe, ativaDe) {
       const valores = new Map(contas.map((c) => [c.conta, colunas.map((col) => valorDe(c.conta, col))]));
       return contas.map((c) => {
         const v = valores.get(c.conta);
@@ -418,11 +423,12 @@
           valores: v,
           av: v.map((x, k) => (c.nivel === 1 || !vp ? null : div(x, vp[k]))),
           ah: v.map((x, k) => (k === 0 ? null : ah(x, v[k - 1]))),
+          ativa: colunas.map((col) => ativaDe(c.conta, col)),
         });
       });
     }
-    const mensal = { colunas: meses.map((m) => ({ id: m.comp, rotulo: m.rotulo, falta: !m.tem })), linhas: tabelaDeContas(meses, valor) };
-    const trimestral = { colunas: trimestres.map((t) => ({ id: t.id, rotulo: t.rotulo, parcial: t.parcial })), linhas: tabelaDeContas(trimestres, valorTrimestre) };
+    const mensal = { colunas: meses.map((m) => ({ id: m.comp, rotulo: m.rotulo, falta: !m.tem })), linhas: tabelaDeContas(meses, valor, ativaNoMes) };
+    const trimestral = { colunas: trimestres.map((t) => ({ id: t.id, rotulo: t.rotulo, parcial: t.parcial })), linhas: tabelaDeContas(trimestres, valorTrimestre, ativaNoTrimestre) };
 
     // ---------- DRE: as linhas pelo mapa da empresa; sem mapa, pelo modelo (se os nomes batem) ou pela
     // sugestão pelos nomes (situação 'sugestao': a tela só mostra a DRE depois de quem usa conferir).
