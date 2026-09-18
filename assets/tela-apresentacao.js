@@ -198,8 +198,12 @@
       colunas.map((c) => '<th colspan="3" class="per' + (c.falta ? ' falta' : '') + (c.cls ? ' ' + c.cls : '') + '">' + T.esc(c.rotulo) + (c.falta ? '<small>sem balancete</small>' : '') + '</th>').join('') +
       '</tr><tr class="sub">' + colunas.map(() => '<th class="num">Valor</th><th class="num pct">AV %</th><th class="num pct">AH %</th>').join('') + '</tr></thead>';
   }
-  function celulasPeriodos(l, avah) {
-    return l.valores.map((v, k) => '<td class="num">' + dinheiro(v) + '</td>' + (avah ? '<td class="num pct">' + pct(l.av[k]) + '</td><td class="num pct">' + pct(l.ah[k]) + '</td>' : '')).join('');
+  // colunas (opcional): a coluna do acumulado sai com fundo destacado.
+  function celulasPeriodos(l, avah, colunas) {
+    return l.valores.map((v, k) => {
+      const extra = colunas && colunas[k] && colunas[k].acumulado ? ' acum' : '';
+      return '<td class="num' + extra + '">' + dinheiro(v) + '</td>' + (avah ? '<td class="num pct' + extra + '">' + pct(l.av[k]) + '</td><td class="num pct' + extra + '">' + pct(l.ah[k]) + '</td>' : '');
+    }).join('');
   }
 
   // ---------- Resumo
@@ -210,10 +214,11 @@
       l.valores.map((v, k) => '<td class="num' + (colunas[k].cls ? ' ' + colunas[k].cls : '') + '">' + dinheiro(v) + '</td>').join('') + '</tr>').join('');
     const dre = E.rel.dre.mensal;
     const indicador = (id) => dre.linhas.find((l) => l.id === id);
+    const iAcum = dre.colunas.findIndex((c) => c.acumulado); // a DRE mensal traz o acumulado na última coluna
     const fichas = ['receitaLiquida', 'lucroBruto', 'ebitda', 'lucroOperacional', 'lucroLiquido'].map((id) => {
       const l = indicador(id);
-      const total = l.valores.reduce((s, v) => s + (v || 0), 0);
-      const rl = indicador('receitaLiquida').valores.reduce((s, v) => s + (v || 0), 0);
+      const total = l.valores[iAcum] || 0;
+      const rl = indicador('receitaLiquida').valores[iAcum] || 0;
       return '<div class="apres-ficha"><span>' + T.esc(l.rotulo) + ' · ' + T.esc(colunas.find((c) => c.acumulado).rotulo) + '</span><b>' + dinheiro(total) + '</b>' +
         (id !== 'receitaLiquida' && rl ? '<small>' + pct(total / rl) + ' da receita líquida</small>' : '') + '</div>';
     }).join('');
@@ -238,15 +243,15 @@
       const aberto = (op && op.abrirTudo) || E.abertos.has(l.grupo || l.id);
       if (l.tipo === 'analitica') {
         if (!aberto) return faixa;
-        return faixa + '<tr class="analitica" data-de="' + T.esc(l.grupo) + '"><td class="fixa"><span class="cod">' + T.esc(l.conta) + '</span> ' + T.esc(l.rotulo) + '</td>' + celulasPeriodos(l, avah) + '</tr>';
+        return faixa + '<tr class="analitica" data-de="' + T.esc(l.grupo) + '"><td class="fixa"><span class="cod">' + T.esc(l.conta) + '</span> ' + T.esc(l.rotulo) + '</td>' + celulasPeriodos(l, avah, dre.colunas) + '</tr>';
       }
       if (l.tipo === 'grupo') {
         return faixa + '<tr class="grupo' + (l.semLinha ? ' sem-linha' : '') + '" data-grupo="' + T.esc(l.id) + '" title="' + (aberto ? 'Fechar' : 'Abrir') + ' as ' + l.filhas + ' conta(s)">' +
-          '<td class="fixa"><span class="abre nao-imprimir">' + (aberto ? '▾' : '▸') + '</span>' + T.esc(l.rotulo) + (l.semLinha ? ' ⚠️' : '') + ' <small>' + l.filhas + '</small></td>' + celulasPeriodos(l, avah) + '</tr>';
+          '<td class="fixa"><span class="abre nao-imprimir">' + (aberto ? '▾' : '▸') + '</span>' + T.esc(l.rotulo) + (l.semLinha ? ' ⚠️' : '') + ' <small>' + l.filhas + '</small></td>' + celulasPeriodos(l, avah, dre.colunas) + '</tr>';
       }
-      return faixa + '<tr class="total' + (l.destaque ? ' destaque' : '') + '"><td class="fixa">' + T.esc(l.rotulo) + '</td>' + celulasPeriodos(l, avah) + '</tr>';
+      return faixa + '<tr class="total' + (l.destaque ? ' destaque' : '') + '"><td class="fixa">' + T.esc(l.rotulo) + '</td>' + celulasPeriodos(l, avah, dre.colunas) + '</tr>';
     }).join('');
-    const colunas = dre.colunas.map((c) => Object.assign({}, c, { rotulo: c.rotulo }));
+    const colunas = dre.colunas.map((c) => Object.assign({}, c, { cls: c.acumulado ? 'acum' : '' }));
     const nota = E.rel.dre.naoMapeadas.length ? '<p class="apres-nota">⚠️ "Outras contas de resultado" reúne conta(s) de resultado que nenhuma linha do modelo pega: ' +
       E.rel.dre.naoMapeadas.map((x) => T.esc(x.conta + ' ' + x.titulo)).join('; ') + '. Diga em que linha ela(s) entra(m) para ficar certo na apresentação.</p>' : '';
     const fora = E.rel.dre.foraDaDre.length ? '<p class="apres-nota suave">Fora da DRE, como na planilha: ' + E.rel.dre.foraDaDre.length + ' conta(s) de compras e estoque (4.2), que somam zero no mês.</p>' : '';

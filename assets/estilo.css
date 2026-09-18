@@ -640,6 +640,9 @@ table.apres.balancete tr.nivel-1 td { background: #e7e6e6; font-weight: 700; }
 table.apres.balancete tr.nivel-2 td, table.apres.balancete tr.nivel-3 td { font-weight: 600; }
 table.apres.balancete tr.sintetica.nivel-4 td { font-weight: 600; color: #34404d; }
 table.apres.simples tr.total td { background: #ddebf7; font-weight: 700; }
+/* Coluna do acumulado (DRE mensal e Resumo): tinta por cima da cor da linha e borda à esquerda. */
+table.apres td.acum { box-shadow: inset 0 0 0 999px rgba(31, 78, 120, 0.07); font-weight: 700; }
+table.apres td.num.acum:not(.pct) { border-left: 2px solid #1f4e78; }
 table.apres.simples th.fixa { min-width: 240px; }
 table.apres.simples td.txt { white-space: nowrap; min-width: 0; }
 table.apres.premissas td.txt { white-space: normal; min-width: 170px; max-width: 420px; }

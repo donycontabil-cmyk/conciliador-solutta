@@ -283,12 +283,17 @@
       const rl = totais.get('receitaLiquida');
       linhas.forEach((l) => {
         l.av = l.valores.map((v, k) => div(v, rl[k]));
-        l.ah = l.valores.map((v, k) => (k === 0 ? null : ah(v, l.valores[k - 1])));
+        // O acumulado não tem "período anterior": AH vazio nele.
+        l.ah = l.valores.map((v, k) => (k === 0 || colunas[k].acumulado ? null : ah(v, l.valores[k - 1])));
       });
-      return { colunas: colunas.map((c) => ({ id: c.id || c.comp, rotulo: c.rotulo, falta: !!c.falta, parcial: !!c.parcial })), linhas, totais };
+      return { colunas: colunas.map((c) => ({ id: c.id || c.comp, rotulo: c.rotulo, falta: !!c.falta, parcial: !!c.parcial, acumulado: !!c.acumulado })), linhas, totais };
     }
     const colMeses = meses.map((m) => Object.assign({}, m, { id: m.comp, falta: !m.tem }));
-    const dreMensal = dre(colMeses, (conta, m) => valor(conta, m));
+    // DRE mensal com o ACUMULADO no fim, à direita (Dony, 18/09/2026: "um acumulado de janeiro até agosto;
+    // quando tiver setembro, de janeiro a setembro"): a soma dos meses carregados, com AV % sobre a receita
+    // líquida acumulada. Os meses continuam nas posições 0..n-1 (o LALUR e a conferência usam esse índice).
+    const colAcumulado = meses.length ? [{ id: 'acumulado', rotulo: 'Acumulado ' + rotuloAcumulado(meses), acumulado: true }] : [];
+    const dreMensal = dre(colMeses.concat(colAcumulado), (conta, col) => (col.acumulado ? somaDe(meses.map((m) => valor(conta, m))) : valor(conta, col)));
     const dreTrimestral = dre(trimestres, (conta, t) => valorTrimestre(conta, t));
     // Conferência: lucro da DRE × resultado do balancete (débitos − créditos das contas de 1º nível que não são 1 e 2).
     const conferencia = meses.filter((m) => m.tem).map((m) => {
