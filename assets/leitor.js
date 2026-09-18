@@ -8,11 +8,11 @@
  */
 (function (raiz, fabrica) {
   if (typeof module === 'object' && module.exports) {
-    module.exports = fabrica(require('./util.js'), require('./ler-planilha.js'), require('./ler-razao.js'), require('./ler-financeiro.js'), require('./familias.js'));
+    module.exports = fabrica(require('./util.js'), require('./ler-planilha.js'), require('./ler-razao.js'), require('./ler-financeiro.js'), require('./familias.js'), require('./ler-balancete.js'));
   } else {
-    raiz.Leitor = fabrica(raiz.Util, raiz.LerPlanilha, raiz.LerRazao, raiz.LerFinanceiro, raiz.Familias);
+    raiz.Leitor = fabrica(raiz.Util, raiz.LerPlanilha, raiz.LerRazao, raiz.LerFinanceiro, raiz.Familias, raiz.LerBalancete);
   }
-})(typeof self !== 'undefined' ? self : this, function (Util, LerPlanilha, LerRazao, LerFinanceiro, Familias) {
+})(typeof self !== 'undefined' ? self : this, function (Util, LerPlanilha, LerRazao, LerFinanceiro, Familias, LerBalancete) {
   'use strict';
 
   const NOMES_DOS_TIPOS = {
@@ -64,6 +64,17 @@
         r.variosMeses = de && ate && (de.ano !== ate.ano || de.mes !== ate.mes);
       }
       r.contas = razao.contas.map((c) => Object.assign({ papel: Familias.papelDaConta(c, { nomeArquivo }) }, c));
+      return fechar(r);
+    }
+    // Balancete (relatório de apresentação): lido conta por conta quando o cabeçalho é reconhecido.
+    const recBal = LerBalancete && LerBalancete.reconhecer(planilha.abas);
+    if (recBal) {
+      const b = LerBalancete.ler(planilha.abas, { nomeArquivo });
+      r.tipo = 'balancete';
+      r.motivo = recBal.motivo;
+      r.balancete = b;
+      r.avisos = r.avisos.concat(b.avisos);
+      r.competencia = b.competencia;
       return fechar(r);
     }
     if (recRazao.tipo === 'balancete') {

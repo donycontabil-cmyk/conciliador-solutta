@@ -17,7 +17,7 @@
  *
  * Cada passo monta os seus lugares:
  *   { id, parte, titulo, sub, nome (para as mensagens), log,
- *     tipo: 'razao' | 'financeiro_pagar' | 'financeiro_adiantamento', competencia,
+ *     tipo: 'razao' | 'financeiro_pagar' | 'financeiro_adiantamento' | 'balancete' (relatório de apresentação), competencia,
  *     papel (razão: 'principal' | 'adiantamento'), varias (razão com mais de uma conta), opcional,
  *     periodo: { de, ate } (razão: confere se há lançamento; de = null → tudo até o fim do mês),
  *     nomePeriodo, arquivos: [meta, ...] (a versão que o passo usa agora),
@@ -60,6 +60,16 @@
     return app().armazenamento.guardarArquivo(codigo, meta, { tipo, titulos: f.titulos, total: f.total, descartados: f.descartados, posicao: f.posicao }, r.bytes);
   }
 
+  // Guarda um balancete (relatório de apresentação) na competência dada. O resultado do mês (créditos −
+  // débitos das contas de 1º nível que não são 1 e 2) vai na ficha para aparecer no lugar.
+  function guardarBalancete(codigo, r, comp, extra) {
+    const b = r.balancete;
+    const resultado = b.contas.filter((c) => c.nivel === 1 && !/^[12]$/.test(c.conta)).reduce((s, c) => s + c.creditos - c.debitos, 0);
+    const meta = Object.assign({ tipo: 'balancete', arquivo: r.nomeArquivo, competencia: comp, periodo: b.periodo, contas: b.contas.length, resultado,
+      confere: b.confere, empresaNoArquivo: b.empresa, cnpjNoArquivo: b.cnpj, hashDoConteudo: r.hash }, extra || {});
+    return app().armazenamento.guardarArquivo(codigo, meta, { tipo: 'balancete', empresa: b.empresa, cnpj: b.cnpj, periodo: b.periodo, contas: b.contas, total: b.total }, r.bytes);
+  }
+
   // Os arquivos guardados que ocupam o mesmo lugar que este (as versões): aging = mesmo tipo e
   // competência; razão = mesma competência e papel — e a mesma conta no lugar de várias contas (①).
   // Sem o lugar, o razão é o da mesma conta.
@@ -98,7 +108,7 @@
   // "9 entraram · 2 saíram · 1 mudou" (ou "mesmos itens").
   function textoComparacao(c, tipo) {
     if (!c || c.iguais === undefined) return 'comparada com a versão anterior';
-    const nome = tipo === 'razao' ? ['lançamento', 'lançamentos'] : ['título', 'títulos'];
+    const nome = tipo === 'razao' ? ['lançamento', 'lançamentos'] : tipo === 'balancete' ? ['conta', 'contas'] : ['título', 'títulos'];
     const partes = [];
     if (c.entraram) partes.push('<b>' + c.entraram + '</b> ' + (c.entraram === 1 ? 'entrou' : 'entraram'));
     if (c.sairam) partes.push('<b>' + c.sairam + '</b> ' + (c.sairam === 1 ? 'saiu' : 'saíram'));
@@ -110,10 +120,15 @@
   // Desenho
   // ------------------------------------------------------------------
   function detalheDoArquivo(m) {
+    if (m.tipo === 'balancete') {
+      return (m.contas || 0) + ' contas · ' + (m.resultado >= 0 ? 'lucro' : 'prejuízo') + ' do mês ' + T.moeda(Math.abs(m.resultado || 0)) +
+        (m.confere === false ? ' · <span class="falta">não fecha</span>' : '');
+    }
     return m.tipo === 'razao'
       ? 'conta ' + T.esc(m.conta.codigo + ' ' + (m.conta.nome || '')) + ' · ' + (m.lancamentos || 0) + ' lanç.' + (m.periodo ? ' · ' + T.esc(m.periodo.de + ' a ' + m.periodo.ate) : '')
       : (m.titulos || 0) + ' títulos · ' + T.moeda(m.total || 0);
   }
+  function tipoDaComparacao(m) { return m.tipo === 'razao' ? 'razao' : m.tipo === 'balancete' ? 'balancete' : 'aging'; }
   function quemEnviou(m) { return m.enviadoEm ? T.esc(m.enviadoPor || '') + ' em ' + U.dataHoraLocal(m.enviadoEm) : ''; }
 
   function descreverArquivo(m, lugar, metas) {
@@ -123,7 +138,7 @@
     const antigas = versoes.slice(pos + 1);
     const outroMes = m.competencia !== lugar.competencia ? ' · guardado em ' + U.nomeCompetencia(m.competencia) : '';
     const quem = quemEnviou(m);
-    const tipo = m.tipo === 'razao' ? 'razao' : 'aging';
+    const tipo = tipoDaComparacao(m);
     const comparar = antigas.length || (m.comparacao && m.comparacao.com);
     return '<div class="arquivo-lugar"><div><b>' + T.esc(m.arquivo) + '</b>' +
       (versoes.length > 1 ? ' <span class="selo versao" title="O programa usa a versão mais nova; as anteriores continuam guardadas">versão ' + numero + ' · em uso</span>' : '') +
@@ -292,8 +307,11 @@
     const base = { com: ativo.id, arquivoAnterior: ativo.arquivo };
     try {
       const antes = await app().armazenamento.conteudoDoArquivo(ativo.id);
-      return Object.assign(base, motor().resumoDaComparacao(motor().compararVersoes(tipo, antes, novo)));
+      return Object.assign(base, motor().resumoDaComparacao(comparar(tipo, antes, novo)));
     } catch (e) { return base; }
+  }
+  function comparar(tipo, antes, depois) {
+    return tipo === 'balancete' ? raiz.MotorApresentacao.compararBalancetes(antes, depois) : motor().compararVersoes(tipo, antes, depois);
   }
 
   // Sobe UM arquivo num lugar. Devolve true se guardou. op: { semRota } (não redesenha no fim).
@@ -376,6 +394,38 @@
         }
         resumo = (contas.length === 1 ? 'conta ' + contas[0].codigo : contas.length + ' contas (' + contas.map((c) => c.codigo).join(', ') + ')') +
           ' · ' + noPeriodo + ' lançamento(s) ' + emPeriodo + (rz.periodo ? ' (arquivo de ' + rz.periodo.de + ' a ' + rz.periodo.ate + ')' : '');
+      } else if (lugar.tipo === 'balancete') {
+        const b = r.balancete;
+        if (r.tipo !== 'balancete' || !b || !b.contas.length) { await naoServe('um balancete', r.tipo !== 'balancete' && r.tipo !== 'desconhecido'); return false; }
+        const emp = app().empresas.find((e) => String(e.codigo) === String(codigo)) || {};
+        if (b.cnpj && emp.cnpj && String(b.cnpj).slice(0, 8) !== String(emp.cnpj).slice(0, 8)) {
+          const ok = await T.confirmar({ titulo: 'Esse balancete é de outra empresa?',
+            texto: 'O CNPJ do balancete (' + U.formatarCnpj(b.cnpj) + ') não é o de <b>' + T.esc(emp.nome) + '</b> (' + U.formatarCnpj(emp.cnpj) + ').',
+            botao: 'Guardar mesmo assim', perigo: true });
+          if (!ok) return false;
+        }
+        if (b.competencia && b.competencia !== lugar.competencia) {
+          const ok = await T.confirmar({ titulo: 'O balancete é de outro mês',
+            texto: T.esc(arquivo.name) + ' é de <b>' + T.esc(b.periodo.de + ' a ' + b.periodo.ate) + '</b>, mas este lugar é o de <b>' + T.esc(U.nomeCompetencia(lugar.competencia)) + '</b>. É o arquivo certo?',
+            botao: 'Guardar em ' + U.nomeCompetencia(lugar.competencia), perigo: true });
+          if (!ok) return false;
+        }
+        if (b.variosMeses || !b.confere) {
+          const ok = await T.confirmar({ titulo: b.variosMeses ? 'O balancete tem mais de um mês' : 'O balancete não fecha',
+            texto: b.avisos.map((a) => T.esc(a)).join('<br>') + '<br><br>O relatório usa os débitos e créditos de cada mês. Guardar assim mesmo?',
+            botao: 'Guardar assim mesmo', perigo: true });
+          if (!ok) return false;
+        }
+        const ativo = emUsoNoLugar(lugar);
+        if (!(ativo && ativo.hashDoConteudo === r.hash)) {
+          jaEra = false;
+          const comparacao = ativo ? await compararComEmUso(ativo, 'balancete', b) : null;
+          const extra = comparacao ? { comparacao } : {};
+          let g = await guardarBalancete(codigo, r, lugar.competencia, extra);
+          if (g.jaExistia && (!ativo || g.meta.id !== ativo.id)) g = await guardarBalancete(codigo, r, lugar.competencia, Object.assign({ recarga: U.agoraISO() }, extra));
+          await versaoNova(g, ativo, comparacao);
+        }
+        resumo = b.contas.length + ' contas · ' + (b.periodo ? b.periodo.de + ' a ' + b.periodo.ate : U.nomeCompetencia(lugar.competencia));
       } else {
         if (!r.financeiro) { await naoServe('um relatório de títulos em aberto (aging)', !/^financeiro|^desconhecido$/.test(r.tipo)); return false; }
         const pos = r.financeiro.posicao && U.lerData(r.financeiro.posicao);
@@ -409,7 +459,7 @@
           const qtd = versoesDoArquivo(metas, n.meta, lugar).length;
           if (qtd < 2) return '';
           return 'versão ' + qtd + ' (a anterior continua guardada' + (n.comparacao && n.comparacao.iguais !== undefined
-            ? ': ' + textoComparacao(n.comparacao, lugar.tipo === 'razao' ? 'razao' : 'aging').replace(/<\/?b>/g, '') : '') + ')';
+            ? ': ' + textoComparacao(n.comparacao, tipoDaComparacao(lugar)).replace(/<\/?b>/g, '') : '') + ')';
         }).filter(Boolean);
         textoVersao = partes.join('; ');
       }
@@ -489,14 +539,14 @@
       cDepois = await arm.conteudoDoArquivo(m.id);
     } catch (e) { T.avisoRapido('Não consegui abrir as versões: ' + T.mensagemDeErro(e), 'erro'); return; }
     if (!cAntes) { T.avisoRapido('A versão anterior não está mais guardada.', 'erro'); return; }
-    const tipo = m.tipo === 'razao' ? 'razao' : 'aging';
-    const c = motor().compararVersoes(tipo, cAntes, cDepois);
+    const c = comparar(tipoDaComparacao(m), cAntes, cDepois);
     const nomeAnt = anterior.excluida ? 'a versão anterior (excluída)' : 'a versão ' + (numero - 1);
     await T.janela({ titulo: 'O que mudou da ' + nomeAnt.replace(/^a /, '') + ' para a versão ' + numero + ' · ' + (lugar ? lugar.nome : ''), larga: true,
       corpo: htmlComparacao(c, { antes: anterior, depois: m, nomeAntes: primeiraMaiuscula(nomeAnt.replace(/^a /, '')), nomeDepois: 'Versão ' + numero }) });
   }
 
   function htmlComparacao(c, op) {
+    if (c.tipo === 'balancete') return htmlComparacaoBalancete(c, op);
     const razao = c.tipo === 'razao';
     const totais = (t) => razao ? 'débitos ' + T.moeda(t.debitos) + ' · créditos ' + T.moeda(t.creditos) : 'total ' + T.moeda(t.total);
     const ficha = (nome, m, qtd, t) => '<div><b>' + T.esc(nome) + '</b>: ' + T.esc(m.arquivo || '') + ' · ' + qtd + (razao ? ' lançamentos' : ' títulos') + ' · ' + totais(t) +
@@ -531,5 +581,29 @@
         (razao ? 'mesma data e histórico, ' : '') + 'mesma data e valor, mesma data e documento, ou mesmo documento e valor).</p>' + mudaram;
   }
 
-  raiz.TelaSubir = { painel, botao, ligar, ligarBotao, subir, apagar, verVersao, guardarContaDoRazao, guardarTitulos, doMesmoLugar, versoesDoArquivo, htmlComparacao, contagensDaComparacao };
+  // Balancete: conta por conta (entrou, saiu ou mudou algum dos quatro valores).
+  function htmlComparacaoBalancete(c, op) {
+    const ficha = (nome, m, qtd, t) => '<div><b>' + T.esc(nome) + '</b>: ' + T.esc(m.arquivo || '') + ' · ' + qtd + ' contas · débitos ' + T.moeda(t.debitos) + ' · créditos ' + T.moeda(t.creditos) +
+      (m.enviadoEm ? ' · ' + T.esc(m.enviadoPor || '') + ' em ' + U.dataHoraLocal(m.enviadoEm) : '') + '</div>';
+    const cab = '<th>Conta</th><th>Título</th><th class="num">Saldo anterior</th><th class="num">Débitos</th><th class="num">Créditos</th><th class="num">Saldo atual</th>';
+    const tds = (x) => '<td class="num">' + T.esc(x.conta) + '</td><td class="nome">' + T.esc(x.titulo || '') + '</td>' + T.tdValor(x.saldoAnterior) + T.tdValor(x.debitos) + T.tdValor(x.creditos) + T.tdValor(x.saldoAtual);
+    const LIMITE = 300;
+    const mudA = new Set(c.mudaram.map((p) => p.antes)), mudD = new Set(c.mudaram.map((p) => p.depois));
+    const entraram = c.entraram.filter((x) => !mudD.has(x)), sairam = c.sairam.filter((x) => !mudA.has(x));
+    const tabela = (titulo, xs) => '<h3 class="titulo-comparacao">' + titulo + ' <small>(' + xs.length + ')</small></h3>' +
+      (xs.length ? '<div class="tabela-caixa"><table class="tabela"><thead><tr>' + cab + '</tr></thead><tbody>' + xs.slice(0, LIMITE).map((x) => '<tr>' + tds(x) + '</tr>').join('') +
+        '</tbody></table></div>' : '<p class="suave pequeno">Nenhuma.</p>');
+    const mudaram = c.mudaram.length
+      ? '<div class="tabela-caixa"><table class="tabela"><thead><tr><th></th>' + cab + '<th>O que mudou</th></tr></thead><tbody>' +
+        c.mudaram.slice(0, LIMITE).map((p) => '<tr class="suave"><td class="pequeno">antes</td>' + tds(p.antes) + '<td rowspan="2"><b>' + T.esc(p.campos.join(', ')) + '</b></td></tr>' +
+          '<tr><td class="pequeno"><b>agora</b></td>' + tds(p.depois) + '</tr>').join('') + '</tbody></table></div>'
+      : '<p class="suave pequeno">Nenhuma.</p>';
+    return '<div class="fichas-versao pequeno">' + ficha(op.nomeAntes, op.antes, c.qtdAntes, c.antes) + ficha(op.nomeDepois, op.depois, c.qtdDepois, c.depois) + '</div>' +
+      '<p class="resumo-versao">✓ ' + contagem(c.iguais, 'igual', 'iguais', true) + ' · ➕ ' + contagem(entraram.length, 'entrou', 'entraram', true) +
+        ' · ➖ ' + contagem(sairam.length, 'saiu', 'saíram', true) + ' · ✎ ' + contagem(c.mudaram.length, 'mudou', 'mudaram', true) + '</p>' +
+      tabela('➕ Contas que entraram', entraram) + tabela('➖ Contas que saíram', sairam) +
+      '<h3 class="titulo-comparacao">✎ Contas que mudaram <small>(' + c.mudaram.length + ')</small></h3>' + mudaram;
+  }
+
+  raiz.TelaSubir = { painel, botao, ligar, ligarBotao, subir, apagar, verVersao, guardarContaDoRazao, guardarTitulos, guardarBalancete, doMesmoLugar, versoesDoArquivo, htmlComparacao, contagensDaComparacao };
 })(self);

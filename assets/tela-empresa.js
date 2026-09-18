@@ -34,10 +34,21 @@
         '<div class="rodape"><span class="pilula cinza">em construção · Etapa ' + f.etapa + '</span></div></div>';
     }).join('');
 
+    // Relatório de apresentação (18/09/2026): balancetes do ano, DRE, balancete mensal/trimestral e LALUR.
+    const balancetes = arquivos.filter((a) => a.tipo === 'balancete');
+    const ultimoBal = balancetes.map((a) => U.anoMes(a.competencia)).sort().reverse()[0];
+    const anoBal = ultimoBal ? ultimoBal.slice(0, 4) : '';
+    const meses = anoBal ? new Set(balancetes.filter((a) => String(a.competencia).slice(0, 4) === anoBal).map((a) => a.competencia)).size : 0;
+    const cartaoApresentacao = '<a class="cartao familia apresentacao" href="#/empresa/' + encodeURIComponent(codigo) + '/apresentacao' + (anoBal ? '/' + anoBal : '') + '">' +
+      '<div class="icone">📊</div><h2>Relatório de apresentação</h2><p class="suave" style="line-height:1.5">Importe os balancetes do mês: o programa monta a DRE (CPC 51) mensal e trimestral, ' +
+      'o balancete mensal e trimestral com AV % e AH % e o LALUR trimestral, prontos para apresentar, imprimir ou baixar em Excel.</p>' +
+      '<div class="rodape"><span class="suave pequeno">' + (meses ? meses + ' balancete(s) de ' + anoBal + ' · último: ' + U.nomeCompetencia(ultimoBal + '-01') : 'nenhum balancete ainda') + '</span>' +
+      '<span class="botao primario pequeno">Abrir →</span></div></a>';
+
     el.innerHTML = '<a class="voltar" href="#/">← Empresas</a>' +
       '<div class="cabecalho"><div class="titulos"><h1>' + T.esc(emp.nome) + '</h1><p class="suave">Código ' + T.esc(emp.codigo) + (detalhes.length ? ' · ' + T.esc(detalhes.join(' · ')) : '') + '</p></div>' +
       '<button class="botao" id="bt-editar">Editar cadastro</button></div>' +
-      '<div class="grade-3">' + cartoes + '</div>';
+      '<div class="grade-3">' + cartaoApresentacao + cartoes + '</div>';
     el.querySelector('#bt-editar').addEventListener('click', () => raiz.TelaCarteira.formulario(emp));
   }
 
