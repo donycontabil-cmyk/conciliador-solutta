@@ -41,7 +41,8 @@
 
   // Estado da tela (continua entre redesenhos).
   const E = { codigo: null, ano: null, emp: null, rel: null, registro: null, config: {}, lugares: [], metas: [],
-    aba: 'dre-mensal', avah: true, nivel: 5, semZeradas: false, abertos: new Set(), selecao: null, marcarLalur: false, balancetes: [], fila: null, clienteMes: null, cacheCliente: null, ultimoCliente: null, casas: 2, milhar: false };
+    aba: 'dre-mensal', avah: true, nivel: 5, semZeradas: false, abertos: new Set(), selecao: null, marcarLalur: false, balancetes: [], fila: null, clienteMes: null, cacheCliente: null, ultimoCliente: null, casas: 2, milhar: false,
+    dreEdicao: null };
   (function lerPreferencias() {
     try {
       const p = JSON.parse((raiz.localStorage && raiz.localStorage.getItem(CHAVE_PREF)) || '{}') || {};
@@ -98,6 +99,14 @@
 
   function idRegistro(codigo, ano) { return 'F-' + codigo + '-apresentacao-' + ano + '-01'; }
 
+  // As linhas da DRE guardadas na empresa (valem para todos os anos) e o relatório montado com elas.
+  function mapaDaEmpresa() { const m = E.emp && E.emp.mapaDre; return m && m.contas && Object.keys(m.contas).length ? m : null; }
+  function montarRel(balancetes, dreModo) {
+    return motor().montar({ ano: E.ano, balancetes: balancetes || E.balancetes, config: E.config, mapaDre: mapaDaEmpresa(), dreModo });
+  }
+  // Plano de contas diferente do modelo e linhas ainda não conferidas: a DRE e o que sai dela ficam fechados.
+  const dreFechada = () => !!E.rel && E.rel.dre.situacao === 'sugestao';
+
   // ------------------------------------------------------------------
   // Abrir a tela
   // ------------------------------------------------------------------
@@ -129,9 +138,9 @@
     }
     const registro = (await arm.conciliacoes(codigo, anoEscolhido + '-01-01')).find((r) => r.id === idRegistro(codigo, anoEscolhido)) || null;
     if (conferir && !conferir()) return;
-    if (E.codigo !== codigo || E.ano !== anoEscolhido) { E.abertos = new Set(); E.selecao = null; }
+    if (E.codigo !== codigo || E.ano !== anoEscolhido) { E.abertos = new Set(); E.selecao = null; E.dreEdicao = null; }
     Object.assign(E, { codigo, ano: anoEscolhido, emp, metas, lugares, registro, balancetes, config: (registro && registro.config) || {} });
-    E.rel = motor().montar({ ano: anoEscolhido, balancetes, config: E.config });
+    E.rel = montarRel();
     E.anos = Array.from(new Set(anosComBalancete.concat([anoAtual, anoEscolhido]))).sort((a, b) => b - a);
     desenhar(el);
   }
@@ -194,8 +203,12 @@
       '<input type="checkbox" data-opcao="marcar-lalur"' + (E.marcarLalur ? ' checked' : '') + '> ✎ Marcar adições e exclusões do LALUR</label>';
     const ajudaMarcar = '<span class="suave pequeno"><b>Marcando o LALUR:</b> clique em <b>+ Adição</b> ou <b>− Exclusão</b> na conta; clique de novo para tirar. ' +
       'Conta de ativo ou passivo só tem exclusão, pelo aumento do saldo credor (a regra da planilha). ' + ajustesAtuais().length + ' conta(s) marcada(s).</span>';
+    if ((E.aba === 'dre-mensal' || E.aba === 'dre-trimestral') && (dreFechada() || E.dreEdicao)) {
+      return '<span class="suave pequeno">Conferindo as <b>linhas da DRE</b> da empresa: escolha a linha de cada grupo de contas; a prévia da DRE ao lado muda na hora.</span>';
+    }
     if (E.aba === 'dre-mensal' || E.aba === 'dre-trimestral') {
-      return '<button type="button" class="botao pequeno" data-opcao="abrir-tudo">＋ Abrir todas as contas</button>' +
+      return '<button type="button" class="botao pequeno" data-opcao="linhas-dre" title="Em que linha da DRE entra cada conta de resultado desta empresa">⚙ Linhas da DRE</button>' +
+        '<button type="button" class="botao pequeno" data-opcao="abrir-tudo">＋ Abrir todas as contas</button>' +
         '<button type="button" class="botao pequeno" data-opcao="fechar-tudo">－ Fechar todas</button>' + avah + marcar +
         (E.marcarLalur ? ajudaMarcar : '<span class="suave pequeno">Clique num subtotal para abrir ou fechar as contas dele. AV % sobre a receita líquida; AH % sobre o ' + (E.aba === 'dre-mensal' ? 'mês' : 'trimestre') + ' anterior.</span>');
     }
@@ -285,6 +298,7 @@
   // O painel dos meses (como o exemplo que o Dony mandou): atalhos, o ano e um botão por mês.
   function seletorMeses() {
     if (!ABAS_MENSAIS[E.aba]) return '';
+    if ((E.aba === 'dre-mensal' && (dreFechada() || E.dreEdicao)) || (E.aba === 'indicadores' && dreFechada())) return '';
     const com = mesesComBalancete();
     const vis = new Set(mesesVisiveis().map((m) => m.comp));
     const todos = !E.selecao || vis.size === com.length;
@@ -323,10 +337,13 @@
   // Uma seção do relatório (na tela, a aba; na impressão, uma depois da outra). op.impressao: todas as contas da DRE abertas?
   function secao(aba, op) {
     const rel = E.rel;
+    const impressao = !!(op && op.impressao);
     if (aba === 'resumo') return secaoResumo();
     if (aba === 'balanco') return secaoBalanco();
-    if (aba === 'indicadores') return secaoIndicadores();
-    if (aba === 'cliente') return secaoCliente(op);
+    if (aba === 'indicadores') return dreFechada() ? (impressao ? '' : tituloSecao('Indicadores financeiros e patrimoniais', '') + avisoDreFechada('Os indicadores ficam fechados')) : secaoIndicadores();
+    if (aba === 'cliente') return dreFechada() ? (impressao ? '' : avisoDreFechada('O relatório do cliente fica fechado')) : secaoCliente(op);
+    if (/^dre-/.test(aba) && dreFechada() && impressao) return '';
+    if (/^dre-/.test(aba) && (dreFechada() || E.dreEdicao) && !impressao) return secaoLinhasDre();
     if (aba === 'dre-mensal') return secaoDre(dreMensalVisivel(), 'DRE CPC 51 mensal detalhada', op);
     if (aba === 'dre-trimestral') return secaoDre(rel.dre.trimestral, 'DRE CPC 51 trimestral detalhada', op);
     if (aba === 'balancete-mensal') return secaoBalancete(balanceteMensalVisivel(), 'Balancete analítico mensal');
@@ -377,7 +394,7 @@
     }).join('');
     return tituloSecao('Resumo executivo', 'Os cartões: a DRE somada nos meses escolhidos. A tabela: o saldo das contas de 1º nível no fim de cada mês, como no balancete ' +
       '(receitas, custos e despesas acumulados desde o último encerramento); a soma de cada coluna tem que dar zero.') +
-      '<div class="apres-fichas">' + fichas + '</div>' +
+      (dreFechada() ? avisoDreFechada('Os cartões da DRE ficam fechados') : '<div class="apres-fichas">' + fichas + '</div>') +
       '<div class="apres-caixa"><table class="apres"><thead><tr><th class="fixa">Conta</th>' +
       colunas.map((c) => '<th class="num per' + (c.cls ? ' ' + c.cls : '') + (c.falta ? ' falta' : '') + '">' + T.esc(c.rotulo) + '</th>').join('') + '</tr></thead><tbody>' + linhas + '</tbody></table></div>';
   }
@@ -441,12 +458,211 @@
       return faixa + '<tr class="total' + (l.destaque ? ' destaque' : '') + '"><td class="fixa">' + T.esc(l.rotulo) + '</td>' + celulasPeriodos(l, avah, dre.colunas) + '</tr>';
     }).join('');
     const colunas = dre.colunas.map((c) => Object.assign({}, c, { cls: c.acumulado ? 'acum' : '' }));
-    const nota = E.rel.dre.naoMapeadas.length ? '<p class="apres-nota">⚠️ "Outras contas de resultado" reúne conta(s) de resultado que nenhuma linha do modelo pega: ' +
-      E.rel.dre.naoMapeadas.map((x) => T.esc(x.conta + ' ' + x.titulo)).join('; ') + '. Diga em que linha ela(s) entra(m) para ficar certo na apresentação.</p>' : '';
-    const fora = E.rel.dre.foraDaDre.length ? '<p class="apres-nota suave">Fora da DRE, como na planilha: ' + E.rel.dre.foraDaDre.length + ' conta(s) de compras e estoque (4.2), que somam zero no mês.</p>' : '';
-    return tituloSecao(titulo, T.esc(E.ano) + ' · ' + valoresEm() + ' · receitas positivas, custos e despesas entre parênteses') +
+    const d = E.rel.dre;
+    const nota = d.naoMapeadas.length ? '<p class="apres-nota">⚠️ "Outras contas de resultado" reúne conta(s) de resultado que nenhuma linha da DRE pega: ' +
+      d.naoMapeadas.map((x) => T.esc(x.conta + ' ' + x.titulo)).join('; ') + '. Indique a linha delas em <b>⚙ Linhas da DRE</b> para ficar certo na apresentação.</p>' : '';
+    const fora = !d.foraDaDre.length ? '' : d.situacao === 'modelo'
+      ? '<p class="apres-nota suave">Fora da DRE, como na planilha: ' + d.foraDaDre.length + ' conta(s) de compras e estoque (4.2), que somam zero no mês.</p>'
+      : '<p class="apres-nota suave">Fora da DRE (marcadas nas linhas da DRE da empresa): ' + d.foraDaDre.length + ' conta(s) — ' + d.foraDaDre.slice(0, 3).map((x) => T.esc(x.conta + ' ' + x.titulo)).join('; ') + (d.foraDaDre.length > 3 ? '; …' : '') + '.</p>';
+    const salvo = mapaDaEmpresa();
+    const origem = d.situacao === 'mapa'
+      ? 'linhas da DRE desta empresa' + (salvo && salvo.conferidoEm ? ', conferidas em ' + T.esc(U.dataHoraLocal(salvo.conferidoEm).slice(0, 10)) : '')
+      : 'linhas da DRE pelo modelo da planilha (os nomes das contas batem com ele)';
+    return tituloSecao(titulo, T.esc(E.ano) + ' · ' + valoresEm() + ' · receitas positivas, custos e despesas entre parênteses · <span class="nao-imprimir">' + origem + '</span>') +
       '<div class="apres-caixa"><table class="apres dre' + (avah ? ' com-avah' : '') + (E.marcarLalur ? ' marcando' : '') + '">' + cabecalhoPeriodos([{ titulo: 'Linha / Conta analítica' }], colunas, avah) +
       '<tbody>' + corpo + '</tbody></table></div>' + nota + fora;
+  }
+
+  // ---------- LINHAS DA DRE da empresa (Dony, 18/09/2026: a DRE de um plano de contas diferente do da
+  // planilha saiu com despesa no custo). Em que linha da DRE entra cada conta de resultado: a linha de uma
+  // conta vale para todas as de baixo, a não ser que uma de baixo tenha a sua. O programa sugere pelos nomes,
+  // quem usa confere e confirma; fica guardado na empresa (todos os anos). A prévia da DRE ao lado muda na hora.
+  // E.dreEdicao = { contas: { conta: linha }, rotulos: { linha: nome na DRE }, abertos: Set, soMovimento }.
+  function avisoDreFechada(oque) {
+    return '<div class="aviso ambar" style="margin:0 0 12px"><span class="icone-aviso">🔒</span><div><b>' + oque + ' até as linhas da DRE desta empresa serem conferidas.</b> ' +
+      'O plano de contas dela é diferente do modelo da planilha; o programa já sugeriu a linha de cada grupo de contas pelos nomes. ' +
+      '<button type="button" class="botao pequeno primario" data-opcao="ir-linhas-dre">Conferir as linhas da DRE</button></div></div>';
+  }
+  function rotuloDaLinha(id) {
+    if (id === 'fora') return 'Fora da DRE';
+    const proprio = E.dreEdicao && E.dreEdicao.rotulos[id];
+    const l = motor().LINHAS_DO_MAPA.find((x) => x.id === id);
+    return (proprio || (l ? l.rotulo : id)).replace(/^\(-\)\s*/, '');
+  }
+  function indiceDoPlano() { return new Map(E.rel.contas.map((c) => [c.conta, c])); }
+  // Abre as contas-mãe de onde há linha escolhida (e das contas com movimento sem linha): as decisões aparecem.
+  function abrirAte(abertos, contas, indice) {
+    contas.forEach((k) => { let x = indice.get(k); while (x && x.pai && indice.has(x.pai)) { abertos.add(x.pai); x = indice.get(x.pai); } });
+  }
+  function iniciarEdicaoDre() {
+    const d = E.rel.dre;
+    const salvo = mapaDaEmpresa();
+    const contas = salvo ? Object.assign({}, salvo.contas) : d.situacao === 'modelo' ? motor().mapaDoModelo(E.rel.contas) : Object.assign({}, d.mapa || {});
+    E.dreEdicao = { contas, rotulos: Object.assign({}, (salvo && salvo.rotulos) || {}), abertos: new Set(), soMovimento: true };
+    const indice = indiceDoPlano();
+    abrirAte(E.dreEdicao.abertos, Object.keys(contas).concat(pendentesDre().map((c) => c.conta)), indice);
+  }
+  // Movimento de cada conta de resultado nos meses carregados (com o sinal da DRE: receita +) e as contas com
+  // movimento (a analítica e todas as de cima dela).
+  function movimentosDre() {
+    const com = E.rel.meses.map((m, k) => (m.tem ? k : -1)).filter((k) => k >= 0);
+    const mov = new Map(), comMov = new Set();
+    const indice = indiceDoPlano();
+    E.rel.mensal.linhas.forEach((l) => {
+      if (l.patrimonial) return;
+      let s = 0, abs = 0;
+      com.forEach((k) => { const v = l.valores[k] || 0; s += v; abs += Math.abs(v); });
+      mov.set(l.conta, -s);
+      if (l.analitica && abs) { let x = l; while (x) { comMov.add(x.conta); x = x.pai ? indice.get(x.pai) : null; } }
+    });
+    return { mov, comMov };
+  }
+  // Contas analíticas com movimento e sem linha (não dá para confirmar assim).
+  function pendentesDre() {
+    const ed = E.dreEdicao;
+    if (!ed) return [];
+    const { comMov } = movimentosDre();
+    const indice = indiceDoPlano();
+    return E.rel.contas.filter((c) => c.analitica && !c.patrimonial && comMov.has(c.conta) && !motor().linhaNoMapa(ed.contas, indice, c.conta));
+  }
+  // maeSemFalta: conta-mãe sem linha própria em que todas as de baixo já têm a sua.
+  function opcoesLinhas(propria, herdada, maeSemFalta) {
+    const vazia = herdada ? '↳ igual à de cima: ' + T.esc(rotuloDaLinha(herdada)) : maeSemFalta ? '— cada conta de baixo tem a sua —' : '— sem linha —';
+    let html = '<option value=""' + (propria ? '' : ' selected') + '>' + vazia + '</option>';
+    let cat = null;
+    motor().LINHAS_DO_MAPA.forEach((l) => {
+      if (l.categoria !== cat) { if (cat !== null) html += '</optgroup>'; cat = l.categoria; html += '<optgroup label="' + T.esc(cat) + '">'; }
+      html += '<option value="' + l.id + '"' + (propria === l.id ? ' selected' : '') + '>' + T.esc(rotuloDaLinha(l.id)) + '</option>';
+    });
+    return html + '</optgroup><option value="fora"' + (propria === 'fora' ? ' selected' : '') + '>Fora da DRE (não entra)</option>';
+  }
+  function secaoLinhasDre() {
+    if (!E.dreEdicao) iniciarEdicaoDre();
+    const ed = E.dreEdicao;
+    const d = E.rel.dre;
+    const indice = indiceDoPlano();
+    const { mov, comMov } = movimentosDre();
+    const resultado = E.rel.contas.filter((c) => !c.patrimonial);
+    const temConta = new Set(resultado.map((c) => c.conta));
+    const visivel = (c) => { let p = c.pai; while (p && temConta.has(p)) { if (!ed.abertos.has(p)) return false; p = indice.get(p).pai; } return true; };
+    const pend = pendentesDre();
+    const pendentes = new Set(pend.map((c) => c.conta));
+    // Conta-mãe com alguma conta de baixo sem linha também fica em vermelho (para achar abrindo).
+    pend.forEach((p) => { let x = indice.get(p.pai); while (x) { pendentes.add(x.conta); x = x.pai ? indice.get(x.pai) : null; } });
+    const com = E.rel.meses.filter((m) => m.tem);
+    const periodo = com.length ? (com.length === 1 ? com[0].rotulo : com[0].rotulo.slice(0, 3) + '–' + com[com.length - 1].rotulo) : '';
+    const linhas = resultado.filter((c) => visivel(c) && (!ed.soMovimento || comMov.has(c.conta))).map((c) => {
+      const propria = ed.contas[c.conta] || '';
+      const herdada = c.pai ? motor().linhaNoMapa(ed.contas, indice, c.pai) : null;
+      const aberto = ed.abertos.has(c.conta);
+      const semLinha = pendentes.has(c.conta);
+      return '<tr class="md-n' + Math.min(c.nivel, 6) + (c.analitica ? ' md-ana' : ' md-sin') + (propria ? ' md-propria' : '') + (semLinha ? ' md-sem' : '') + '">' +
+        '<td class="md-conta" style="padding-left:' + (6 + (c.nivel - 1) * 14) + 'px" title="' + T.esc(c.conta + ' ' + c.titulo) + '">' +
+        (c.analitica ? '<span class="md-folha"></span>' : '<button type="button" class="md-abre" data-dre-abre="' + T.esc(c.conta) + '" aria-expanded="' + aberto + '" title="' + (aberto ? 'Fechar' : 'Abrir') + ' as contas de baixo">' + (aberto ? '▾' : '▸') + '</button>') +
+        '<span class="cod">' + T.esc(c.conta) + '</span> ' + T.esc(c.titulo) + '</td>' +
+        '<td class="num">' + dinheiro(mov.get(c.conta)) + '</td>' +
+        '<td class="md-escolha"><select class="apres-campo" data-dre-conta="' + T.esc(c.conta) + '" aria-label="Linha da DRE da conta ' + T.esc(c.conta) + '">' + opcoesLinhas(propria, herdada, !c.analitica && !semLinha) + '</select></td></tr>';
+    }).join('');
+    // Prévia: a DRE com as linhas escolhidas (acumulado dos meses carregados) e a conferência com o balancete.
+    const previa = motor().montar({ ano: E.ano, balancetes: E.balancetes, config: E.config, mapaDre: { contas: ed.contas, rotulos: ed.rotulos, rascunho: true } });
+    const pd = previa.dre.mensal;
+    const iAc = pd.colunas.findIndex((c) => c.acumulado);
+    const linhasPrevia = pd.linhas.filter((l) => l.tipo !== 'analitica').map((l) => {
+      const v = l.valores[iAc];
+      if (l.tipo === 'grupo') {
+        const modelo = (motor().LINHAS_DO_MAPA.find((x) => x.id === l.id) || { rotulo: l.rotulo }).rotulo;
+        return '<tr class="md-pgrupo' + (l.filhas ? '' : ' md-vazia') + (l.semLinha ? ' md-sem' : '') + '"><td>' +
+          (l.semLinha ? T.esc(l.rotulo) : '<input class="md-rotulo" data-dre-rotulo="' + T.esc(l.id) + '" value="' + T.esc(ed.rotulos[l.id] || modelo) + '" placeholder="' + T.esc(modelo) + '" title="Nome da linha na DRE (clique para mudar)">') +
+          ' <small>' + l.filhas + '</small></td><td class="num">' + dinheiro(v) + '</td></tr>';
+      }
+      return '<tr class="total' + (l.destaque ? ' destaque' : '') + '"><td>' + T.esc(l.rotulo) + '</td><td class="num">' + dinheiro(v) + '</td></tr>';
+    }).join('');
+    const ll = pd.linhas.find((l) => l.id === 'lucroLiquido').valores[iAc] || 0;
+    const resBal = previa.dre.conferencia.reduce((s, c) => s + c.resultadoBalancete, 0);
+    const fecha = Math.abs(ll - resBal) <= 1;
+    const conferencia = '<p class="md-conf ' + (fecha ? 'ok' : 'neg') + '">' + (fecha ? '✓ ' : '⚠ ') + 'Lucro líquido pela DRE <b>' + dinheiro(ll) + '</b> · resultado do balancete nos mesmos meses <b>' + dinheiro(resBal) + '</b>' +
+      (fecha ? ' — iguais.' : ' — a diferença são as contas marcadas "Fora da DRE".') + '</p>';
+    // Por que o modelo não serve: as contas em que o código do modelo e o nome da conta discordam.
+    const exemplos = ((d.avaliacao && d.avaliacao.divergencias) || []).slice(0, 3).map((x) => '<b>' + T.esc(x.conta + ' ' + x.titulo) + '</b>: pelo código do modelo iria para “' +
+      T.esc(x.modelo ? rotuloDaLinha(x.modelo) : 'sem linha') + '”, pelo nome é “' + T.esc(rotuloDaLinha(x.pelosNomes)) + '”');
+    const aviso = d.situacao === 'sugestao' && !mapaDaEmpresa()
+      ? '<div class="aviso ambar" style="margin:0 0 10px"><span class="icone-aviso">⚠️</span><div><b>O plano de contas desta empresa é diferente do modelo da planilha.</b>' +
+        (exemplos.length ? ' Exemplos: ' + exemplos.join('; ') + '.' : '') + ' Para a DRE sair certa, confira em que linha entra cada grupo de contas. ' +
+        'O programa já sugeriu pelos nomes das contas: mude o que precisar e clique em <b>Confirmar</b>. Fica guardado para a empresa, em todos os anos. Até lá, a DRE, os indicadores e o relatório do cliente ficam fechados.</div></div>'
+      : '';
+    const estado = pend.length
+      ? '<span class="md-falta">⚠ ' + pend.length + ' conta(s) com movimento sem linha (em vermelho)</span>'
+      : '<span class="md-ok">✓ Todas as contas com movimento têm linha</span>';
+    return tituloSecao('Linhas da DRE', 'Em que linha da DRE entra cada conta de resultado · a linha de uma conta vale para todas as de baixo, a não ser que uma de baixo tenha a sua · fica guardado para a empresa') + aviso +
+      '<div class="md-barra"><button type="button" class="botao primario" data-dre="confirmar">✓ Confirmar as linhas da DRE</button>' +
+      (d.situacao !== 'sugestao' || mapaDaEmpresa() ? '<button type="button" class="botao" data-dre="cancelar" title="Volta para a DRE sem mudar nada">Cancelar</button>' : '') +
+      '<button type="button" class="botao pequeno" data-dre="sugestao" title="Refaz tudo pela sugestão dos nomes das contas">↺ Sugestão pelos nomes</button>' +
+      '<button type="button" class="botao pequeno" data-dre="modelo" title="Refaz tudo pelos códigos do modelo da planilha">↺ Modelo da planilha</button>' +
+      '<button type="button" class="botao pequeno" data-dre="abrir-tudo">＋ Abrir todas</button><button type="button" class="botao pequeno" data-dre="fechar-tudo">－ Fechar todas</button>' +
+      '<label class="caixa-opcao"><input type="checkbox" data-dre="so-movimento"' + (ed.soMovimento ? ' checked' : '') + '> Só contas com movimento</label>' + estado + '</div>' +
+      '<div class="md-grade"><div class="apres-caixa md-arvore"><table class="apres md-tabela"><thead><tr><th class="fixa">Conta de resultado</th><th class="num md-c-valor">' + T.esc(periodo) + '</th><th class="md-c-linha">Linha da DRE</th></tr></thead><tbody>' +
+      (linhas || '<tr><td colspan="3" class="suave">Nenhuma conta de resultado com movimento.</td></tr>') + '</tbody></table></div>' +
+      '<div class="md-lado"><h3 class="apres-sub">Prévia da DRE <small>' + T.esc(periodo) + ' · muda na hora · clique no nome de uma linha para mudar como ela aparece</small></h3>' +
+      '<table class="apres md-previa"><tbody>' + linhasPrevia + '</tbody></table>' + conferencia + '</div></div>';
+  }
+  // Muda a linha de uma conta. Numa conta-mãe, a escolha vale para todas as de baixo (as escolhas de baixo saem).
+  function mudarLinhaDre(el, conta, valor) {
+    const ed = E.dreEdicao;
+    if (!ed) return;
+    const indice = indiceDoPlano();
+    const c = indice.get(conta);
+    if (!c) return;
+    let tiradas = 0;
+    if (!c.analitica) {
+      Object.keys(ed.contas).forEach((k) => {
+        let x = indice.get(k);
+        while (x && x.pai) { if (x.pai === conta) { delete ed.contas[k]; tiradas++; break; } x = indice.get(x.pai); }
+      });
+    }
+    const herdada = c.pai ? motor().linhaNoMapa(ed.contas, indice, c.pai) : null;
+    if (!valor || valor === herdada) delete ed.contas[conta]; else ed.contas[conta] = valor;
+    redesenharFolha(el);
+    if (tiradas) T.avisoRapido(tiradas + ' conta(s) de baixo passaram a seguir esta. Abra a conta para mudar alguma.', 'ok', 4000);
+  }
+  function refazerLinhasDre(el, qual) {
+    const ed = E.dreEdicao;
+    if (!ed) return;
+    ed.contas = qual === 'modelo' ? motor().mapaDoModelo(E.rel.contas) : motor().sugerirMapaDre(E.rel.contas);
+    ed.abertos = new Set();
+    abrirAte(ed.abertos, Object.keys(ed.contas).concat(pendentesDre().map((c) => c.conta)), indiceDoPlano());
+    redesenharFolha(el);
+    T.avisoRapido(qual === 'modelo' ? 'Linhas refeitas pelos códigos do modelo da planilha: confira.' : 'Linhas refeitas pela sugestão dos nomes das contas: confira.', 'ok', 3500);
+  }
+  async function confirmarLinhasDre(el) {
+    const ed = E.dreEdicao;
+    if (!ed) return;
+    const pend = pendentesDre();
+    if (pend.length) {
+      abrirAte(ed.abertos, pend.map((c) => c.conta), indiceDoPlano());
+      redesenharFolha(el);
+      T.avisoRapido('Falta a linha de ' + pend.length + ' conta(s) com movimento (em vermelho): escolha a linha delas ou "Fora da DRE".', 'erro', 6000);
+      return;
+    }
+    // As contas de outros anos (que não estão no plano deste ano) continuam como estavam.
+    const salvo = mapaDaEmpresa();
+    const noPlano = new Set(E.rel.contas.map((c) => c.conta));
+    const contas = {};
+    if (salvo) Object.keys(salvo.contas).forEach((k) => { if (!noPlano.has(k)) contas[k] = salvo.contas[k]; });
+    Object.assign(contas, ed.contas);
+    const rotulos = {};
+    Object.keys(ed.rotulos).forEach((k) => {
+      const t = String(ed.rotulos[k] || '').replace(/\s+/g, ' ').trim();
+      const l = motor().LINHAS_DO_MAPA.find((x) => x.id === k);
+      if (t && l && t !== l.rotulo) rotulos[k] = t.slice(0, 80);
+    });
+    const ok = await salvarEmpresaCliente({ mapaDre: { contas, rotulos, conferidoEm: U.agoraISO(), conferidoPor: (app().usuario && app().usuario.nome) || '' } },
+      'Linhas da DRE guardadas para a empresa: a DRE, os indicadores e o relatório do cliente usam essas linhas.');
+    if (!ok) return;
+    app().armazenamento.registrarNoLog({ codigo: E.codigo, acao: 'apresentacao-linhas-dre', alvo: 'apresentacao/' + E.ano, detalhe: Object.keys(contas).length + ' conta(s) no mapa' }).catch(() => {});
+    E.dreEdicao = null;
+    E.cacheCliente = null;
+    E.rel = montarRel();
+    redesenharConteudo(el);
   }
 
   // ---------- Balancete mensal / trimestral
@@ -528,6 +744,24 @@
       // Painel dos meses: um mês aparece ou some; os atalhos escolhem vários de uma vez.
       const mes = ev.target.closest('button[data-mes], button[data-meses]');
       if (mes && !mes.disabled) { mudarSelecao(mes.getAttribute('data-mes') || mes.getAttribute('data-meses')); redesenharConteudo(el); return; }
+      // Linhas da DRE: abrir/fechar uma conta-mãe e os botões da barra.
+      const abre = ev.target.closest('button[data-dre-abre]');
+      if (abre && E.dreEdicao) {
+        const k = abre.getAttribute('data-dre-abre');
+        if (E.dreEdicao.abertos.has(k)) E.dreEdicao.abertos.delete(k); else E.dreEdicao.abertos.add(k);
+        redesenharFolha(el);
+        return;
+      }
+      const bd = ev.target.closest('button[data-dre]');
+      if (bd && E.dreEdicao) {
+        const q = bd.getAttribute('data-dre');
+        if (q === 'confirmar') await confirmarLinhasDre(el);
+        else if (q === 'cancelar') { E.dreEdicao = null; redesenharConteudo(el); }
+        else if (q === 'sugestao' || q === 'modelo') refazerLinhasDre(el, q);
+        else if (q === 'abrir-tudo') { E.rel.contas.forEach((c) => { if (!c.patrimonial && !c.analitica) E.dreEdicao.abertos.add(c.conta); }); redesenharFolha(el); }
+        else if (q === 'fechar-tudo') { E.dreEdicao.abertos.clear(); redesenharFolha(el); }
+        return;
+      }
       const lb = ev.target.closest('button[data-lalur]');
       if (lb) { marcarConta(el, lb.getAttribute('data-conta'), lb.getAttribute('data-lalur')); return; }
       const lt = ev.target.closest('button[data-lalur-tirar]');
@@ -562,6 +796,8 @@
       else if (qual === 'fechar-tudo') { E.abertos.clear(); redesenharFolha(el); }
       else if (qual === 'guardar-parte-b') await guardarParteB(el);
       else if (qual === 'editar-ajustes') await editarAjustes();
+      else if (qual === 'linhas-dre') { iniciarEdicaoDre(); redesenharConteudo(el); }
+      else if (qual === 'ir-linhas-dre') { E.aba = /^dre-/.test(E.aba) ? E.aba : 'dre-mensal'; guardarPreferencias(); redesenharConteudo(el); }
     });
     // Relatório do cliente: texto reescrito na prévia (guarda ao sair do texto), mês, cor e logo.
     el.addEventListener('focusout', (ev) => {
@@ -581,6 +817,11 @@
       if (alvo && ev.key === 'Enter') { ev.preventDefault(); alvo.blur(); }
     });
     el.addEventListener('change', (ev) => {
+      const sd = ev.target.closest('select[data-dre-conta]');
+      if (sd) { mudarLinhaDre(el, sd.getAttribute('data-dre-conta'), sd.value); return; }
+      if (ev.target.matches('input[data-dre="so-movimento"]') && E.dreEdicao) { E.dreEdicao.soMovimento = ev.target.checked; redesenharFolha(el); return; }
+      const rot = ev.target.closest('input[data-dre-rotulo]');
+      if (rot && E.dreEdicao) { E.dreEdicao.rotulos[rot.getAttribute('data-dre-rotulo')] = rot.value.replace(/\s+/g, ' ').trim(); redesenharFolha(el); return; }
       if (ev.target.id === 'rc-mes') { E.clienteMes = ev.target.value; redesenharFolha(el); return; }
       if (ev.target.id === 'rc-cor') { mudarCorCliente(el, ev.target.value); return; }
       if (ev.target.id === 'rc-arquivo-logo') { trocarLogo(el, ev.target.files && ev.target.files[0]); ev.target.value = ''; return; }
@@ -654,7 +895,7 @@
       texto = conta + ' marcada como ' + (tipo === 'exclusao' ? 'exclusão' : 'adição');
     }
     E.config = Object.assign({}, E.config, { ajustes });
-    E.rel = motor().montar({ ano: E.ano, balancetes: E.balancetes, config: E.config });
+    E.rel = montarRel();
     redesenharConteudo(el);
     const config = E.config;
     E.fila = (E.fila || Promise.resolve())
@@ -708,7 +949,7 @@
     }).join('');
     const colunas = ind.colunas.map((c) => '<th class="num per' + (c.acumulado ? ' acum' : '') + (c.falta ? ' falta' : '') + '">' + T.esc(c.rotulo) + '</th>').join('');
     const contas = '<p class="ind-contas">Contas usadas (achadas pelo nome no plano de contas): ' + ind.contas.map((c) => '<b>' + T.esc(c.nome) + '</b> = ' +
-      (c.conta ? T.esc(c.conta + ' ' + c.titulo) : '<span class="rel-aviso">não achada</span>')).join(' · ') + '. PL* = ativo total − passivo circulante − passivo não circulante ' +
+      (c.conta ? T.esc(c.conta + ' ' + c.titulo) : c.calculo ? 'calculado: ' + T.esc(c.calculo) : '<span class="rel-aviso">não achada</span>')).join(' · ') + '. PL* = ativo total − passivo circulante − passivo não circulante ' +
       '(inclui o resultado do ano que ainda não foi encerrado no balancete).</p>';
     const falta = ind.faltam.length ? '<div class="aviso ambar nao-imprimir" style="margin:0 0 10px"><span class="icone-aviso">⚠️</span><div>Não achei no plano de contas: ' + T.esc(ind.faltam.join(', ')) +
       '. Os indicadores que dependem dessas contas ficam vazios.</div></div>' : '';
@@ -732,7 +973,8 @@
   // O relatório cortado no mês escolhido (o trimestre do LALUR vai até esse mês).
   function relDoCliente(comp) {
     if (E.cacheCliente && E.cacheCliente.comp === comp && E.cacheCliente.base === E.rel) return E.cacheCliente.rel;
-    const rel = motor().montar({ ano: E.ano, balancetes: E.balancetes.filter((b) => b.competencia <= comp), config: E.config });
+    // Mesmas linhas da DRE da tela (o modelo, se ele serve para o ano todo, vale também no mês cortado).
+    const rel = montarRel(E.balancetes.filter((b) => b.competencia <= comp), E.rel.dre.situacao === 'modelo' ? 'modelo' : undefined);
     E.cacheCliente = { comp, base: E.rel, rel };
     return rel;
   }
@@ -1013,8 +1255,9 @@
   async function imprimir() {
     const escolha = await T.janela({
       titulo: 'Imprimir ou salvar em PDF',
-      corpo: '<p class="suave pequeno" style="margin:0 0 8px">Escolha as partes. Cada uma começa numa folha nova, deitada. O balancete sai até o nível e com as opções que estão na tela.</p>' +
-        ABAS.filter((a) => a.id !== 'cliente').map((a) => '<label class="item-aba"><input type="checkbox" value="' + a.id + '"' + (/^balancete/.test(a.id) ? '' : ' checked') + '> ' + a.titulo + '</label>').join('') +
+      corpo: '<p class="suave pequeno" style="margin:0 0 8px">Escolha as partes. Cada uma começa numa folha nova, deitada. O balancete sai até o nível e com as opções que estão na tela.' +
+        (dreFechada() ? ' <b>A DRE e os indicadores ficam de fora até as linhas da DRE desta empresa serem conferidas.</b>' : '') + '</p>' +
+        ABAS.filter((a) => a.id !== 'cliente' && !(dreFechada() && (/^dre-/.test(a.id) || a.id === 'indicadores'))).map((a) => '<label class="item-aba"><input type="checkbox" value="' + a.id + '"' + (/^balancete/.test(a.id) ? '' : ' checked') + '> ' + a.titulo + '</label>').join('') +
         '<label class="item-aba" style="margin-top:8px"><input type="checkbox" id="apres-imp-abrir" checked> DRE com todas as contas analíticas abertas</label>',
       botoes: [{ texto: 'Cancelar', valor: null }, { texto: '🖨 Imprimir', tipo: 'primario', antes: (j) => {
         const partes = Array.from(j.querySelectorAll('input[type=checkbox][value]:checked')).map((x) => x.value);
@@ -1188,7 +1431,7 @@
     });
     f.vazia();
     f.add([{ v: 'Contas usadas (achadas pelo nome no plano de contas):', e: 'subtitulo' }]);
-    ind.contas.forEach((c) => f.add([{ v: c.nome, e: 'ind.formula' }, { v: c.conta ? c.conta + ' ' + c.titulo : 'não achada', e: 'ind.formula' }]));
+    ind.contas.forEach((c) => f.add([{ v: c.nome, e: 'ind.formula' }, { v: c.conta ? c.conta + ' ' + c.titulo : c.calculo ? 'calculado: ' + c.calculo : 'não achada', e: 'ind.formula' }]));
     f.congelar = { linhas: r1, colunas: 1 };
     f.repetir = [r1, r1];
     return f;
@@ -1225,16 +1468,19 @@
     const f = novaFolha('Resumo', [14, 44].concat(r.colunas.map(() => larg)));
     f.titulo('Resumo executivo', 'Indicadores: a DRE somada nos meses escolhidos · Contas de 1º nível: o saldo no fim de cada mês, como no balancete (a soma de cada coluna tem que dar zero)' +
       (E.selecao ? ' · meses escolhidos: ' + rotuloSelecao(mesesVisiveis()) : '') + ' · ' + valoresEm());
-    // Os indicadores do período (as fichas do topo da tela).
-    let n = f.add([{ v: 'Indicador', e: 'cabEsq' }, { v: '', e: 'cabEsq' }, { v: dre.colunas[iAcum].rotulo, e: 'cabAcum' }, { v: '% da receita líquida', e: 'cab' }], { altura: 30 });
-    f.mesclar(0, n, 1, n);
-    const rlAc = dre.linhas.find((l) => l.id === 'receitaLiquida').valores[iAcum];
-    ['receitaLiquida', 'lucroBruto', 'ebitda', 'lucroOperacional', 'lucroLiquido'].forEach((id) => {
-      const l = dre.linhas.find((x) => x.id === id);
-      const v = l.valores[iAcum];
-      n = f.add([{ v: l.rotulo, e: 'tot.rot0' }, { v: '', e: 'tot.rot0' }, { v: R(v), e: 'tot.val.acum' }, { v: id === 'receitaLiquida' || !rlAc || v === null ? null : v / rlAc, e: 'tot.pct' }]);
+    // Os indicadores do período (as fichas do topo da tela) — só com as linhas da DRE conferidas.
+    if (dreFechada()) f.add([{ v: 'Indicadores da DRE: fechados até as linhas da DRE desta empresa serem conferidas (o plano de contas é diferente do modelo da planilha).', e: 'subtitulo' }]);
+    else {
+      let n = f.add([{ v: 'Indicador', e: 'cabEsq' }, { v: '', e: 'cabEsq' }, { v: dre.colunas[iAcum].rotulo, e: 'cabAcum' }, { v: '% da receita líquida', e: 'cab' }], { altura: 30 });
       f.mesclar(0, n, 1, n);
-    });
+      const rlAc = dre.linhas.find((l) => l.id === 'receitaLiquida').valores[iAcum];
+      ['receitaLiquida', 'lucroBruto', 'ebitda', 'lucroOperacional', 'lucroLiquido'].forEach((id) => {
+        const l = dre.linhas.find((x) => x.id === id);
+        const v = l.valores[iAcum];
+        n = f.add([{ v: l.rotulo, e: 'tot.rot0' }, { v: '', e: 'tot.rot0' }, { v: R(v), e: 'tot.val.acum' }, { v: id === 'receitaLiquida' || !rlAc || v === null ? null : v / rlAc, e: 'tot.pct' }]);
+        f.mesclar(0, n, 1, n);
+      });
+    }
     f.vazia();
     const estilo = (c) => (c.trimestre ? 'cabTri' : 'cab');
     const r1 = f.add([{ v: 'Conta', e: 'cabEsq' }, { v: 'Título', e: 'cabEsq' }].concat(r.colunas.map((c) => ({ v: c.rotulo, e: estilo(c) }))), { altura: 20 });
@@ -1365,20 +1611,24 @@
 
   function montarExcel() {
     const escolha = E.selecao ? ' · meses escolhidos: ' + rotuloSelecao(mesesVisiveis()) : '';
-    const planilhas = [
-      folhaResumo(),
-      folhaBalanco(),
-      folhaIndicadores(),
-      folhaDre('DRE mensal', 'DRE CPC 51 mensal detalhada', E.ano + ' · ' + valoresEm() + ' · receitas positivas, custos e despesas entre parênteses · AV % sobre a receita líquida · AH % sobre o mês anterior' + escolha +
-        ' · clique no + à esquerda para abrir as contas de um subtotal', dreMensalVisivel()),
-      folhaDre('DRE trimestral', 'DRE CPC 51 trimestral detalhada', E.ano + ' · ' + valoresEm() + ' · AV % sobre a receita líquida · AH % sobre o trimestre anterior · clique no + à esquerda para abrir as contas',
-        E.rel.dre.trimestral),
-      folhaBalancete('Balancete mensal', 'Balancete analítico mensal', E.ano + ' · contas 1 e 2: saldo final do mês · 3, 4 e 5: movimento do mês · AV % sobre a conta-mãe' + escolha +
-        ' · use os números 1 a 5 no canto esquerdo do Excel para abrir ou fechar os níveis', balanceteMensalVisivel()),
-      folhaBalancete('Balancete trimestral', 'Balancete analítico trimestral', E.ano + ' · contas 1 e 2: saldo no fim do trimestre · 3, 4 e 5: soma dos meses · AV % sobre a conta-mãe', E.rel.trimestral),
-    ].concat(folhasLalur(), [folhaBase()]);
-    const ordem = { resumo: 0, balanco: 1, indicadores: 2, 'dre-mensal': 3, 'dre-trimestral': 4, 'balancete-mensal': 5, 'balancete-trimestral': 6, lalur: 7 };
-    return raiz.ExcelBonito.gerar({ planilhas, estilos: estilosDoExcel(), ativa: ordem[E.aba] || 0 });
+    // Com as linhas da DRE ainda não conferidas, a DRE e os indicadores ficam de fora (informação certa ou nada).
+    const fechada = dreFechada();
+    const abas = [
+      ['resumo', () => folhaResumo()],
+      ['balanco', () => folhaBalanco()],
+      ['indicadores', () => folhaIndicadores(), fechada],
+      ['dre-mensal', () => folhaDre('DRE mensal', 'DRE CPC 51 mensal detalhada', E.ano + ' · ' + valoresEm() + ' · receitas positivas, custos e despesas entre parênteses · AV % sobre a receita líquida · AH % sobre o mês anterior' + escolha +
+        ' · clique no + à esquerda para abrir as contas de um subtotal', dreMensalVisivel()), fechada],
+      ['dre-trimestral', () => folhaDre('DRE trimestral', 'DRE CPC 51 trimestral detalhada', E.ano + ' · ' + valoresEm() + ' · AV % sobre a receita líquida · AH % sobre o trimestre anterior · clique no + à esquerda para abrir as contas',
+        E.rel.dre.trimestral), fechada],
+      ['balancete-mensal', () => folhaBalancete('Balancete mensal', 'Balancete analítico mensal', E.ano + ' · contas 1 e 2: saldo final do mês · 3, 4 e 5: movimento do mês · AV % sobre a conta-mãe' + escolha +
+        ' · use os números 1 a 5 no canto esquerdo do Excel para abrir ou fechar os níveis', balanceteMensalVisivel())],
+      ['balancete-trimestral', () => folhaBalancete('Balancete trimestral', 'Balancete analítico trimestral', E.ano + ' · contas 1 e 2: saldo no fim do trimestre · 3, 4 e 5: soma dos meses · AV % sobre a conta-mãe', E.rel.trimestral)],
+    ].filter((a) => !a[2]);
+    const planilhas = abas.map((a) => a[1]()).concat(folhasLalur(), [folhaBase()]);
+    const i = abas.findIndex((a) => a[0] === E.aba);
+    const ativa = i >= 0 ? i : E.aba === 'lalur' ? abas.length : 0;
+    return raiz.ExcelBonito.gerar({ planilhas, estilos: estilosDoExcel(), ativa });
   }
 
   function baixarExcel() {

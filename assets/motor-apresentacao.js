@@ -12,9 +12,10 @@
  *    (1 e 2) e o movimento do mês (débitos − créditos) nas de resultado (3, 4, 5 e qualquer outra);
  *  - BALANCETE MENSAL e TRIMESTRAL, conta por conta (trimestre: saldo do último mês nas 1 e 2; soma dos
  *    meses nas demais), com AV % (sobre a conta-mãe) e AH % (sobre o período anterior);
- *  - DRE (CPC 51) MENSAL e TRIMESTRAL: as contas analíticas agrupadas pelo começo do código (MODELO_DRE),
- *    com os subtotais da planilha e o valor com o sinal do resultado (receita +, custo e despesa −);
- *    AV % sobre a receita líquida; AH % sobre o período anterior;
+ *  - DRE (CPC 51) MENSAL e TRIMESTRAL: as contas analíticas agrupadas nas linhas do MODELO_DRE — pelas
+ *    LINHAS DA EMPRESA (o mapa que quem usa conferiu) ou, sem elas, pelo começo do código do modelo quando os
+ *    nomes das contas batem com ele —, com os subtotais da planilha e o valor com o sinal do resultado
+ *    (receita +, custo e despesa −); AV % sobre a receita líquida; AH % sobre o período anterior;
  *  - LALUR: ajustes (adições e exclusões por conta, com a regra dinâmica: movimento devedor = adição,
  *    credor = exclusão), incentivo PAT, Parte A trimestral (IRPJ e CSLL) e Parte B (o que quem usa informa);
  *  - RESUMO das contas de 1º nível.
@@ -73,6 +74,191 @@
   ];
   // Contas de resultado que ficam fora da DRE de propósito (a planilha modelo também deixa).
   const FORA_DA_DRE = [{ prefixo: '4.2', motivo: 'compras e transferência para o estoque (no mês somam zero)' }];
+
+  // ------------------------------------------------------------------
+  // LINHAS DA DRE POR EMPRESA (Dony, 18/09/2026: cada empresa tem o seu plano de contas — a DRE de um plano
+  // diferente saiu com despesa no custo e custo em outras receitas, pelos códigos do modelo). As contas de
+  // resultado entram nas linhas do MODELO_DRE por um MAPA da empresa:
+  //   { contas: { '<conta>': '<id da linha>' | 'fora' }, rotulos: { '<id da linha>': 'nome na DRE' } }
+  // Cada conta segue a conta mais próxima ACIMA dela que está no mapa (a de cima vale para todas as de baixo,
+  // a não ser que uma de baixo tenha a sua). Sem mapa guardado:
+  //  - se os NOMES das contas batem com o modelo da planilha (avaliarModelo), a DRE sai pelo modelo;
+  //  - se não batem, o programa SUGERE as linhas pelos nomes (sugerirMapaDre) e a DRE só aparece depois de
+  //    quem usa conferir e confirmar ("se a informação não está certa, é melhor não colocar").
+  // ------------------------------------------------------------------
+  const LINHAS_DO_MAPA = MODELO_DRE.filter((g) => g.prefixos && !g.semLinha).map((g) => ({ id: g.id, rotulo: g.rotulo, categoria: g.categoria }));
+  // Linhas de despesa por natureza (a conta de baixo segue a de cima; só IR/CSLL e depreciação saem dela).
+  const NATUREZA = { pessoal: 1, servicos: 1, utilidades: 1, ocupacao: 1, viagens: 1, logistica: 1, provisoes: 1, tributarias: 1, gerais: 1, comerciais: 1, propaganda: 1, depreciacao: 1 };
+  // A linha pelo nome da conta: a primeira regra que casa ganha (a ordem importa: "deduções da receita
+  // bruta" é dedução, não receita; "outras receitas não operacionais" é resultado não operacional; "custo dos
+  // serviços" é custo, não serviço contratado). Nomes sem acento, em maiúsculas, pontuação vira espaço.
+  const REGRAS_NOME = [
+    ['fora', /LUCROS? ?\/? ?(E |OU )?PREJUIZOS?|PREJUIZO DO EXERCICIO|APURACAO DO RESULTADO|RESULTADO DO EXERCICIO|ENCERRAMENTO DO EXERCICIO/],
+    ['tributos', /IMPOSTO DE RENDA|\bIRPJ\b|\bCSLL\b|CONTRIBUICAO SOCIAL|TRIBUT\w* SOBRE O LUCRO|PROVISO(ES|AO) (S\/ ?|SOBRE )(O )?(RESULTADO|LUCRO)|PROV\w* (P\/ ?|PARA )(O )?(IR\b|IMPOSTOS?)/],
+    ['investimentos', /NAO OPERACIONA|GANHOS? (DE|NA) CAPITAL|PERDAS? DE CAPITAL|VENDA D[OE] (ATIVO )?IMOBILIZADO|ALIENACAO D|BAIXA D[OE] (ATIVO )?IMOBILIZADO|PARTIC\w* SOCIETARIA|EQUIVALENCIA PATRIMONIAL|RESULTADOS? D[EO] INVESTIMENTO/],
+    ['receitasFinanceiras', /RECEITAS? FINANCEIRA|RENDIMENTOS? (DE |S\/ ?)?APLICAC|JUROS (RECEBIDOS|ATIVOS|AUFERIDOS)|DESCONTOS? OBTIDOS?|VARIAC\w* (CAMBIA\w*|MONETARIA\w*) ATIVA/],
+    ['despesasFinanceiras', /DESPESAS? FINANCEIRA|ENCARGOS FINANCEIROS|JUROS (PAGOS|PASSIVOS|INCORRIDOS|S\/ ?EMPRESTIMO|S\/ ?FINANCIAMENTO|DE MORA)|DESPESAS BANCARIAS|TARIFAS? BANCARIA|\bIOF\b|DESCONTOS? CONCEDIDOS?|VARIAC\w* (CAMBIA\w*|MONETARIA\w*) PASSIVA/],
+    ['deducoes', /DEDUC|\bDED\b|DEVOLUC\w* (DE |S\/ ?)?VENDA|VENDAS? CANCELAD|CANCELAMENTO|ABATIMENTO|IMPOSTOS? (INCIDENTES )?(S\/ ?|SOBRE )(AS )?(VENDA|RECEITA|FATURAMENTO)|TRIBUTOS? (INCIDENTES )?(S\/ ?|SOBRE )(A )?(RECEITA|VENDA)|SIMPLES NACIONAL/],
+    ['perdas', /AVARIA|PERDAS? (DE |COM |NO |NOS |EM )?(ESTOQUE|PRODUTO|MERCADORIA)|EXTRAVIO|QUEBRAS?\b|CONSUMO (DE PRODUTOS|PROPRIO)/],
+    ['cmv', /\bCUSTOS?\b|\bCMV\b|\bCPV\b|\bCSP\b/],
+    ['outrasReceitas', /OUTRAS RECEITAS|RECEITAS? (DIVERSAS|EVENTUA)|RECUP\w* (DE )?DESP|RECEITAS? (DE|COM) ALUGUE|ALUGUEIS RECEBIDOS|BONIFICAC\w* RECEBIDA/],
+    ['receitaBruta', /RECEITA (OPERACIONAL )?BRUTA|\bVENDAS?\b|FATURAMENTO|\bREC SERV|RECEITAS? (DE |COM |C\/ ?)(VENDA|SERVICO|PRESTACAO|MERCADORIA|PRODUTO|LOCACAO|REVENDA)|PRESTACAO DE SERVICO/, /DESPES|CUSTO|COMISS|FRETE|PROMOC/],
+    ['depreciacao', /DEPREC|AMORTIZ|EXAUST/],
+    ['provisoes', /PROVIS|\bPDD\b|\bPCLD\b|LIQUIDACAO DUVIDOSA|INCOBRAVE|PERDAS? (COM |DE |EM )(CREDITO|CLIENTE|RECEBIVE)|CONTINGENC|CONTIGENC/],
+    ['comerciais', /COMISS|TAXAS? (DE |S\/ ?)?(ADMINISTRACAO DE )?CART|TARIFAS? (DE |S\/ ?)?CART|ANTECIPACAO DE RECEBIVE|MARKETPLACE|ROYALT|FRANQUIA|COMERCIAIS VARIAVE|DESPESAS? COM VENDAS|REPRESENTANTES/],
+    ['propaganda', /PROPAGANDA|PUBLICIDADE|PUPLICIDADE|MARKETING|PROMOC|ANUNCIO|PATROCINIO|FEIRAS|BRINDES|\bPROP E P/],
+    ['servicos', /SERVIC(?!OS? PUBLICOS)|\bSERV\b|HONORAR|\bHONOR\b|ASSESSORIA|CONSULTORIA|AUDITORIA|TERCEIRIZ|PESSOA JURIDICA|PESSOA FISICA|\bPJ\b|ADVOC|CONTABE|CONTABI|SISTEMAS?\b|SOFTWARE|LICENCA DE USO|TECNOLOGIA|INFORMATICA|PROCESSAMENTO DE DADOS/],
+    ['pessoal', /PESSOAL|SALARI|ORDENADO|ENCARGOS SOCIA|\bINSS\b|\bFGTS\b|FERIAS|DECIMO TERCEIRO|PRO LABORE|BENEFICIO|VALE (TRANSPORTE|REFEICAO|ALIMENTACAO)|ASSISTENCIA MEDICA|PLANO DE SAUDE|SAUDE OCUPACIONAL|DIRIGENTE|REMUNERAC|RESCIS|HORAS EXTRAS|GRATIFICAC|TREINAMENTO|UNIFORME|ESTAGIA|APRENDIZ|BOLSA AUXILIO|ALIMENTACAO DO TRABALHADOR/],
+    ['utilidades', /UTILIDADE|SERVICOS? PUBLICOS|ENERGIA|\bAGUA\b|ESGOTO|TELEFON|TELECOM|INTERNET|COMUNICAC|CORREIO|CONTAS DE CONSUMO|\bGAS\b|\bLUZ\b|\bFAX\b/],
+    ['ocupacao', /OCUPACAO|ALUGUE|CONDOMINIO|LOCACAO DE (IMOVE|SALA|GALPAO|LOJA|PREDIO)|SEGURANCA|VIGILANCIA|LIMPEZA E CONSERVACAO|MANUTENCAO PREDIAL/],
+    ['viagens', /VIAGE|HOSPEDAG|PASSAGE|ESTADIA|REPRESENTACAO|\bREPRES\b|VEICULO|COMBUSTIV|PEDAGIO|ESTACIONAMENTO|LOCOMOCAO|CONDUCAO|\bTAXI|QUILOMETRAG|DIARIAS/],
+    ['logistica', /FRETE|TRANSPORTE|ENTREGA|LOGISTIC|CARRETO|ARMAZENAG|MOTOBOY|EXPEDICAO/],
+    ['tributarias', /TRIBUTAR|IMPOSTOS? E TAXAS|\bTAXAS?\b|EMOLUMENTO|\bIPTU\b|\bIPVA\b|ALVARA|CONTRIBUIC\w* SINDIC|TRIBUTOS (MUNICIPAIS|ESTADUAIS|FEDERAIS)|MULTAS? FISCA/],
+    ['gerais', /GERAIS|DIVERSA|DIVERSOS|MATERIA\w* (DE )?(EXPEDIENTE|ESCRITORIO|LIMPEZA|CONSUMO|USO)|USO E CONSUMO|\bCOPA\b|CARTOR|DOACO|MULTAS|INDEDUT|NAO DEDUTIVE|SINISTRO|SEGUROS?\b|ASSINATURA|MANUT|REPARO|CONSERVACAO|ASSOCIAC|ARRENDAMENTO|LEASING|MARCAS E PATENTES|APROPRIAC|DIRETORIA|OUTRAS DESPESAS/],
+  ];
+  // Contas-mãe que só juntam outras (o nome não diz a linha: decide nas de baixo).
+  const GENERICO_RECEITA = /^RECEITAS?( OPERACIONA\w*| LIQUIDA\w*( OPERAC\w*)?| TOTA\w*)?$/;
+  const GENERICO_DESPESA = /^(DESPESAS?|DESP)( OPERACIONA\w*| OPERAC| ADMINISTRATIVA\w*| ADM\w*| COMERCIA\w*| GERAIS E ADMINISTRATIVAS| COM VENDAS| E CUSTOS)?$|^OUTRAS DESP\w*( OPERAC\w*)?$|^CUSTOS E DESPESAS\b/;
+  const GENERICO_RESULTADO = /^(CONTAS DE )?RESULTADOS?( OPERACIONA\w*| DO PERIODO)?$/;
+  const ehContainerFinanceiro = (n) => /FINANCEIR/.test(n) && (/RESULTADO/.test(n) || (/RECEITA/.test(n) && /DESPESA/.test(n)) || /^(RECEITAS E DESPESAS |DESPESAS E RECEITAS )?FINANCEIR\w*$/.test(n));
+  function nomeNormal(t) {
+    let n = Util.semAcento(String(t || '')).toUpperCase().replace(/\(\s*-\s*\)/g, ' ').replace(/[^A-Z0-9\/]+/g, ' ').replace(/\s+/g, ' ').trim();
+    if (/^([A-Z] )+[A-Z]$/.test(n)) n = n.replace(/ /g, ''); // "A T I V O"
+    return n;
+  }
+  // As linhas que o nome indica, na ordem das regras (sem repetir).
+  function linhasPeloNome(n) {
+    const out = [];
+    for (const [linha, sim, nao] of REGRAS_NOME) if (sim.test(n) && !(nao && nao.test(n)) && out.indexOf(linha) < 0) out.push(linha);
+    return out;
+  }
+  function filhasPorMae(contas) {
+    const m = new Map();
+    contas.forEach((c) => { const k = c.pai || ''; if (!m.has(k)) m.set(k, []); m.get(k).push(c); });
+    return m;
+  }
+  const raizesDoResultado = (contas) => { const tem = new Set(contas.map((c) => c.conta)); return contas.filter((c) => !patrimonial(c.conta) && (!c.pai || !tem.has(c.pai))); };
+
+  // A linha de cada conta de resultado pelos nomes. Map conta -> { linha, fonte }: 'nome' (o nome dela ou
+  // de uma de cima disse), 'reserva' (o nome não diz: a linha que sobra no grupo, ex.: despesas gerais).
+  function linhasSugeridas(contas) {
+    const filhas = filhasPorMae(contas);
+    const res = new Map();
+    const reserva = (dica, n) => {
+      if (dica === 'fin') return /RECEITA|RENDIMENTO|GANHO/.test(n) && !/DESPESA/.test(n) ? 'receitasFinanceiras' : 'despesasFinanceiras';
+      if (dica === 'receita') return 'receitaBruta';
+      if (dica === 'despesa') return /COMERCIA/.test(n) ? 'comerciais' : 'gerais';
+      if (dica && dica.ambiguas) return dica.ambiguas[0];
+      return null;
+    };
+    const dicaDoNome = (n) => (/FINANCEIR/.test(n) ? 'fin' : /RECEITA/.test(n) && !/DESPESA|CUSTO/.test(n) ? 'receita' : /DESPESA|CUSTO|DESP\b/.test(n) ? 'despesa' : null);
+    function visitar(c, herdada, dica) {
+      const n = nomeNormal(c.titulo);
+      const menos = /\(\s*-\s*\)/.test(String(c.titulo || ''));
+      const casadas = linhasPeloNome(n);
+      let decisao = null, novaDica = dica;
+      if (herdada) {
+        const h = herdada.linha;
+        if (h !== 'fora' && h !== 'tributos' && casadas[0] === 'tributos') decisao = { linha: 'tributos', fonte: 'nome' };
+        else if (h === 'receitaBruta' && (casadas.indexOf('deducoes') >= 0 || menos || /\b(ICMS|PIS|COFINS|ISS|ISSQN|IPI|DAS)\b|SUBSTITUICAO TRIBUTARIA/.test(n))) decisao = { linha: 'deducoes', fonte: 'nome' };
+        else if (h === 'cmv' && casadas[0] === 'perdas') decisao = { linha: 'perdas', fonte: 'nome' };
+        else if (NATUREZA[h] && h !== 'depreciacao' && casadas[0] === 'depreciacao') decisao = { linha: 'depreciacao', fonte: 'nome' };
+        else decisao = { linha: h, fonte: herdada.fonte };
+      } else if (dica === 'fin' && !(ehContainerFinanceiro(n) && !c.analitica)) {
+        decisao = { linha: casadas[0] === 'tributos' ? 'tributos' : reserva('fin', n), fonte: 'nome' };
+      } else if (!c.analitica && ehContainerFinanceiro(n)) novaDica = 'fin';
+      else if (!c.analitica && GENERICO_RECEITA.test(n)) novaDica = 'receita';
+      else if (!c.analitica && GENERICO_DESPESA.test(n)) novaDica = 'despesa';
+      else if (!c.analitica && GENERICO_RESULTADO.test(n)) novaDica = null;
+      else if (casadas.length) {
+        const naturezas = casadas.filter((l) => NATUREZA[l]);
+        // "UTILIDADES E SERVIÇOS": duas naturezas no nome de uma conta-mãe — decide nas de baixo.
+        if (!c.analitica && naturezas.length >= 2 && naturezas.length === casadas.length) novaDica = { ambiguas: naturezas };
+        else decisao = { linha: casadas[0], fonte: 'nome' };
+      } else if (c.analitica) {
+        const l = reserva(dica || dicaDoNome(n), n);
+        if (l) decisao = { linha: l, fonte: 'reserva' };
+      } else novaDica = dicaDoNome(n) || dica;
+      if (decisao) res.set(c.conta, decisao);
+      (filhas.get(c.conta) || []).forEach((f) => visitar(f, decisao, decisao ? null : novaDica));
+    }
+    raizesDoResultado(contas).forEach((c) => visitar(c, null, null));
+    return res;
+  }
+
+  // Mapa com o mínimo de contas: cada linha fica na conta mais alta em que ela vale para TODAS as analíticas
+  // de baixo (uma conta nova que aparecer embaixo segue essa linha). linhaDe(conta analítica) -> linha | null.
+  function compactarMapa(contas, linhaDe) {
+    const filhas = filhasPorMae(contas);
+    const comum = new Map();
+    function calcular(c) {
+      let l;
+      if (c.analitica) l = linhaDe(c) || null;
+      else {
+        for (const f of filhas.get(c.conta) || []) { const x = calcular(f); if (l === undefined) l = x; else if (l !== x) l = '*'; }
+        if (l === undefined) l = null;
+      }
+      comum.set(c.conta, l);
+      return l;
+    }
+    const mapa = {};
+    function gravar(c) {
+      const l = comum.get(c.conta);
+      if (l === '*') (filhas.get(c.conta) || []).forEach(gravar);
+      else if (l) mapa[c.conta] = l;
+    }
+    const raizes = raizesDoResultado(contas);
+    raizes.forEach(calcular);
+    raizes.forEach(gravar);
+    return mapa;
+  }
+
+  // A linha de uma conta pelo modelo da planilha (começo do código; o prefixo mais comprido ganha).
+  const GRUPOS_COM_PREFIXO = MODELO_DRE.filter((g) => g.prefixos && g.prefixos.length);
+  function linhaDoModelo(conta) {
+    let melhor = null, tam = -1;
+    for (const g of GRUPOS_COM_PREFIXO) for (const p of g.prefixos) if (comeca(conta, p) && p.length > tam) { melhor = g.id; tam = p.length; }
+    if (melhor) return melhor;
+    return FORA_DA_DRE.some((f) => comeca(conta, f.prefixo)) ? 'fora' : null;
+  }
+  // A linha de uma conta pelo mapa: a da própria conta ou a da conta mais próxima acima dela.
+  function linhaNoMapa(mapa, indice, conta) {
+    let c = conta;
+    const vistas = new Set();
+    while (c && !vistas.has(c)) {
+      vistas.add(c);
+      if (mapa[c]) return mapa[c];
+      const x = indice.get(c);
+      c = x ? x.pai : '';
+    }
+    return null;
+  }
+  function sugerirMapaDre(contas) {
+    const sug = linhasSugeridas(contas);
+    return compactarMapa(contas, (c) => { const s = sug.get(c.conta); return s ? s.linha : null; });
+  }
+  function mapaDoModelo(contas) { return compactarMapa(contas, (c) => linhaDoModelo(c.conta)); }
+
+  // Os nomes batem com o modelo? Compara, conta analítica por conta analítica (pesando pelo movimento), a
+  // linha do modelo com a que o nome indica. Serve só se discorda em no máximo 0,1% do movimento (quase nada: na dúvida, pergunta). Conta cujo nome
+  // não diz nada fica de fora da comparação; sem nenhuma para comparar, não serve (pergunta a quem usa).
+  function avaliarModelo(contas, peso) {
+    const sug = linhasSugeridas(contas);
+    let total = 0, contra = 0;
+    const divergencias = [];
+    for (const c of contas) {
+      if (!c.analitica || patrimonial(c.conta)) continue;
+      const w = peso(c.conta);
+      if (!w) continue;
+      const m = linhaDoModelo(c.conta);
+      const s = sug.get(c.conta);
+      if (m === 'fora' || !s || s.fonte !== 'nome' || s.linha === 'fora') continue;
+      total += w;
+      if (m !== s.linha) { contra += w; divergencias.push({ conta: c.conta, titulo: c.titulo, modelo: m, pelosNomes: s.linha, peso: w }); }
+    }
+    divergencias.sort((a, b) => b.peso - a.peso);
+    return { serve: total > 0 && contra <= total * 0.001, total, contra, divergencias: divergencias.slice(0, 20) };
+  }
 
   // ------------------------------------------------------------------
   // LALUR: alíquotas e regras da planilha modelo (aba Premissas) e os ajustes da planilha modelo.
@@ -238,22 +424,32 @@
     const mensal = { colunas: meses.map((m) => ({ id: m.comp, rotulo: m.rotulo, falta: !m.tem })), linhas: tabelaDeContas(meses, valor) };
     const trimestral = { colunas: trimestres.map((t) => ({ id: t.id, rotulo: t.rotulo, parcial: t.parcial })), linhas: tabelaDeContas(trimestres, valorTrimestre) };
 
-    // ---------- DRE
+    // ---------- DRE: as linhas pelo mapa da empresa; sem mapa, pelo modelo (se os nomes batem) ou pela
+    // sugestão pelos nomes (situação 'sugestao': a tela só mostra a DRE depois de quem usa conferir).
+    const peso = (conta) => meses.reduce((s, m) => { const l = linhaDoMes(conta, m); return s + (l ? Math.abs(l.debitos - l.creditos) : 0); }, 0);
+    // (rascunho: as linhas que quem usa está escolhendo, mesmo vazias — a prévia da tela)
+    const mapaEmpresa = entrada.mapaDre && entrada.mapaDre.contas && (entrada.mapaDre.rascunho || Object.keys(entrada.mapaDre.contas).length) ? entrada.mapaDre : null;
+    let situacaoDre, mapaUsado = null, avaliacao = null;
+    if (mapaEmpresa) { situacaoDre = 'mapa'; mapaUsado = mapaEmpresa.contas; }
+    else {
+      avaliacao = entrada.dreModo === 'modelo' ? { serve: true, forcado: true, divergencias: [] } : avaliarModelo(contas, peso);
+      if (avaliacao.serve) situacaoDre = 'modelo';
+      else { situacaoDre = 'sugestao'; mapaUsado = sugerirMapaDre(contas); }
+    }
+    const rotulosDre = (mapaEmpresa && mapaEmpresa.rotulos) || {};
     const gruposComPrefixo = MODELO_DRE.filter((g) => g.prefixos);
-    const grupoDaConta = (conta) => {
-      let melhor = null, tam = -1;
-      for (const g of gruposComPrefixo) for (const p of g.prefixos) if (comeca(conta, p) && p.length > tam) { melhor = g; tam = p.length; }
-      return melhor;
-    };
     const analiticasDoGrupo = new Map(gruposComPrefixo.map((g) => [g.id, []]));
     const foraDaDre = [], naoMapeadas = [];
     for (const c of contas) {
       if (!c.analitica || c.patrimonial) continue;
-      const g = grupoDaConta(c.conta);
-      if (g) { analiticasDoGrupo.get(g.id).push(c); continue; }
-      const fora = FORA_DA_DRE.find((f) => comeca(c.conta, f.prefixo));
-      if (fora) { foraDaDre.push({ conta: c.conta, titulo: c.titulo, motivo: fora.motivo }); continue; }
-      naoMapeadas.push({ conta: c.conta, titulo: c.titulo, motivo: 'nenhuma linha do modelo pega esta conta: foi para "Outras contas de resultado"' });
+      const l = mapaUsado ? linhaNoMapa(mapaUsado, indice, c.conta) : linhaDoModelo(c.conta);
+      if (l === 'fora') {
+        const f = mapaUsado ? null : FORA_DA_DRE.find((x) => comeca(c.conta, x.prefixo));
+        foraDaDre.push({ conta: c.conta, titulo: c.titulo, motivo: f ? f.motivo : 'marcada fora da DRE nas linhas da empresa' });
+        continue;
+      }
+      if (l && analiticasDoGrupo.has(l) && l !== 'semLinha') { analiticasDoGrupo.get(l).push(c); continue; }
+      naoMapeadas.push({ conta: c.conta, titulo: c.titulo, motivo: 'nenhuma linha da DRE pega esta conta: foi para "Outras contas de resultado"' });
       analiticasDoGrupo.get('semLinha').push(c);
     }
     function dre(colunas, valorDe) {
@@ -268,7 +464,8 @@
           }));
           valores = colunas.map((col, k) => somaDe(filhas.map((f) => f.valores[k])) || (colunas[k].falta ? null : 0));
           if (!(g.semLinha && !filhas.length)) {
-            linhas.push({ id: g.id, categoria: g.categoria, tipo: 'grupo', rotulo: g.rotulo, valores, filhas: filhas.length, semLinha: !!g.semLinha });
+            const rotulo = rotulosDre[g.id] || (g.semLinha && situacaoDre !== 'modelo' ? '(-) Outras contas de resultado (sem linha na DRE)' : g.rotulo);
+            linhas.push({ id: g.id, categoria: g.categoria, tipo: 'grupo', rotulo, valores, filhas: filhas.length, semLinha: !!g.semLinha });
             filhas.forEach((f) => linhas.push(f));
           }
         } else {
@@ -332,12 +529,22 @@
     const avisos = [];
     const faltando = meses.filter((m) => !m.tem).map((m) => m.rotulo);
     if (faltando.length) avisos.push('Falta o balancete de ' + faltando.join(', ') + ': esses meses ficam vazios e os trimestres deles ficam parciais.');
-    if (naoMapeadas.length) avisos.push(naoMapeadas.length + ' conta(s) de resultado sem linha no modelo da DRE entraram em "Outras contas de resultado" (' +
-      naoMapeadas.slice(0, 3).map((n) => n.conta + ' ' + n.titulo).join('; ') + (naoMapeadas.length > 3 ? '; …' : '') + ').');
-    balanco.colunas.forEach((c, k) => { const d = balanco.conferencia.diferenca[k]; if (d !== null && Math.abs(d) > 1) avisos.push('Em ' + c.rotulo + ' o balanço não fecha: ativo − (passivo + PL + resultado da DRE) = ' + Util.formatarCentavos(d) + '.'); });
+    if (situacaoDre === 'sugestao') avisos.push('As linhas da DRE desta empresa ainda não foram conferidas: o plano de contas dela é diferente do modelo da planilha. ' +
+      'Abra a DRE e confira em que linha entra cada grupo de contas (fica guardado para a empresa). Até lá, a DRE, os indicadores e o relatório do cliente ficam fechados.');
+    else if (naoMapeadas.length) avisos.push(naoMapeadas.length + ' conta(s) de resultado sem linha na DRE entraram em "Outras contas de resultado" (' +
+      naoMapeadas.slice(0, 3).map((n) => n.conta + ' ' + n.titulo).join('; ') + (naoMapeadas.length > 3 ? '; …' : '') + '): indique a linha delas em "Linhas da DRE".');
+    balanco.colunas.forEach((c, k) => {
+      const d = balanco.conferencia.diferenca[k];
+      if (d === null || Math.abs(d) <= 1) return;
+      // Resultado aberto que vem de antes do primeiro balancete carregado: falta carregar os meses anteriores.
+      avisos.push(c.semEncerramento
+        ? 'Em ' + c.rotulo + ' o balanço não fecha (' + Util.formatarCentavos(d) + ') porque o resultado do ano começou antes do primeiro balancete carregado: carregue os balancetes desde o último encerramento (em geral, desde janeiro).'
+        : 'Em ' + c.rotulo + ' o balanço não fecha: ativo − (passivo + PL + resultado da DRE) = ' + Util.formatarCentavos(d) + '.');
+    });
     conferencia.filter((c) => c.diferenca).forEach((c) => avisos.push('Em ' + c.mes + ' o lucro da DRE difere do resultado do balancete em ' + Util.formatarCentavos(c.diferenca) + ' (contas fora da DRE).'));
 
-    return { ano, meses, trimestres, contas, base, mensal, trimestral, dre: { mensal: dreMensal, trimestral: dreTrimestral, foraDaDre, naoMapeadas, conferencia },
+    return { ano, meses, trimestres, contas, base, mensal, trimestral,
+      dre: { mensal: dreMensal, trimestral: dreTrimestral, foraDaDre, naoMapeadas, conferencia, situacao: situacaoDre, mapa: mapaUsado, rotulos: rotulosDre, avaliacao },
       lalur, resumo, balanco, avisos, faltando };
   }
 
@@ -381,7 +588,7 @@
     const daConta = (c, sinal, nivel, extra) => Object.assign({ conta: c.conta, rotulo: c.titulo, nivel, tipo: 'conta',
       valores: meses.map((m) => { const v = saldo(c.conta, m); return v === null ? null : sinal * v; }) }, extra || {});
     const cb = contasDoBalanco(contas);
-    const P = contas.find((c) => c.conta === '2') || null;
+    const P = cb.passivo;
     const zeros = meses.map((m) => (m.tem ? 0 : null));
     const linhas = [];
     const vAtivo = cb.ativo ? daConta(cb.ativo, 1, 1).valores : zeros;
@@ -418,7 +625,8 @@
     const { meses, trimestres, valor, linhaDoMes, indice, dreMensal, cfg } = x;
     const P = Object.assign({}, PARAMETROS, cfg.parametros || {});
     const ajustesCfg = Array.isArray(cfg.ajustes) ? cfg.ajustes : [];
-    const contaPAT = cfg.contaPAT === undefined ? CONTA_PAT_MODELO : cfg.contaPAT;
+    // Sem conta do PAT escolhida: a da planilha modelo, se ela existe no plano desta empresa.
+    const contaPAT = cfg.contaPAT === undefined ? (indice.has(CONTA_PAT_MODELO) ? CONTA_PAT_MODELO : '') : cfg.contaPAT;
     const parteB = cfg.parteB || {};
 
     // Valor do ajuste de uma conta num mês (positivo = adição, negativo = exclusão).
@@ -599,21 +807,27 @@
   function contasDoBalanco(contas) {
     const porConta = new Map(contas.map((c) => [c.conta, c]));
     const filhas = (pai) => (pai ? contas.filter((c) => c.pai === pai.conta) : []);
-    const nome = (c) => String(c.titulo || '').toUpperCase();
-    const achar = (lista, sim, nao, reserva) => lista.find((c) => sim.test(nome(c)) && !(nao && nao.test(nome(c)))) || porConta.get(reserva) || null;
-    const NAO_CIRC = /N[AÃ]O[\s-]*CIRCULANTE|LONGO PRAZO/;
-    const ativo = porConta.get('1') || null, passivo = porConta.get('2') || null;
+    const nome = (c) => nomeNormal(c.titulo);
+    const achar = (lista, sim, nao, reserva) => lista.find((c) => sim.test(nome(c)) && !(nao && nao.test(nome(c)))) || (reserva && porConta.get(reserva)) || null;
+    // Nas filhas e, se não achar, nas netas (ex.: "CRÉDITOS" > "CLIENTES").
+    const acharFundo = (pai, sim, nao, reserva) => achar(filhas(pai), sim, nao, null) || achar([].concat(...filhas(pai).map(filhas)), sim, nao, reserva);
+    const NAO_CIRC = /NAO CIRCULANTE|LONGO PRAZO/;
+    // Ativo e passivo: a conta de 1º nível da classe 1 e da 2 (o código pode ser "1", "1.0.0.00.00001"...).
+    const primeiras = contas.filter((c) => c.nivel === 1);
+    const daClasse = (k, re) => primeiras.find((c) => classeDe(c.conta) === k) || primeiras.find((c) => re.test(nome(c))) || porConta.get(k) || null;
+    const ativo = daClasse('1', /^ATIVO/), passivo = daClasse('2', /^PASSIVO/);
     const ac = achar(filhas(ativo), /CIRCULANTE/, NAO_CIRC, '1.1');
-    const anc = achar(filhas(ativo), NAO_CIRC, null, '1.2');
+    const anc = achar(filhas(ativo), /NAO CIRCULANTE/, null, '1.2');
     const pc = achar(filhas(passivo), /CIRCULANTE/, NAO_CIRC, '2.1');
     return {
-      ativo, ac, anc, pc,
-      disponivel: achar(filhas(ac), /DISPON[IÍ]VE|CAIXA/, null, '1.1.1'),
-      clientes: achar(filhas(ac), /CLIENTE|RECEBER/, null, '1.1.2'),
-      estoques: achar(filhas(ac), /ESTOQUE/, null, '1.1.4'),
-      rlp: achar(filhas(anc), /REALIZ[AÁ]VEL/, null, '1.2.1'),
+      ativo, passivo, ac, anc, pc,
+      disponivel: acharFundo(ac, /DISPONIVE|CAIXA/, null, '1.1.1'),
+      clientes: acharFundo(ac, /CLIENTE|RECEBER/, /ADIANTAMENTO|ADTO/, '1.1.2'),
+      estoques: acharFundo(ac, /ESTOQUE/, null, '1.1.4'),
+      // No plano antigo o realizável a longo prazo fica direto no ativo ("ATIVO REAL. LONGO PRAZO").
+      rlp: achar(filhas(anc), /REALIZ/, null, null) || achar(filhas(ativo), /REALIZ|LONGO PRAZO/, null, '1.2.1'),
       pnc: achar(filhas(passivo), NAO_CIRC, null, '2.2'),
-      pl: achar(filhas(passivo), /PATRIM[OÔ]NIO/, null, '2.3'),
+      pl: achar(filhas(passivo), /PATRIMONIO/, null, '2.3'),
     };
   }
   const NOMES_CONTAS_BALANCO = { ativo: 'Ativo total', ac: 'Ativo circulante', disponivel: 'Disponível', clientes: 'Clientes', estoques: 'Estoques', anc: 'Ativo não circulante',
@@ -636,8 +850,12 @@
       const ult = lista[lista.length - 1];
       if (ult === undefined || !meses[ult] || !meses[ult].tem) return null;
       const soma = (id) => { let s = 0, tem = false; lista.forEach((k) => { const v = fluxo(id, k); if (v !== null) { s += v; tem = true; } }); return tem ? s : null; };
-      const ativo = bal('ativo', ult), ac = bal('ac', ult), anc = bal('anc', ult);
-      const pc = -bal('pc', ult), pnc = contas.pnc ? -bal('pnc', ult) : 0; // passivo: saldo credor vem negativo
+      // Não circulante = total − circulante (vale também para o plano antigo, com realizável a longo prazo,
+      // permanente e diferido direto no ativo, e exigível a longo prazo no passivo). Passivo: saldo credor vem negativo.
+      const ativo = bal('ativo', ult), ac = bal('ac', ult);
+      const anc = ativo === null || ac === null ? null : ativo - ac;
+      const pc = -bal('pc', ult);
+      const pnc = contas.passivo ? -(bal('passivo', ult) - bal('pc', ult) - (contas.pl ? bal('pl', ult) : 0)) : contas.pnc ? -bal('pnc', ult) : 0;
       return { n: lista.length, ativo, ac, anc, pc, pnc, disponivel: bal('disponivel', ult), clientes: bal('clientes', ult), estoques: bal('estoques', ult), rlp: contas.rlp ? bal('rlp', ult) : 0,
         pl: ativo - pc - pnc, rb: soma('receitaBruta'), rl: soma('receitaLiquida'), lb: soma('lucroBruto'), ebitda: soma('ebitda'), lo: soma('lucroOperacional'), ll: soma('lucroLiquido'),
         cmv: soma('cmv') === null ? null : -soma('cmv') };
@@ -653,7 +871,7 @@
     };
     // Sem a conta de que o indicador precisa, ele fica vazio (não inventa zero).
     const PRECISA = { liquidezCorrente: ['ac', 'pc'], liquidezSeca: ['ac', 'pc', 'estoques'], liquidezImediata: ['disponivel', 'pc'], liquidezGeral: ['ac', 'pc'], ccl: ['ac', 'pc'],
-      endividamento: ['ativo', 'pc'], composicao: ['pc'], terceiros: ['ativo', 'pc'], imobilizacao: ['ativo', 'anc', 'pc'], roi: ['ativo'], roe: ['ativo', 'pc'], giro: ['ativo'],
+      endividamento: ['ativo', 'pc'], composicao: ['pc'], terceiros: ['ativo', 'pc'], imobilizacao: ['ativo', 'ac', 'pc'], roi: ['ativo'], roe: ['ativo', 'pc'], giro: ['ativo'],
       pmr: ['clientes'], pme: ['estoques'] };
     const temContas = (id) => (PRECISA[id] || []).every((q) => contas[q]);
     const porMes = idx.map((k) => componentes([k]));
@@ -666,8 +884,11 @@
     });
     const colunas = idx.map((k) => ({ k, id: meses[k].comp, rotulo: meses[k].rotulo, falta: !meses[k].tem }));
     if (opc.acumulado) colunas.push({ acumulado: true, rotulo: 'Período ' + (idx.length ? meses[idx[0]].rotulo.slice(0, 3) + '–' + meses[idx[idx.length - 1]].rotulo.slice(0, 3) : '') });
-    const usadas = Object.keys(NOMES_CONTAS_BALANCO).map((q) => ({ qual: q, nome: NOMES_CONTAS_BALANCO[q], conta: contas[q] ? contas[q].conta : null, titulo: contas[q] ? contas[q].titulo : null }));
-    return { colunas, linhas, contas: usadas, faltam: usadas.filter((u) => !u.conta).map((u) => u.nome), componentes: porMes };
+    // Sem conta própria, o não circulante sai da conta: ativo − circulante; passivo − circulante − PL.
+    const CALCULADAS = { anc: contas.ativo && contas.ac ? 'ativo − ativo circulante' : null, pnc: contas.passivo && contas.pc ? 'passivo − passivo circulante − PL' : null };
+    const usadas = Object.keys(NOMES_CONTAS_BALANCO).map((q) => ({ qual: q, nome: NOMES_CONTAS_BALANCO[q], conta: contas[q] ? contas[q].conta : null, titulo: contas[q] ? contas[q].titulo : null,
+      calculo: contas[q] ? null : CALCULADAS[q] || null }));
+    return { colunas, linhas, contas: usadas, faltam: usadas.filter((u) => !u.conta && !u.calculo).map((u) => u.nome), componentes: porMes };
   }
 
   // ------------------------------------------------------------------
@@ -689,5 +910,6 @@
     return { tipo: 'balancete', iguais: la.length - sairam.length, entraram, sairam, mudaram, qtdAntes: la.length, qtdDepois: ld.length, antes: totais(la), depois: totais(ld) };
   }
 
-  return { montar, compararBalancetes, indicadores, INDICADORES, contasDoBalanco, MODELO_DRE, FORA_DA_DRE, PARAMETROS, AJUSTES_MODELO, CONTA_PAT_MODELO, PREMISSAS, rotuloMes, compararContas, valorUsado };
+  return { montar, compararBalancetes, indicadores, INDICADORES, contasDoBalanco, MODELO_DRE, FORA_DA_DRE, PARAMETROS, AJUSTES_MODELO, CONTA_PAT_MODELO, PREMISSAS, rotuloMes, compararContas, valorUsado,
+    LINHAS_DO_MAPA, sugerirMapaDre, mapaDoModelo, linhaNoMapa, linhaDoModelo, avaliarModelo, linhasSugeridas, nomeNormal };
 });

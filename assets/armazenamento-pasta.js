@@ -398,6 +398,32 @@
       return { aba: Number.isInteger(valor.aba) && valor.aba >= 0 && valor.aba < 100 ? valor.aba : 0, colunas };
     }
 
+    // Linhas da DRE da empresa: { contas: { '<conta>': '<id da linha>' | 'fora' }, rotulos: { '<id>': 'nome' },
+    // conferidoEm, conferidoPor }. Sem nenhuma conta, some (a DRE volta ao modelo ou à sugestão).
+    function limparMapaDre(valor) {
+      if (!valor || typeof valor !== 'object' || !valor.contas || typeof valor.contas !== 'object') return null;
+      const contas = {};
+      let n = 0;
+      for (const k of Object.keys(valor.contas)) {
+        const v = valor.contas[k];
+        if (!/^[0-9A-Za-z._-]{1,40}$/.test(k) || typeof v !== 'string' || !/^[A-Za-z]{2,30}$/.test(v)) continue;
+        contas[k] = v;
+        if (++n >= 5000) break;
+      }
+      if (!n) return null;
+      const rotulos = {};
+      if (valor.rotulos && typeof valor.rotulos === 'object') {
+        Object.keys(valor.rotulos).slice(0, 60).forEach((k) => {
+          const t = valor.rotulos[k];
+          if (/^[A-Za-z]{2,30}$/.test(k) && typeof t === 'string' && t.trim()) rotulos[k] = t.replace(/\s+/g, ' ').trim().slice(0, 80);
+        });
+      }
+      const limpo = { contas, rotulos };
+      if (typeof valor.conferidoEm === 'string' && valor.conferidoEm.length <= 40) limpo.conferidoEm = valor.conferidoEm;
+      if (typeof valor.conferidoPor === 'string' && valor.conferidoPor.trim()) limpo.conferidoPor = valor.conferidoPor.trim().slice(0, 80);
+      return limpo;
+    }
+
     async function salvarEmpresa(empresa) {
       exigirConexao();
       const codigo = validarCodigo(empresa && empresa.codigo);
@@ -441,6 +467,9 @@
       // ele guarda"): { aba, colunas: { conta, titulo, saldoAnterior, debitos, creditos, saldoAtual, dcAnterior, dcAtual } }.
       const mapaBal = limparMapaBalancete(empresa.mapaBalancete !== undefined ? empresa.mapaBalancete : (anterior && anterior.mapaBalancete));
       if (mapaBal) registro.mapaBalancete = mapaBal;
+      // Linhas da DRE conferidas por quem usa (Dony, 18/09/2026: cada empresa com o seu plano de contas).
+      const mapaDre = limparMapaDre(empresa.mapaDre !== undefined ? empresa.mapaDre : (anterior && anterior.mapaDre));
+      if (mapaDre) registro.mapaDre = mapaDre;
       const cor = empresa.corRelatorio !== undefined ? empresa.corRelatorio : (anterior && anterior.corRelatorio);
       if (typeof cor === 'string' && /^#[0-9a-fA-F]{6}$/.test(cor)) registro.corRelatorio = cor.toLowerCase();
       if (i >= 0) lista[i] = registro; else lista.push(registro);

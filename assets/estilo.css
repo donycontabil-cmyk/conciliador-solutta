@@ -613,6 +613,42 @@ table.rel-regras { margin-top: 4px; border: 1px solid var(--borda); }
 .apres-sub small { font-weight: 500; color: var(--texto-suave); font-size: 12px; margin-left: 6px; }
 .apres-nota { font-size: 12.5px; margin: 8px 0 0; color: var(--ambar); }
 .apres-nota.suave { color: var(--texto-suave); }
+/* Linhas da DRE da empresa: árvore das contas de resultado com a linha de cada uma e a prévia da DRE ao lado. */
+.md-barra { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 10px; }
+.md-falta { color: var(--vermelho); font-weight: 600; font-size: 12.5px; }
+.md-ok { color: var(--verde); font-weight: 600; font-size: 12.5px; }
+.md-grade { display: grid; grid-template-columns: minmax(0, 1.9fr) minmax(300px, 1fr); gap: 14px; align-items: start; }
+@media (max-width: 1100px) { .md-grade { grid-template-columns: 1fr; } }
+.md-arvore { max-height: 74vh; }
+table.md-tabela { table-layout: fixed; width: 100%; }
+table.md-tabela th.md-c-valor { width: 108px; }
+table.md-tabela th.md-c-linha { width: 236px; }
+table.md-tabela td { padding: 3px 8px; border-bottom: 1px solid #eef1f4; vertical-align: middle; }
+table.md-tabela td.md-conta { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+table.md-tabela td.md-escolha select { width: 100%; }
+table.md-tabela tr.md-sin td.md-conta { font-weight: 600; }
+table.md-tabela tr.md-n1 td { background: #f2f5f8; }
+table.md-tabela .md-abre { font: inherit; width: 20px; padding: 0; border: 0; background: none; color: #1f4e78; cursor: pointer; }
+table.md-tabela .md-folha { display: inline-block; width: 20px; }
+table.md-tabela td.md-escolha select { font-size: 12px; padding: 3px 6px; max-width: 290px; color: var(--texto-suave); }
+table.md-tabela tr.md-propria td.md-escolha select { color: var(--texto); font-weight: 600; border-color: #1f4e78; background: #eef4fa; }
+table.md-tabela tr.md-sem td { background: #fdecea; }
+table.md-tabela tr.md-sem td.md-escolha select { border-color: var(--vermelho); color: var(--vermelho); }
+.md-lado { position: sticky; top: 8px; }
+.md-lado .apres-sub { margin-top: 0; }
+table.md-previa { font-size: 12px; border: 1px solid #c9d3de; border-radius: 6px; table-layout: fixed; width: 100%; }
+table.md-previa td { padding: 3px 8px; border-bottom: 1px solid #eef1f4; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+table.md-previa td.num { width: 112px; }
+table.md-previa tr.total td { font-weight: 700; background: #ddebf7; }
+table.md-previa tr.md-vazia td { color: var(--texto-fraco); }
+table.md-previa tr.md-sem td { background: #fdecea; color: var(--vermelho); }
+table.md-previa small { color: var(--texto-fraco); }
+.md-rotulo { font: inherit; width: calc(100% - 28px); border: 1px solid transparent; border-radius: 4px; padding: 1px 4px; background: transparent; color: inherit; }
+.md-rotulo:hover { border-color: #c9d3de; }
+.md-rotulo:focus { border-color: var(--primaria); background: #fffbe6; outline: none; }
+.md-conf { font-size: 12.5px; margin: 8px 0 0; }
+.md-conf.ok { color: var(--verde); }
+.md-conf.neg { color: var(--ambar); }
 /* Marcação das contas do LALUR na DRE e no balancete: botões (modo marcar) e selo (conta marcada). */
 .caixa-opcao.lalur-opcao.ligada { background: var(--ambar-fundo); border-color: #e2bf62; color: #6d4700; font-weight: 600; }
 table.apres.marcando td.fixa { max-width: 600px; }
