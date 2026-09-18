@@ -75,15 +75,18 @@
   const FORA_DA_DRE = [{ prefixo: '4.2', motivo: 'compras e transferência para o estoque (no mês somam zero)' }];
 
   // ------------------------------------------------------------------
-  // LALUR: alíquotas e regras da planilha modelo (aba Premissas) e os ajustes de exemplo.
+  // LALUR: alíquotas e regras da planilha modelo (aba Premissas) e os ajustes da planilha modelo.
   // ------------------------------------------------------------------
   const PARAMETROS = {
     irpj: 0.15, adicional: 0.10, limiteAdicionalMes: 2000000 /* R$ 20.000,00 por mês do período */, csll: 0.09,
     compensacao: 0.30, patPercentual: 0.15, patRedutor: 0.90, patLimite: 0.036,
   };
-  // Ajustes do modelo (adições e exclusões por conta). regra: 'movimento' = débitos − créditos do mês
-  // (positivo = adição, negativo = exclusão); 'aumento-credor' = exclusão do quanto o saldo credor de uma
-  // conta patrimonial aumentou no mês (planilha: −MÁXIMO(0; −(saldo atual − saldo anterior))).
+  // Adições e exclusões por conta. regra: 'movimento' = débitos − créditos do mês (positivo = adição,
+  // negativo = exclusão — a regra dinâmica da planilha); 'aumento-credor' = exclusão do quanto o saldo credor
+  // de uma conta patrimonial aumentou no mês (planilha: −MÁXIMO(0; −(saldo atual − saldo anterior))).
+  // A EMPRESA COMEÇA SEM NENHUMA CONTA: quem usa marca cada conta na DRE ou no balancete (Dony, 18/09/2026:
+  // "eu quero ir lá no balancete, na DRE, e colocar essa conta é adição, essa é exclusão, e não você
+  // decidindo o que é"). AJUSTES_MODELO é a lista da planilha modelo, usada só pela prova que confere a planilha.
   const AJUSTES_MODELO = [
     { conta: '5.1.9.002.00399', regra: 'movimento', tipo: 'adicao' },
     { conta: '5.2.5.002.00541', regra: 'movimento', tipo: 'adicao' },
@@ -101,7 +104,7 @@
     ['Adicional IRPJ', '10% sobre a parcela do lucro real que excede R$ 20.000 por mês, ou R$ 60.000 no trimestre', 'Regra geral IRPJ lucro real', 'Usado no modelo',
       'Apuração trimestral; no trimestre em andamento o limite é R$ 20.000 por mês já fechado.'],
     ['Compensação', 'Compensação de prejuízo fiscal/base negativa limitada a 30%, com os saldos informados na Parte B', 'Regra fiscal geral', 'Zerada por padrão', 'Preencher saldos disponíveis na Parte B.'],
-    ['Ajustes', 'Adições e exclusões conforme as contas escolhidas na lista de ajustes', 'Lista de ajustes da empresa', 'Incluído', 'Validar documentação e natureza fiscal.'],
+    ['Ajustes', 'Adições e exclusões nas contas marcadas por quem usa, na DRE ou no balancete', 'Marcação da empresa no ano', 'Incluído', 'Validar documentação e natureza fiscal.'],
     ['PAT', 'Incentivo PAT calculado pelo menor entre 15% da despesa elegível x 90% e 3,6% do IRPJ principal', 'Consulta fiscal / regra informada pelo usuário + redutor de benefício em 2026',
       'Incluído no modelo', 'Validar inscrição no PAT e se a despesa da conta do PAT é integralmente elegível.'],
     ['Regra dinâmica resultado', 'Para contas de resultado 3, 4 e 5: movimento positivo/devedor = adição; movimento negativo/credor = exclusão', 'Critério definido pelo usuário nesta apuração',
@@ -348,7 +351,7 @@
   function montarLalur(x) {
     const { meses, trimestres, valor, linhaDoMes, indice, dreMensal, cfg } = x;
     const P = Object.assign({}, PARAMETROS, cfg.parametros || {});
-    const ajustesCfg = Array.isArray(cfg.ajustes) ? cfg.ajustes : AJUSTES_MODELO;
+    const ajustesCfg = Array.isArray(cfg.ajustes) ? cfg.ajustes : [];
     const contaPAT = cfg.contaPAT === undefined ? CONTA_PAT_MODELO : cfg.contaPAT;
     const parteB = cfg.parteB || {};
 
@@ -360,7 +363,8 @@
         if (!l) return 0;
         return -Math.max(0, l.saldoAnterior - l.saldoAtual);
       }
-      return valor(a.conta, m) || 0;
+      const l = linhaDoMes(a.conta, m); // débitos − créditos (na conta patrimonial, o saldo não serve)
+      return l ? l.debitos - l.creditos : 0;
     };
     // Colunas dos ajustes: os meses e, depois dos meses de cada trimestre, o total do trimestre
     // (no trimestre em andamento com um mês só, o total seria igual ao mês: fica de fora, como na planilha).
@@ -373,7 +377,13 @@
       const c = indice.get(a.conta);
       const porMes = new Map(meses.map((m) => [m.comp, ajusteNoMes(a, m)]));
       const valores = colunasAjustes.map((col) => (col.mes ? porMes.get(col.mes.comp) : somaDe(col.trimestre.meses.map((m) => porMes.get(m.comp)))));
-      return { conta: a.conta, tipo: a.tipo === 'exclusao' ? 'Exclusão' : 'Adição', regra: a.regra, titulo: c ? c.titulo : (a.descricao || ''), noBalancete: !!c, valores, porMes };
+      // Trimestres em que a conta entrou do lado contrário ao marcado (regra dinâmica: adição com movimento
+      // credor no trimestre vira exclusão, e o contrário) — a tela avisa.
+      const contraMarca = trimestres.filter((t) => {
+        const s = somaDe(t.meses.map((m) => porMes.get(m.comp))) || 0;
+        return a.tipo === 'exclusao' ? s > 0 : s < 0;
+      }).map((t) => t.rotulo);
+      return { conta: a.conta, tipo: a.tipo === 'exclusao' ? 'Exclusão' : 'Adição', regra: a.regra, titulo: c ? c.titulo : (a.descricao || ''), noBalancete: !!c, valores, porMes, contraMarca };
     });
     const totalPositivo = (k) => ajustes.reduce((s, a) => s + Math.max(0, a.valores[k] || 0), 0);
     const totalNegativo = (k) => ajustes.reduce((s, a) => s + Math.max(0, -(a.valores[k] || 0)), 0);

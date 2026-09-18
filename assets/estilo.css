@@ -606,6 +606,21 @@ table.rel-regras { margin-top: 4px; border: 1px solid var(--borda); }
 .apres-sub small { font-weight: 500; color: var(--texto-suave); font-size: 12px; margin-left: 6px; }
 .apres-nota { font-size: 12.5px; margin: 8px 0 0; color: var(--ambar); }
 .apres-nota.suave { color: var(--texto-suave); }
+/* Marcação das contas do LALUR na DRE e no balancete: botões (modo marcar) e selo (conta marcada). */
+.caixa-opcao.lalur-opcao.ligada { background: var(--ambar-fundo); border-color: #e2bf62; color: #6d4700; font-weight: 600; }
+table.apres.marcando td.fixa { max-width: 600px; }
+.lalur-bts { display: inline-flex; gap: 3px; margin-right: 6px; vertical-align: 1px; }
+.lalur-bt { font: inherit; font-size: 10.5px; font-weight: 600; line-height: 1; padding: 3px 7px; border-radius: 10px; border: 1px solid var(--borda-forte); background: #fff; color: var(--texto-suave); cursor: pointer; }
+.lalur-bt:hover { border-color: var(--primaria); color: var(--primaria); }
+.lalur-bt.adicao.ligado { background: var(--verde); border-color: var(--verde); color: #fff; }
+.lalur-bt.exclusao.ligado { background: #a4480f; border-color: #a4480f; color: #fff; }
+.lalur-selo { display: inline-block; font-size: 10px; font-weight: 700; line-height: 1; padding: 2px 6px; border-radius: 9px; margin-right: 6px; vertical-align: 1px; }
+.lalur-selo.adicao { background: var(--verde-fundo); color: var(--verde); }
+.lalur-selo.exclusao { background: #fbe9df; color: #a4480f; }
+table.apres tr.grupo td.fixa small.lalur-conta { color: var(--verde); font-weight: 600; }
+.lalur-contra { color: var(--ambar); font-weight: 600; margin-left: 4px; }
+.lalur-tirar { font: inherit; font-size: 11px; line-height: 1; padding: 2px 5px; margin-left: 4px; border: 1px solid var(--borda-forte); border-radius: 4px; background: #fff; color: var(--vermelho); cursor: pointer; }
+.lalur-tirar:hover { background: var(--vermelho-fundo); }
 .apres-caixa { overflow: auto; max-height: 72vh; border: 1px solid #c9d3de; border-radius: 6px; }
 table.apres { border-collapse: separate; border-spacing: 0; font-size: 12.5px; min-width: 100%; font-variant-numeric: tabular-nums; }
 table.apres th { position: sticky; top: 0; z-index: 2; background: #1f4e78; color: #fff; font-weight: 600; padding: 6px 8px; text-align: left; white-space: nowrap; border-right: 1px solid #2d6190; }

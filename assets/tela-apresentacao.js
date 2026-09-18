@@ -9,6 +9,8 @@
  *  - Abas: Resumo, DRE mensal, DRE trimestral, Balancete mensal, Balancete trimestral e LALUR (Parte A,
  *    ajustes, PAT, Parte B e premissas). As contas vêm do motor-apresentacao.js.
  *  - O que quem usa informa (Parte B, lista de ajustes, conta do PAT) fica num registro do ano.
+ *  - Adições e exclusões do LALUR: quem usa marca cada conta na própria DRE ou no balancete (botão
+ *    "✎ Marcar adições e exclusões do LALUR"); a lista começa vazia (Dony, 18/09/2026).
  *  - Imprimir / salvar PDF (folha deitada) e Excel com as mesmas abas da planilha modelo.
  */
 (function (raiz) {
@@ -33,7 +35,7 @@
 
   // Estado da tela (continua entre redesenhos).
   const E = { codigo: null, ano: null, emp: null, rel: null, registro: null, config: {}, lugares: [], metas: [],
-    aba: 'dre-mensal', avah: true, nivel: 5, semZeradas: false, abertos: new Set(), selecao: null };
+    aba: 'dre-mensal', avah: true, nivel: 5, semZeradas: false, abertos: new Set(), selecao: null, marcarLalur: false, balancetes: [], fila: null };
   (function lerPreferencias() {
     try {
       const p = JSON.parse((raiz.localStorage && raiz.localStorage.getItem(CHAVE_PREF)) || '{}') || {};
@@ -99,7 +101,7 @@
     const registro = (await arm.conciliacoes(codigo, anoEscolhido + '-01-01')).find((r) => r.id === idRegistro(codigo, anoEscolhido)) || null;
     if (conferir && !conferir()) return;
     if (E.codigo !== codigo || E.ano !== anoEscolhido) { E.abertos = new Set(); E.selecao = null; }
-    Object.assign(E, { codigo, ano: anoEscolhido, emp, metas, lugares, registro, config: (registro && registro.config) || {} });
+    Object.assign(E, { codigo, ano: anoEscolhido, emp, metas, lugares, registro, balancetes, config: (registro && registro.config) || {} });
     E.rel = motor().montar({ ano: anoEscolhido, balancetes, config: E.config });
     E.anos = Array.from(new Set(anosComBalancete.concat([anoAtual, anoEscolhido]))).sort((a, b) => b - a);
     desenhar(el);
@@ -147,7 +149,7 @@
   }
 
   function conteudo() {
-    return avisos() +
+    return '<div id="apres-avisos">' + avisos() + '</div>' +
       '<div class="abas nao-imprimir" role="tablist">' + ABAS.map((a) => '<button type="button" role="tab" data-aba="' + a.id + '" class="' + (E.aba === a.id ? 'ativa' : '') + '">' + a.titulo + '</button>').join('') + '</div>' +
       '<div id="apres-meses">' + seletorMeses() + '</div>' +
       '<div class="apres-opcoes nao-imprimir">' + opcoesDaAba() + '</div>' +
@@ -156,19 +158,23 @@
 
   function opcoesDaAba() {
     const avah = '<label class="caixa-opcao"><input type="checkbox" data-opcao="avah"' + (E.avah ? ' checked' : '') + '> AV % e AH %</label>';
+    const marcar = '<label class="caixa-opcao lalur-opcao' + (E.marcarLalur ? ' ligada' : '') + '" title="Mostra, em cada conta, os botões para marcar adição ou exclusão do LALUR">' +
+      '<input type="checkbox" data-opcao="marcar-lalur"' + (E.marcarLalur ? ' checked' : '') + '> ✎ Marcar adições e exclusões do LALUR</label>';
+    const ajudaMarcar = '<span class="suave pequeno"><b>Marcando o LALUR:</b> clique em <b>+ Adição</b> ou <b>− Exclusão</b> na conta; clique de novo para tirar. ' +
+      'Conta de ativo ou passivo só tem exclusão, pelo aumento do saldo credor (a regra da planilha). ' + ajustesAtuais().length + ' conta(s) marcada(s).</span>';
     if (E.aba === 'dre-mensal' || E.aba === 'dre-trimestral') {
       return '<button type="button" class="botao pequeno" data-opcao="abrir-tudo">＋ Abrir todas as contas</button>' +
-        '<button type="button" class="botao pequeno" data-opcao="fechar-tudo">－ Fechar todas</button>' + avah +
-        '<span class="suave pequeno">Clique num subtotal para abrir ou fechar as contas dele. AV % sobre a receita líquida; AH % sobre o ' + (E.aba === 'dre-mensal' ? 'mês' : 'trimestre') + ' anterior.</span>';
+        '<button type="button" class="botao pequeno" data-opcao="fechar-tudo">－ Fechar todas</button>' + avah + marcar +
+        (E.marcarLalur ? ajudaMarcar : '<span class="suave pequeno">Clique num subtotal para abrir ou fechar as contas dele. AV % sobre a receita líquida; AH % sobre o ' + (E.aba === 'dre-mensal' ? 'mês' : 'trimestre') + ' anterior.</span>');
     }
     if (E.aba === 'balancete-mensal' || E.aba === 'balancete-trimestral') {
       return '<span class="suave pequeno">Mostrar até o nível</span>' + [1, 2, 3, 4, 5].map((n) => '<button type="button" class="botao pequeno' + (E.nivel === n ? ' primario' : '') + '" data-nivel="' + n + '">' + n + '</button>').join('') +
-        '<label class="caixa-opcao"><input type="checkbox" data-opcao="sem-zeradas"' + (E.semZeradas ? ' checked' : '') + '> Esconder contas zeradas</label>' + avah +
-        '<span class="suave pequeno">' + (E.aba === 'balancete-mensal' ? 'Contas 1 e 2: saldo final do mês; 3, 4 e 5: movimento do mês.' : 'Contas 1 e 2: saldo no fim do trimestre; 3, 4 e 5: soma dos meses.') + ' AV % sobre a conta-mãe.</span>';
+        '<label class="caixa-opcao"><input type="checkbox" data-opcao="sem-zeradas"' + (E.semZeradas ? ' checked' : '') + '> Esconder contas zeradas</label>' + avah + marcar +
+        (E.marcarLalur ? ajudaMarcar : '<span class="suave pequeno">' + (E.aba === 'balancete-mensal' ? 'Contas 1 e 2: saldo final do mês; 3, 4 e 5: movimento do mês.' : 'Contas 1 e 2: saldo no fim do trimestre; 3, 4 e 5: soma dos meses.') + ' AV % sobre a conta-mãe.</span>');
     }
     if (E.aba === 'lalur') {
       return '<button type="button" class="botao pequeno" data-opcao="editar-ajustes">✎ Lista de ajustes e conta do PAT</button>' +
-        '<span class="suave pequeno">Apuração trimestral do lucro real. Os campos em azul da Parte B são preenchidos por você.</span>';
+        '<span class="suave pequeno">Apuração trimestral do lucro real. As adições e exclusões são as contas que você marca na DRE ou no balancete. Os campos em azul da Parte B são preenchidos por você.</span>';
     }
     return '<span class="suave pequeno">Contas de 1º nível. No acumulado, ativo e passivo mostram o saldo do último mês escolhido; receitas, custos e despesas, a soma dos meses escolhidos.</span>';
   }
@@ -334,6 +340,9 @@
     const n = 1 + dre.colunas.length * (avah ? 3 : 1);
     let categoria = null;
     const SEM_FAIXA = { 'Subtotal CPC 51': true, Subtotal: true, Resultado: true };
+    const marcadas = new Set(ajustesAtuais().map((a) => a.conta));
+    const noLalur = {};
+    dre.linhas.forEach((l) => { if (l.tipo === 'analitica' && marcadas.has(l.conta)) noLalur[l.grupo] = (noLalur[l.grupo] || 0) + 1; });
     const corpo = dre.linhas.map((l) => {
       let faixa = '';
       if (l.categoria !== categoria) {
@@ -343,11 +352,12 @@
       const aberto = (op && op.abrirTudo) || E.abertos.has(l.grupo || l.id);
       if (l.tipo === 'analitica') {
         if (!aberto) return faixa;
-        return faixa + '<tr class="analitica" data-de="' + T.esc(l.grupo) + '"><td class="fixa"><span class="cod">' + T.esc(l.conta) + '</span> ' + T.esc(l.rotulo) + '</td>' + celulasPeriodos(l, avah, dre.colunas) + '</tr>';
+        return faixa + '<tr class="analitica" data-de="' + T.esc(l.grupo) + '"><td class="fixa">' + marcaLalur(l.conta, false) + '<span class="cod">' + T.esc(l.conta) + '</span> ' + T.esc(l.rotulo) + '</td>' + celulasPeriodos(l, avah, dre.colunas) + '</tr>';
       }
       if (l.tipo === 'grupo') {
         return faixa + '<tr class="grupo' + (l.semLinha ? ' sem-linha' : '') + '" data-grupo="' + T.esc(l.id) + '" title="' + (aberto ? 'Fechar' : 'Abrir') + ' as ' + l.filhas + ' conta(s)">' +
-          '<td class="fixa"><span class="abre nao-imprimir">' + (aberto ? '▾' : '▸') + '</span>' + T.esc(l.rotulo) + (l.semLinha ? ' ⚠️' : '') + ' <small>' + l.filhas + '</small></td>' + celulasPeriodos(l, avah, dre.colunas) + '</tr>';
+          '<td class="fixa"><span class="abre nao-imprimir">' + (aberto ? '▾' : '▸') + '</span>' + T.esc(l.rotulo) + (l.semLinha ? ' ⚠️' : '') + ' <small>' + l.filhas + '</small>' +
+          (noLalur[l.id] ? '<small class="lalur-conta nao-imprimir" title="Contas deste subtotal marcadas no LALUR">· ' + noLalur[l.id] + ' no LALUR</small>' : '') + '</td>' + celulasPeriodos(l, avah, dre.colunas) + '</tr>';
       }
       return faixa + '<tr class="total' + (l.destaque ? ' destaque' : '') + '"><td class="fixa">' + T.esc(l.rotulo) + '</td>' + celulasPeriodos(l, avah, dre.colunas) + '</tr>';
     }).join('');
@@ -356,7 +366,7 @@
       E.rel.dre.naoMapeadas.map((x) => T.esc(x.conta + ' ' + x.titulo)).join('; ') + '. Diga em que linha ela(s) entra(m) para ficar certo na apresentação.</p>' : '';
     const fora = E.rel.dre.foraDaDre.length ? '<p class="apres-nota suave">Fora da DRE, como na planilha: ' + E.rel.dre.foraDaDre.length + ' conta(s) de compras e estoque (4.2), que somam zero no mês.</p>' : '';
     return tituloSecao(titulo, T.esc(E.ano) + ' · valores em R$ · receitas positivas, custos e despesas entre parênteses') +
-      '<div class="apres-caixa"><table class="apres dre' + (avah ? ' com-avah' : '') + '">' + cabecalhoPeriodos([{ titulo: 'Linha / Conta analítica' }], colunas, avah) +
+      '<div class="apres-caixa"><table class="apres dre' + (avah ? ' com-avah' : '') + (E.marcarLalur ? ' marcando' : '') + '">' + cabecalhoPeriodos([{ titulo: 'Linha / Conta analítica' }], colunas, avah) +
       '<tbody>' + corpo + '</tbody></table></div>' + nota + fora;
   }
 
@@ -365,9 +375,9 @@
     const avah = E.avah;
     const linhas = tab.linhas.filter((l) => l.nivel <= E.nivel && !(E.semZeradas && l.valores.every((v) => !v)));
     const corpo = linhas.map((l) => '<tr class="nivel-' + Math.min(l.nivel, 5) + (l.analitica ? ' analitica' : ' sintetica') + '"><td class="fixa" style="padding-left:' + (8 + (l.nivel - 1) * 14) + 'px">' +
-      '<span class="cod">' + T.esc(l.conta) + '</span> ' + T.esc(l.titulo) + '</td>' + celulasPeriodos(l, avah) + '</tr>').join('');
+      (l.analitica ? marcaLalur(l.conta, l.patrimonial) : '') + '<span class="cod">' + T.esc(l.conta) + '</span> ' + T.esc(l.titulo) + '</td>' + celulasPeriodos(l, avah) + '</tr>').join('');
     return tituloSecao(titulo, T.esc(E.ano) + ' · ' + linhas.length + ' de ' + tab.linhas.length + ' contas · saldos devedores positivos, credores entre parênteses') +
-      '<div class="apres-caixa"><table class="apres balancete' + (avah ? ' com-avah' : '') + '">' + cabecalhoPeriodos([{ titulo: 'Conta' }], tab.colunas, avah) + '<tbody>' + corpo + '</tbody></table></div>';
+      '<div class="apres-caixa"><table class="apres balancete' + (avah ? ' com-avah' : '') + (E.marcarLalur ? ' marcando' : '') + '">' + cabecalhoPeriodos([{ titulo: 'Conta' }], tab.colunas, avah) + '<tbody>' + corpo + '</tbody></table></div>';
   }
 
   // ---------- LALUR
@@ -384,16 +394,22 @@
     const colA = L.parteA.colunas.map((c) => Object.assign({}, c, { cls: c.soma ? 'acum' : '' }));
     const parteA = tabelaSimples(['Linha', 'Bloco'], colA, L.parteA.linhas.map((l) => ({ cls: l.destaque ? 'total' : '', cab: [T.esc(l.rotulo), '<span class="suave">' + T.esc(l.bloco) + '</span>'], valores: l.valores })));
     const colAj = L.ajustes.colunas.map((c) => Object.assign({}, c, { cls: c.trimestre ? 'tri' : '' }));
-    const ajustes = tabelaSimples(['Descrição', 'Conta', 'Tipo'], colAj, L.ajustes.linhas.map((a) => ({
-      cab: [T.esc(a.titulo || '') + (a.noBalancete ? '' : ' <span class="rel-aviso">(não está nos balancetes)</span>') +
-        (a.regra === 'aumento-credor' ? ' <small class="suave">· aumento do saldo credor</small>' : ''), '<span class="cod">' + T.esc(a.conta) + '</span>', a.tipo], valores: a.valores,
-    })).concat([
+    const editavel = !(op && op.impressao);
+    const ajustes = (L.ajustes.linhas.length ? '' : '<p class="apres-nota nao-imprimir">Nenhuma conta marcada ainda. Vá na <b>DRE</b> ou no <b>balancete</b>, ligue ' +
+      '<b>✎ Marcar adições e exclusões do LALUR</b> e clique em <b>+ Adição</b> ou <b>− Exclusão</b> nas contas.</p>') +
+      tabelaSimples(['Descrição', 'Conta', 'Tipo'], colAj, L.ajustes.linhas.map((a) => ({
+        cab: [T.esc(a.titulo || '') + (a.noBalancete ? '' : ' <span class="rel-aviso">(não está nos balancetes)</span>') +
+          (a.regra === 'aumento-credor' ? ' <small class="suave">· aumento do saldo credor</small>' : '') +
+          (a.contraMarca.length ? ' <small class="lalur-contra nao-imprimir" title="Regra dinâmica da planilha: o movimento do trimestre foi do lado contrário ao marcado">⚠ no ' +
+            T.esc(a.contraMarca.join(', ')) + ' entrou como ' + (a.tipo === 'Exclusão' ? 'adição' : 'exclusão') + '</small>' : ''),
+        '<span class="cod">' + T.esc(a.conta) + '</span>',
+        a.tipo + (editavel ? ' <button type="button" class="lalur-tirar nao-imprimir" data-lalur-tirar="' + T.esc(a.conta) + '" title="Tirar esta conta do LALUR">✕</button>' : '')], valores: a.valores,
+      })).concat([
       { cls: 'total', cab: ['Total das Adições', '', ''], valores: L.ajustes.adicoes },
       { cls: 'total', cab: ['Total das Exclusões', '', ''], valores: L.ajustes.exclusoes },
     ]));
     const colPat = L.pat.colunas.map((c) => Object.assign({}, c, { cls: c.lalur ? 'acum' : '' }));
     const pat = tabelaSimples(['Descrição', 'Linha'], colPat, L.pat.linhas.map((l) => ({ cab: [T.esc(l.rotulo), l.letra], valores: l.valores })));
-    const editavel = !(op && op.impressao);
     const parteB = '<div class="apres-caixa"><table class="apres simples parte-b"><thead><tr><th class="fixa">Controle</th>' +
       L.parteB.colunas.map((c) => '<th class="num per">' + T.esc(c.rotulo) + '</th>').join('') + '<th>Observação</th></tr></thead><tbody>' +
       L.parteB.linhas.map((l) => '<tr class="' + (l.editavel ? 'editavel' : '') + '"><td class="fixa">' + T.esc(l.rotulo) + '</td>' +
@@ -406,7 +422,7 @@
     const premissas = '<div class="apres-caixa"><table class="apres simples premissas"><thead><tr><th class="fixa">Tema</th><th>Premissa usada</th><th>Fonte / Base</th><th>Status</th><th>Comentário</th></tr></thead><tbody>' +
       L.premissas.map((p) => '<tr><td class="fixa">' + T.esc(p[0]) + '</td>' + p.slice(1).map((x) => '<td class="txt">' + T.esc(x) + '</td>').join('') + '</tr>').join('') + '</tbody></table></div>';
     return tituloSecao('LALUR Parte A: apuração do lucro real e da CSLL', 'Apuração trimestral a partir da DRE; adições e exclusões pela lista de ajustes; incentivo PAT e Parte B.') + parteA +
-      '<h3 class="apres-sub">Ajustes mensais e trimestrais <small>valor positivo = adição · valor negativo = exclusão</small></h3>' + ajustes +
+      '<h3 class="apres-sub">Ajustes mensais e trimestrais <small>as contas marcadas na DRE ou no balancete · valor positivo = adição · valor negativo = exclusão</small></h3>' + ajustes +
       '<h3 class="apres-sub">Incentivo fiscal PAT <small>conta ' + T.esc(L.contaPAT || '—') + (L.pat.titulo ? ' · ' + T.esc(L.pat.titulo) : '') + ' · menor entre o incentivo potencial e 3,6% do IRPJ principal (15%)</small></h3>' + pat +
       '<h3 class="apres-sub">LALUR Parte B: controles fiscais <small>saldos de prejuízo fiscal e base negativa (zerados até você informar) e IR retido</small></h3>' + parteB +
       '<h3 class="apres-sub">Premissas, fontes e pontos de validação</h3>' + premissas;
@@ -433,6 +449,10 @@
       // Painel dos meses: um mês aparece ou some; os atalhos escolhem vários de uma vez.
       const mes = ev.target.closest('button[data-mes], button[data-meses]');
       if (mes && !mes.disabled) { mudarSelecao(mes.getAttribute('data-mes') || mes.getAttribute('data-meses')); redesenharConteudo(el); return; }
+      const lb = ev.target.closest('button[data-lalur]');
+      if (lb) { marcarConta(el, lb.getAttribute('data-conta'), lb.getAttribute('data-lalur')); return; }
+      const lt = ev.target.closest('button[data-lalur-tirar]');
+      if (lt) { marcarConta(el, lt.getAttribute('data-lalur-tirar'), null); return; }
       const g = ev.target.closest('tr.grupo[data-grupo]');
       if (g) { const id = g.getAttribute('data-grupo'); if (E.abertos.has(id)) E.abertos.delete(id); else E.abertos.add(id); redesenharFolha(el); return; }
       const o = ev.target.closest('button[data-opcao]');
@@ -446,6 +466,13 @@
     el.addEventListener('change', (ev) => {
       const c = ev.target.closest('input[data-opcao]');
       if (!c) return;
+      if (c.getAttribute('data-opcao') === 'marcar-lalur') {
+        // Ligado na DRE, abre todos os subtotais para as contas aparecerem.
+        E.marcarLalur = c.checked;
+        if (E.marcarLalur && /^dre/.test(E.aba)) E.rel.dre.mensal.linhas.filter((l) => l.tipo === 'grupo').forEach((l) => E.abertos.add(l.id));
+        redesenharConteudo(el);
+        return;
+      }
       if (c.getAttribute('data-opcao') === 'avah') E.avah = c.checked;
       if (c.getAttribute('data-opcao') === 'sem-zeradas') E.semZeradas = c.checked;
       guardarPreferencias();
@@ -454,6 +481,8 @@
   }
 
   function redesenharConteudo(el) {
+    const av = el.querySelector('#apres-avisos');
+    if (av) av.innerHTML = avisos();
     el.querySelectorAll('.abas [data-aba]').forEach((b) => b.classList.toggle('ativa', b.getAttribute('data-aba') === E.aba));
     const meses = el.querySelector('#apres-meses');
     if (meses) meses.innerHTML = seletorMeses();
@@ -469,6 +498,48 @@
     f.innerHTML = secao(E.aba, {});
     const nova = f.querySelector('.apres-caixa');
     if (nova && rolagem) { nova.scrollLeft = rolagem.x; nova.scrollTop = rolagem.y; }
+  }
+
+  // ------------------------------------------------------------------
+  // Marcação das contas do LALUR (Dony, 18/09/2026: "eu quero ir lá no balancete, na DRE, e colocar essa
+  // conta é adição, essa conta é exclusão, e não você decidindo o que é"). Conta de resultado: movimento do
+  // mês (a regra dinâmica da planilha); conta de ativo/passivo: só exclusão, pelo aumento do saldo credor.
+  // ------------------------------------------------------------------
+  function ajustesAtuais() { return Array.isArray(E.config.ajustes) ? E.config.ajustes : []; }
+  function marcaLalur(conta, patrimonial) {
+    const m = ajustesAtuais().find((a) => a.conta === conta) || null;
+    if (!E.marcarLalur) {
+      return m ? '<span class="lalur-selo ' + (m.tipo === 'exclusao' ? 'exclusao' : 'adicao') + ' nao-imprimir" title="Conta marcada no LALUR">' +
+        (m.tipo === 'exclusao' ? '− Exclusão' : '+ Adição') + '</span>' : '';
+    }
+    const ligado = (tipo) => !!m && (m.tipo === 'exclusao' ? 'exclusao' : 'adicao') === tipo;
+    const bt = (tipo, texto, titulo) => '<button type="button" class="lalur-bt ' + tipo + (ligado(tipo) ? ' ligado' : '') + '" data-lalur="' + tipo + '" data-conta="' + T.esc(conta) + '" title="' +
+      (ligado(tipo) ? 'Tirar do LALUR' : titulo) + '">' + texto + '</button>';
+    return '<span class="lalur-bts nao-imprimir">' +
+      (patrimonial && !ligado('adicao') ? '' : bt('adicao', '+ Adição', 'Marcar como adição no LALUR')) +
+      bt('exclusao', '− Exclusão', patrimonial ? 'Marcar como exclusão no LALUR: o quanto o saldo credor aumentou no mês (regra da planilha)' : 'Marcar como exclusão no LALUR') + '</span>';
+  }
+  // Marca (tipo 'adicao'/'exclusao'), troca ou tira (tipo null ou o mesmo já marcado). Recalcula na hora e
+  // guarda em fila, para cliques rápidos não se atropelarem.
+  function marcarConta(el, conta, tipo) {
+    const atual = ajustesAtuais().find((a) => a.conta === conta) || null;
+    const resto = ajustesAtuais().filter((a) => a.conta !== conta);
+    const linha = E.rel.contas.find((c) => c.conta === conta);
+    let ajustes = resto, texto;
+    if (!tipo || (atual && (atual.tipo === 'exclusao' ? 'exclusao' : 'adicao') === tipo)) texto = conta + ' saiu do LALUR';
+    else {
+      const regra = linha && linha.patrimonial ? 'aumento-credor' : 'movimento';
+      ajustes = resto.concat([{ conta, tipo, regra }]).sort((a, b) => motor().compararContas(a.conta, b.conta));
+      texto = conta + ' marcada como ' + (tipo === 'exclusao' ? 'exclusão' : 'adição');
+    }
+    E.config = Object.assign({}, E.config, { ajustes });
+    E.rel = motor().montar({ ano: E.ano, balancetes: E.balancetes, config: E.config });
+    redesenharConteudo(el);
+    const config = E.config;
+    E.fila = (E.fila || Promise.resolve())
+      .then(() => guardarConfig(config, 'apresentacao-ajustes', texto))
+      .then(() => T.avisoRapido(texto + ' · LALUR recalculado.', 'ok', 2500))
+      .catch((e) => { T.avisoRapido('Não foi possível guardar a marcação: ' + T.mensagemDeErro(e), 'erro'); app().mostrarRota(); });
   }
 
   async function guardarConfig(novo, acao, detalhe) {
@@ -501,7 +572,7 @@
   // Lista de ajustes do LALUR e conta do PAT (por empresa e ano).
   async function editarAjustes() {
     const L = E.rel.lalur;
-    const atuais = Array.isArray(E.config.ajustes) ? E.config.ajustes : motor().AJUSTES_MODELO;
+    const atuais = ajustesAtuais();
     const contas = E.rel.contas;
     const titulo = (c) => { const x = contas.find((k) => k.conta === c); return x ? x.titulo : ''; };
     const linha = (a) => '<tr><td><input class="apres-campo" list="apres-contas" data-aj="conta" value="' + T.esc(a.conta || '') + '" placeholder="conta" style="width:150px"></td>' +
@@ -509,13 +580,13 @@
       '<td><select class="apres-campo" data-aj="tipo"><option value="adicao"' + (a.tipo !== 'exclusao' ? ' selected' : '') + '>Adição</option><option value="exclusao"' + (a.tipo === 'exclusao' ? ' selected' : '') + '>Exclusão</option></select></td>' +
       '<td><select class="apres-campo" data-aj="regra">' + Object.keys(REGRAS).map((k) => '<option value="' + k + '"' + ((a.regra || 'movimento') === k ? ' selected' : '') + '>' + REGRAS[k] + '</option>').join('') + '</select></td>' +
       '<td><button type="button" class="botao pequeno perigo" data-aj="tirar" title="Tirar da lista">✕</button></td></tr>';
-    const corpo = '<p class="suave pequeno" style="margin:0 0 8px;line-height:1.5">As contas que entram nas adições e exclusões do LALUR. <b>Movimento do mês</b>: débitos − créditos da conta ' +
+    const corpo = '<p class="suave pequeno" style="margin:0 0 8px;line-height:1.5">As contas que entram nas adições e exclusões do LALUR (dá para marcar direto na DRE ou no balancete, ' +
+      'no botão <b>✎ Marcar adições e exclusões do LALUR</b>). <b>Movimento do mês</b>: débitos − créditos da conta ' +
       '(positivo = adição, negativo = exclusão — a regra dinâmica da planilha). <b>Aumento do saldo credor</b>: exclusão do quanto o saldo credor da conta aumentou no mês (ex.: pagamento de aluguel no IFRS 16).</p>' +
       '<datalist id="apres-contas">' + contas.filter((c) => c.analitica).map((c) => '<option value="' + T.esc(c.conta) + '">' + T.esc(c.titulo) + '</option>').join('') + '</datalist>' +
       '<div class="tabela-caixa"><table class="tabela"><thead><tr><th>Conta</th><th>Título no balancete</th><th>Tipo</th><th>Regra</th><th></th></tr></thead><tbody id="apres-aj-linhas">' +
       atuais.map(linha).join('') + '</tbody></table></div>' +
-      '<div class="linha-flex" style="margin-top:8px"><button type="button" class="botao pequeno" data-aj="mais">＋ Adicionar conta</button>' +
-      '<button type="button" class="botao pequeno" data-aj="modelo">Voltar para a lista do modelo</button></div>' +
+      '<div class="linha-flex" style="margin-top:8px"><button type="button" class="botao pequeno" data-aj="mais">＋ Adicionar conta</button></div>' +
       '<div style="margin-top:14px"><label class="pequeno"><b>Conta do PAT</b> (despesa elegível ao incentivo)<br>' +
       '<input class="apres-campo" list="apres-contas" id="apres-conta-pat" value="' + T.esc(L.contaPAT || '') + '" style="width:190px"> <span class="suave" id="apres-titulo-pat">' + T.esc(titulo(L.contaPAT)) + '</span></label></div>';
     const res = await T.janela({
@@ -528,7 +599,6 @@
           const q = b.getAttribute('data-aj');
           if (q === 'tirar') b.closest('tr').remove();
           if (q === 'mais') { tb.insertAdjacentHTML('beforeend', linha({ conta: '', tipo: 'adicao', regra: 'movimento' })); tb.lastElementChild.querySelector('input').focus(); }
-          if (q === 'modelo') tb.innerHTML = motor().AJUSTES_MODELO.map(linha).join('');
         });
         j.addEventListener('input', (ev) => {
           const inp = ev.target.closest('input[data-aj="conta"]');
@@ -584,83 +654,288 @@
   }
 
   // ------------------------------------------------------------------
-  // Excel com as mesmas abas da planilha modelo (valores; números com o formato da planilha).
+  // Excel FORMATADO, igual à tela (Dony, 18/09/2026: "quero o Excel exatamente como eu vejo na tela,
+  // bonito e formatado, porque vou mandar para o cliente"): as mesmas abas, os meses escolhidos, AV/AH
+  // ligados ou não, os grupos da DRE abertos ou fechados como estão na tela (com o +/− do Excel para abrir
+  // e fechar), o balancete até o nível escolhido (os outros níveis ficam recolhidos, abrem pelos números
+  // de nível do Excel), cabeçalho e 1ª coluna travados e cada aba pronta para imprimir (folha deitada, uma
+  // página de largura, cabeçalho repetido). O arquivo é montado por excel-bonito.js.
   // ------------------------------------------------------------------
-  function baixarExcel() {
-    const X = raiz.XLSX;
-    const rel = E.rel;
-    const wb = X.utils.book_new();
-    const FMT_V = '#,##0.00;[Red]\\(#,##0.00\\);\\-', FMT_P = '0.0%;[Red]\\(0.0%\\);\\-';
-    const R = (c) => (c === null || c === undefined || !isFinite(c) ? '' : Math.round(c) / 100);
-    const P = (x) => (x === null || x === undefined || !isFinite(x) ? '' : x);
-    const nome = E.emp.nome;
-    // linhas: [[...]], fmt(linha, coluna) -> formato ou null
-    function folha(titulo, linhas, larguras, fmt, nomeAba) {
-      const ws = X.utils.aoa_to_sheet(linhas);
-      ws['!cols'] = larguras.map((w) => ({ wch: w }));
-      const f = X.utils.decode_range(ws['!ref'] || 'A1');
-      for (let r = 0; r <= f.e.r; r++) for (let c = 0; c <= f.e.c; c++) {
-        const cel = ws[X.utils.encode_cell({ r, c })];
-        if (!cel || cel.t !== 'n') continue;
-        const z = fmt(r, c);
-        if (z) cel.z = z;
+  const R = (c) => (c === null || c === undefined || !isFinite(c) ? null : Math.round(c) / 100);
+  const P = (x) => (x === null || x === undefined || !isFinite(x) ? null : x);
+  const COR = { azul: 'FF1F4E78', azulSub: 'FF2B5D8A', azulAcum: 'FF0F2C46', azulAcumSub: 'FF16395A', azulTri: 'FF173B5C', ambar: 'FF7A5A16',
+    branco: 'FFFFFFFF', texto: 'FF1D2733', suave: 'FF5F6B7A', fraco: 'FF8A94A1', linha: 'FFE6EAEF', divisa: 'FF2D6190' };
+
+  function estilosDoExcel() {
+    const e = {
+      titulo: { negrito: true, tam: 14, cor: COR.azul },
+      subtitulo: { italico: true, tam: 9, cor: COR.suave },
+      cab: { negrito: true, cor: COR.branco, fundo: COR.azul, alinh: 'center', vert: 'center', quebra: true, borda: { dir: { cor: COR.divisa } } },
+      cabEsq: { negrito: true, cor: COR.branco, fundo: COR.azul, alinh: 'left', vert: 'center', borda: { dir: { cor: COR.divisa } } },
+      cabSub: { tam: 9, cor: COR.branco, fundo: COR.azulSub, alinh: 'center', borda: { dir: { cor: COR.divisa } } },
+      cabAcum: { negrito: true, cor: COR.branco, fundo: COR.azulAcum, alinh: 'center', vert: 'center', quebra: true },
+      cabAcumSub: { tam: 9, cor: COR.branco, fundo: COR.azulAcumSub, alinh: 'center' },
+      cabTri: { negrito: true, cor: COR.branco, fundo: COR.azulTri, alinh: 'center', vert: 'center', quebra: true },
+      cabTriSub: { tam: 9, cor: COR.branco, fundo: COR.azulTri, alinh: 'center' },
+      cabFalta: { negrito: true, cor: 'FFFFE3A3', fundo: COR.ambar, alinh: 'center', vert: 'center', quebra: true },
+      cat: { negrito: true, tam: 9, cor: COR.azul, fundo: 'FFF4F6F8', borda: { baixo: { cor: COR.linha } } },
+    };
+    // Tipos de linha (as mesmas cores da tela) × tipo de célula; ".acum" = coluna do acumulado.
+    const LINHAS = { ana: {}, grp: { fundo: 'FFE7E6E6', negrito: true }, tot: { fundo: 'FFDDEBF7', negrito: true },
+      des: { fundo: 'FFC9DCEF', negrito: true, cor: 'FF0F2C46', cima: true }, n1: { fundo: 'FFE7E6E6', negrito: true }, sin: { negrito: true },
+      inp: { fundo: 'FFEAF2FB', negrito: true, cor: 'FF0B3D91' } };
+    const ACUM = { ana: 'FFEEF3F8', grp: 'FFDCE1E7', tot: 'FFCFE0F1', des: 'FFBBD2EA', n1: 'FFDCE1E7', sin: 'FFEEF3F8', inp: 'FFEAF2FB' };
+    Object.keys(LINHAS).forEach((t) => {
+      const b = LINHAS[t];
+      const borda = (extra) => Object.assign({ baixo: { cor: COR.linha } }, b.cima ? { cima: { cor: 'FF8FB0D0' } } : {}, extra || {});
+      const base = { negrito: b.negrito, cor: b.cor || COR.texto, fundo: b.fundo };
+      for (let r = 0; r <= 5; r++) e[t + '.rot' + r] = Object.assign({}, base, { recuo: r || undefined, borda: borda() });
+      e[t + '.cod'] = Object.assign({}, base, { tam: 9, cor: COR.fraco, negrito: false, borda: borda() });
+      e[t + '.txt'] = Object.assign({}, base, { borda: borda(), vert: 'top' });
+      e[t + '.txtq'] = Object.assign({}, base, { borda: borda(), quebra: true, vert: 'top' });
+      e[t + '.val'] = Object.assign({}, base, { formato: 'dinheiro', borda: borda() });
+      e[t + '.pct'] = Object.assign({}, base, { formato: 'porcento', tam: 9, cor: b.cor || COR.suave, borda: borda() });
+      e[t + '.val.acum'] = Object.assign({}, base, { formato: 'dinheiro', negrito: true, fundo: ACUM[t], borda: borda({ esq: { estilo: 'medium', cor: COR.azul } }) });
+      e[t + '.pct.acum'] = Object.assign({}, base, { formato: 'porcento', tam: 9, cor: b.cor || COR.suave, fundo: ACUM[t], borda: borda() });
+    });
+    return e;
+  }
+
+  // Larguras pelo maior número da aba, para nada virar "#####" no Excel (AH passa de 10.000% às vezes,
+  // e empresa grande tem valor na casa do bilhão). listas = arrays de valores em centavos ou de frações.
+  function larguraValor(listas, minimo) {
+    let max = 0;
+    listas.forEach((vals) => (vals || []).forEach((c) => {
+      if (c === null || c === undefined || !isFinite(c) || !Math.round(c)) return;
+      const d = String(Math.floor(Math.abs(Math.round(c)) / 100)).length;
+      max = Math.max(max, d + Math.floor((d - 1) / 3) + 3 + (c < 0 ? 2 : 0)); // 1.234,56 e (1.234,56)
+    }));
+    return Math.max(minimo || 15, Math.ceil(max * 0.9 + 1.5));
+  }
+  function larguraPct(listas) {
+    let max = 0;
+    listas.forEach((vals) => (vals || []).forEach((x) => {
+      if (x === null || x === undefined || !isFinite(x)) return;
+      const n = Math.abs(Math.round(x * 1000) / 10);
+      if (n) max = Math.max(max, String(Math.floor(n)).length + 3 + (x < 0 ? 2 : 0)); // 12,5% e (12,5%)
+    }));
+    return max <= 8 ? 8 : max + 0.5;
+  }
+  function largurasDePeriodos(linhas, colunas, avah) {
+    const val = larguraValor(linhas.map((l) => l.valores));
+    if (!avah) return colunas.map(() => val);
+    const av = larguraPct(linhas.map((l) => l.av)), ah = larguraPct(linhas.map((l) => l.ah));
+    return [].concat(...colunas.map(() => [val, av, ah]));
+  }
+
+  // Uma aba em construção: add() devolve o número da linha (1 = primeira).
+  function novaFolha(nome, larguras, op) {
+    const f = Object.assign({ nome, colunas: larguras, linhas: [], mesclas: [], semGrade: true, paisagem: true, zoom: 90,
+      rodape: E.emp.nome + ' · Relatório de apresentação ' + E.ano }, op || {});
+    f.add = (celulas, extra) => { f.linhas.push(Object.assign({ celulas }, extra || {})); return f.linhas.length; };
+    f.vazia = () => { f.linhas.push(null); return f.linhas.length; };
+    f.mesclar = (c1, r1, c2, r2) => f.mesclas.push(raiz.ExcelBonito.coluna(c1) + r1 + ':' + raiz.ExcelBonito.coluna(c2) + r2);
+    f.titulo = (titulo, sub) => { f.add([{ v: E.emp.nome + ' — ' + titulo, e: 'titulo' }], { altura: 22 }); f.add([{ v: sub || '', e: 'subtitulo' }]); f.vazia(); };
+    return f;
+  }
+
+  // Cabeçalho com os períodos: com AV/AH, cada período ocupa 3 colunas (Valor, AV %, AH %), como na tela.
+  function cabecalhoComPeriodos(f, fixas, colunas, avah) {
+    const r1 = f.linhas.length + 1;
+    const estilo = (c) => (c.acumulado ? 'cabAcum' : c.trimestre ? 'cabTri' : c.falta ? 'cabFalta' : 'cab');
+    const estiloSub = (c) => (c.acumulado ? 'cabAcumSub' : c.trimestre ? 'cabTriSub' : 'cabSub');
+    const linha1 = fixas.map((t, i) => ({ v: t, e: i === 0 ? 'cabEsq' : 'cab' }));
+    colunas.forEach((c) => {
+      linha1.push({ v: c.rotulo + (c.falta ? ' (sem balancete)' : ''), e: estilo(c) });
+      if (avah) { linha1.push({ v: '', e: estilo(c) }); linha1.push({ v: '', e: estilo(c) }); }
+    });
+    f.add(linha1, { altura: 20 });
+    if (avah) {
+      f.add(fixas.map((t, i) => ({ v: '', e: i === 0 ? 'cabEsq' : 'cab' })).concat(...colunas.map((c) => ['Valor', 'AV %', 'AH %'].map((t) => ({ v: t, e: estiloSub(c) })))), { altura: 16 });
+      fixas.forEach((t, i) => f.mesclar(i, r1, i, r1 + 1));
+      colunas.forEach((c, k) => { const c0 = fixas.length + k * 3; f.mesclar(c0, r1, c0 + 2, r1); });
+    }
+    return { primeira: r1, ultima: f.linhas.length };
+  }
+  function celulasDePeriodos(tipo, l, colunas, avah) {
+    const out = [];
+    l.valores.forEach((v, k) => {
+      const acum = colunas[k] && colunas[k].acumulado ? '.acum' : '';
+      out.push({ v: R(v), e: tipo + '.val' + acum });
+      if (avah) { out.push({ v: P(l.av[k]), e: tipo + '.pct' + acum }); out.push({ v: P(l.ah[k]), e: tipo + '.pct' + acum }); }
+    });
+    return out;
+  }
+
+  function folhaResumo() {
+    const r = resumoVisivel();
+    const dre = dreMensalVisivel();
+    const iAcum = dre.colunas.findIndex((c) => c.acumulado);
+    const larg = larguraValor(r.linhas.map((l) => l.valores).concat([dre.linhas.map((l) => l.valores[iAcum])]), 16);
+    const f = novaFolha('Resumo', [14, 44].concat(r.colunas.map(() => larg)));
+    f.titulo('Resumo executivo', 'Contas de 1º nível, mês a mês, acumulado e por trimestre' + (E.selecao ? ' · meses escolhidos: ' + rotuloSelecao(mesesVisiveis()) : '') + ' · valores em R$');
+    // Os indicadores do período (as fichas do topo da tela).
+    let n = f.add([{ v: 'Indicador', e: 'cabEsq' }, { v: '', e: 'cabEsq' }, { v: dre.colunas[iAcum].rotulo, e: 'cabAcum' }, { v: '% da receita líquida', e: 'cab' }], { altura: 30 });
+    f.mesclar(0, n, 1, n);
+    const rlAc = dre.linhas.find((l) => l.id === 'receitaLiquida').valores[iAcum];
+    ['receitaLiquida', 'lucroBruto', 'ebitda', 'lucroOperacional', 'lucroLiquido'].forEach((id) => {
+      const l = dre.linhas.find((x) => x.id === id);
+      const v = l.valores[iAcum];
+      n = f.add([{ v: l.rotulo, e: 'tot.rot0' }, { v: '', e: 'tot.rot0' }, { v: R(v), e: 'tot.val.acum' }, { v: id === 'receitaLiquida' || !rlAc || v === null ? null : v / rlAc, e: 'tot.pct' }]);
+      f.mesclar(0, n, 1, n);
+    });
+    f.vazia();
+    const estilo = (c) => (c.acumulado ? 'cabAcum' : c.trimestre ? 'cabTri' : 'cab');
+    const r1 = f.add([{ v: 'Conta', e: 'cabEsq' }, { v: 'Título', e: 'cabEsq' }].concat(r.colunas.map((c) => ({ v: c.rotulo, e: estilo(c) }))), { altura: 20 });
+    r.linhas.forEach((l) => f.add([{ v: l.conta, e: 'n1.cod' }, { v: l.titulo, e: 'n1.rot0' }].concat(l.valores.map((v, k) => ({ v: R(v), e: 'n1.val' + (r.colunas[k].acumulado ? '.acum' : '') })))));
+    f.repetir = [r1, r1];
+    return f;
+  }
+
+  // DRE (mensal ou trimestral): faixa da categoria, subtotal com as contas agrupadas embaixo (+/−) e totais.
+  function folhaDre(nome, titulo, sub, dre) {
+    const avah = E.avah;
+    const f = novaFolha(nome, [52, 18].concat(largurasDePeriodos(dre.linhas, dre.colunas, avah)), { resumoAcima: true });
+    f.titulo(titulo, sub);
+    const cab = cabecalhoComPeriodos(f, ['Linha / Conta analítica', 'Conta'], dre.colunas, avah);
+    const nCols = 2 + dre.colunas.length * (avah ? 3 : 1);
+    const SEM_FAIXA = { 'Subtotal CPC 51': true, Subtotal: true, Resultado: true };
+    let categoria = null;
+    dre.linhas.forEach((l) => {
+      if (l.categoria !== categoria) {
+        categoria = l.categoria;
+        if (!SEM_FAIXA[categoria]) f.add([{ v: categoria.toUpperCase(), e: 'cat' }].concat(Array.from({ length: nCols - 1 }, () => ({ v: '', e: 'cat' }))), { altura: 16 });
       }
-      X.utils.book_append_sheet(wb, ws, nomeAba || titulo);
-    }
-    const tituloAba = (t, sub) => [[nome + ' - ' + t], [sub || ''], []];
-    // Tabelas com Valor / AV % / AH % por período.
-    function comPeriodos(t, sub, fixasCab, colunas, linhas, fixasDe, nomeAba) {
-      const n = fixasCab.length;
-      const cab1 = fixasCab.map(() => '').concat(...colunas.map((c) => [c.rotulo, '', '']));
-      const cab2 = fixasCab.concat(...colunas.map(() => ['Valor', 'AV %', 'AH %']));
-      const dados = linhas.map((l) => fixasDe(l).concat(...l.valores.map((v, k) => [R(v), P(l.av[k]), P(l.ah[k])])));
-      const aoa = tituloAba(t, sub).concat([cab1, cab2], dados);
-      folha(t, aoa, fixasCab.map((f, i) => (i === 1 ? 44 : 16)).concat(...colunas.map(() => [15, 8, 8])), (r, c) => (r < 5 || c < n ? null : ((c - n) % 3 === 0 ? FMT_V : FMT_P)), nomeAba);
-    }
-    // Resumo (visões mensais com os meses escolhidos na tela)
-    const res = resumoVisivel();
+      const aberto = E.abertos.has(l.grupo || l.id);
+      if (l.tipo === 'analitica') {
+        f.add([{ v: l.rotulo, e: 'ana.rot2' }, { v: l.conta, e: 'ana.cod' }].concat(celulasDePeriodos('ana', l, dre.colunas, avah)), { nivel: 1, escondida: !aberto });
+      } else if (l.tipo === 'grupo') {
+        f.add([{ v: l.rotulo, e: 'grp.rot0' }, { v: '', e: 'grp.cod' }].concat(celulasDePeriodos('grp', l, dre.colunas, avah)), { recolhida: !aberto && l.filhas > 0 });
+      } else {
+        const t = l.destaque ? 'des' : 'tot';
+        f.add([{ v: l.rotulo, e: t + '.rot0' }, { v: '', e: t + '.cod' }].concat(celulasDePeriodos(t, l, dre.colunas, avah)));
+      }
+    });
+    f.congelar = { linhas: cab.ultima, colunas: 2 };
+    f.repetir = [cab.primeira, cab.ultima];
+    return f;
+  }
+
+  // Balancete (mensal ou trimestral): recuo por nível e grupos por nível (o Excel abre e fecha pelos números 1 a 5).
+  function folhaBalancete(nome, titulo, sub, tab) {
+    const avah = E.avah;
+    const f = novaFolha(nome, [18, 50].concat(largurasDePeriodos(tab.linhas, tab.colunas, avah)), { resumoAcima: true });
+    f.titulo(titulo, sub);
+    const cab = cabecalhoComPeriodos(f, ['Conta', 'Título da conta'], tab.colunas, avah);
+    const linhas = tab.linhas.filter((l) => !(E.semZeradas && l.valores.every((v) => !v)));
+    linhas.forEach((l, i) => {
+      const t = l.nivel === 1 ? 'n1' : (!l.analitica && l.nivel <= 4) ? 'sin' : 'ana';
+      const proxima = linhas[i + 1];
+      const recolhida = l.nivel <= E.nivel && !!proxima && proxima.nivel > l.nivel && proxima.nivel > E.nivel;
+      f.add([{ v: l.conta, e: t + '.cod' }, { v: l.titulo, e: t + '.rot' + Math.min(5, l.nivel - 1) }].concat(celulasDePeriodos(t, l, tab.colunas, avah)),
+        { nivel: Math.min(7, l.nivel - 1), escondida: l.nivel > E.nivel, recolhida });
+    });
+    f.congelar = { linhas: cab.ultima, colunas: 2 };
+    f.repetir = [cab.primeira, cab.ultima];
+    return f;
+  }
+
+  function folhasLalur() {
+    const L = E.rel.lalur;
+    const folhas = [];
+    // Parte A
+    let larg = larguraValor(L.parteA.linhas.map((l) => l.valores), 17);
+    let f = novaFolha('LALUR Parte A', [44, 16].concat(L.parteA.colunas.map(() => larg)));
+    f.titulo('LALUR Parte A: apuração do lucro real e da CSLL', 'Apuração trimestral a partir da DRE; adições e exclusões pela lista de ajustes; incentivo PAT e Parte B · valores em R$');
+    let r1 = f.add([{ v: 'Linha', e: 'cabEsq' }, { v: 'Bloco', e: 'cabEsq' }].concat(L.parteA.colunas.map((c) => ({ v: c.rotulo, e: c.soma ? 'cabAcum' : 'cab' }))), { altura: 30 });
+    L.parteA.linhas.forEach((l) => {
+      const t = l.destaque ? 'tot' : 'ana';
+      f.add([{ v: l.rotulo, e: t + '.rot0' }, { v: l.bloco, e: t + '.cod' }].concat(l.valores.map((v, k) => ({ v: R(v), e: t + '.val' + (L.parteA.colunas[k].soma ? '.acum' : '') }))));
+    });
+    f.congelar = { linhas: r1, colunas: 1 };
+    f.repetir = [r1, r1];
+    folhas.push(f);
+    // Ajustes
+    larg = larguraValor(L.ajustes.linhas.map((a) => a.valores).concat([L.ajustes.adicoes, L.ajustes.exclusoes]), 14);
+    f = novaFolha('LALUR Ajustes', [46, 18, 10].concat(L.ajustes.colunas.map(() => larg)));
+    f.titulo('LALUR: ajustes mensais e trimestrais', 'Valor positivo = adição · valor negativo = exclusão · valores em R$');
+    r1 = f.add([{ v: 'Descrição', e: 'cabEsq' }, { v: 'Conta', e: 'cab' }, { v: 'Tipo', e: 'cab' }].concat(L.ajustes.colunas.map((c) => ({ v: c.rotulo, e: c.trimestre ? 'cabTri' : 'cab' }))), { altura: 20 });
+    if (!L.ajustes.linhas.length) f.add([{ v: 'Nenhuma conta marcada como adição ou exclusão.', e: 'ana.txt' }]);
+    L.ajustes.linhas.forEach((a) => f.add([{ v: a.titulo || a.conta, e: 'ana.rot0' }, { v: a.conta, e: 'ana.cod' }, { v: a.tipo, e: 'ana.txt' }]
+      .concat(a.valores.map((v, k) => ({ v: R(v), e: 'ana.val' + (L.ajustes.colunas[k].trimestre ? '.acum' : '') })))));
+    [['Total das Adições', L.ajustes.adicoes], ['Total das Exclusões', L.ajustes.exclusoes]].forEach(([t, vals]) =>
+      f.add([{ v: t, e: 'tot.rot0' }, { v: '', e: 'tot.cod' }, { v: '', e: 'tot.txt' }].concat(vals.map((v, k) => ({ v: R(v), e: 'tot.val' + (L.ajustes.colunas[k].trimestre ? '.acum' : '') })))));
+    f.congelar = { linhas: r1, colunas: 1 };
+    f.repetir = [r1, r1];
+    folhas.push(f);
+    // PAT
+    larg = larguraValor(L.pat.linhas.map((l) => l.valores), 14);
+    f = novaFolha('LALUR PAT', [58, 8].concat(L.pat.colunas.map(() => larg)));
+    f.titulo('Incentivo fiscal PAT', 'Conta ' + (L.contaPAT || '—') + (L.pat.titulo ? ' · ' + L.pat.titulo : '') + ' · menor entre o incentivo potencial e 3,6% do IRPJ principal (15%) · valores em R$');
+    r1 = f.add([{ v: 'Descrição', e: 'cabEsq' }, { v: 'Linha', e: 'cab' }].concat(L.pat.colunas.map((c) => ({ v: c.rotulo, e: c.lalur ? 'cabAcum' : 'cab' }))), { altura: 30 });
+    L.pat.linhas.forEach((l) => f.add([{ v: l.rotulo, e: 'ana.rot0' }, { v: l.letra, e: 'ana.cod' }].concat(l.valores.map((v, k) => ({ v: R(v), e: 'ana.val' + (L.pat.colunas[k].lalur ? '.acum' : '') })))));
+    f.congelar = { linhas: r1, colunas: 1 };
+    f.repetir = [r1, r1];
+    folhas.push(f);
+    // Parte B
+    larg = larguraValor(L.parteB.linhas.map((l) => l.valores), 16);
+    f = novaFolha('LALUR Parte B', [46].concat(L.parteB.colunas.map(() => larg), [80]));
+    f.titulo('LALUR Parte B: controles fiscais', 'Saldos de prejuízo fiscal e base negativa (zerados até serem informados) e IR retido · valores em R$');
+    r1 = f.add([{ v: 'Controle', e: 'cabEsq' }].concat(L.parteB.colunas.map((c) => ({ v: c.rotulo, e: 'cab' })), [{ v: 'Observação', e: 'cabEsq' }]), { altura: 20 });
+    L.parteB.linhas.forEach((l) => {
+      const t = l.editavel ? 'inp' : 'ana';
+      f.add([{ v: l.rotulo, e: t + '.rot0' }].concat(l.valores.map((v) => ({ v: R(v), e: t + '.val' })), [{ v: l.obs || '', e: 'ana.txt' }]));
+    });
+    folhas.push(f);
+    // Premissas
+    const largP = [22, 60, 38, 18, 55];
+    f = novaFolha('LALUR Premissas', largP);
+    f.titulo('LALUR: premissas, fontes e pontos de validação', '');
+    f.add(['Tema', 'Premissa usada', 'Fonte / Base', 'Status', 'Comentário'].map((t) => ({ v: t, e: 'cabEsq' })), { altura: 20 });
+    L.premissas.forEach((p) => {
+      const linhasTexto = Math.max.apply(null, p.map((t, k) => Math.ceil(String(t).length / (largP[k] * 1.05))));
+      f.add(p.map((t) => ({ v: t, e: 'ana.txtq' })), { altura: Math.max(15, 13 * linhasTexto + 4) });
+    });
+    folhas.push(f);
+    return folhas;
+  }
+
+  function folhaBase() {
+    const larg = larguraValor([].concat(...E.rel.base.map((b) => [[b.saldoAnterior, b.debitos, b.creditos, b.saldoAtual, b.valor]])), 15);
+    const f = novaFolha('Base normalizada', [8, 18, 7, 44, larg, larg, larg, larg, larg, 16]);
+    const r1 = f.add(['Mês', 'Conta', 'Red.', 'Título da Conta', 'Saldo Ant.', 'Débitos', 'Créditos', 'Saldo Atual', 'Valor Usado', 'Critério'].map((t, i) => ({ v: t, e: i < 4 || i === 9 ? 'cabEsq' : 'cab' })), { altura: 20 });
+    E.rel.base.forEach((b) => f.add([{ v: b.mes, e: 'ana.txt' }, { v: b.conta, e: 'ana.cod' }, { v: b.reduzido, e: 'ana.cod' }, { v: b.titulo, e: 'ana.txt' }]
+      .concat([b.saldoAnterior, b.debitos, b.creditos, b.saldoAtual, b.valor].map((v) => ({ v: R(v), e: 'ana.val' })), [{ v: b.criterio, e: 'ana.cod' }])));
+    f.congelar = { linhas: r1, colunas: 0 };
+    f.repetir = [r1, r1];
+    return f;
+  }
+
+  function montarExcel() {
     const escolha = E.selecao ? ' · meses escolhidos: ' + rotuloSelecao(mesesVisiveis()) : '';
-    folha('Resumo', tituloAba('Resumo executivo das contas de 1º nível', escolha.slice(3)).concat([['Conta', 'Título'].concat(res.colunas.map((c) => c.rotulo))],
-      res.linhas.map((l) => [l.conta, l.titulo].concat(l.valores.map(R)))), [8, 30].concat(res.colunas.map(() => 15)), (r, c) => (r > 3 && c > 1 ? FMT_V : null));
-    // DRE
-    const dreLinhas = (dre) => dre.linhas;
-    const dreFixas = (l) => [l.categoria, l.rotulo, l.conta || '', l.tipo === 'analitica' ? 'Analítica' : 'Total / Subtotal'];
-    const dreMes = dreMensalVisivel();
-    comPeriodos('DRE CPC 51 Mensal Detalhada', E.ano + ' · AV % sobre a receita líquida · AH % sobre o mês anterior' + escolha, ['Categoria CPC 51', 'Linha / Conta Analítica', 'Conta Contábil', 'Tipo'],
-      dreMes.colunas, dreLinhas(dreMes), dreFixas, 'DRE mensal');
-    comPeriodos('DRE CPC 51 Trimestral Detalhada', E.ano + ' · AV % sobre a receita líquida · AH % sobre o trimestre anterior', ['Categoria CPC 51', 'Linha / Conta Analítica', 'Conta Contábil', 'Tipo'],
-      rel.dre.trimestral.colunas, dreLinhas(rel.dre.trimestral), dreFixas, 'DRE trimestral');
-    // Balancetes
-    const balFixas = (l) => [l.conta, l.reduzido, l.titulo, l.nivel, l.pai];
-    const balMes = balanceteMensalVisivel();
-    comPeriodos('Balancete Analítico Mensal com AV e AH', 'Contas 1 e 2: saldo final · 3, 4 e 5: movimento do mês · AV % sobre a conta-mãe' + escolha, ['Conta', 'Red.', 'Título da Conta', 'Nível', 'Conta Pai'],
-      balMes.colunas, balMes.linhas, balFixas, 'Mensal');
-    comPeriodos('Análise Trimestral', 'Contas 1 e 2: saldo final do trimestre · 3, 4 e 5: soma dos meses', ['Conta', 'Red.', 'Título da Conta', 'Nível', 'Conta Pai'],
-      rel.trimestral.colunas, rel.trimestral.linhas, balFixas, 'Trimestral');
-    // LALUR
-    const L = rel.lalur;
-    folha('LALUR Parte A', tituloAba('LALUR Parte A: Apuração Lucro Real e CS', 'Apuração trimestral construída a partir da DRE').concat([['Bloco', 'Linha'].concat(L.parteA.colunas.map((c) => c.rotulo))],
-      L.parteA.linhas.map((l) => [l.bloco, l.rotulo].concat(l.valores.map(R)))), [18, 40].concat(L.parteA.colunas.map(() => 16)), (r, c) => (r > 3 && c > 1 ? FMT_V : null), 'LALUR_Parte_A');
-    folha('LALUR Ajustes', tituloAba('LALUR: Ajustes Mensais e Trimestrais', 'Valor positivo = Adição | Valor negativo = Exclusão').concat([['Tipo', 'Conta', 'Descrição'].concat(L.ajustes.colunas.map((c) => c.rotulo))],
-      L.ajustes.linhas.map((a) => [a.tipo, a.conta, a.titulo].concat(a.valores.map(R))), [[]],
-      [['', '', 'Total das Adições'].concat(L.ajustes.adicoes.map(R)), ['', '', 'Total das Exclusões'].concat(L.ajustes.exclusoes.map(R))]),
-    [10, 18, 40].concat(L.ajustes.colunas.map(() => 14)), (r, c) => (r > 3 && c > 2 ? FMT_V : null), 'LALUR_Ajustes');
-    folha('LALUR PAT', tituloAba('Incentivo Fiscal PAT', 'Menor entre incentivo potencial e limite de 3,6% sobre IRPJ principal (15%)').concat([['Linha', 'Descrição'].concat(L.pat.colunas.map((c) => c.rotulo))],
-      L.pat.linhas.map((l) => [l.letra, l.rotulo].concat(l.valores.map(R)))), [6, 52].concat(L.pat.colunas.map(() => 14)), (r, c) => (r > 3 && c > 1 ? FMT_V : null), 'LALUR_PAT');
-    folha('LALUR Parte B', tituloAba('LALUR Parte B: Controles fiscais', 'Saldos informados por quem usa (zerados por padrão)').concat([['Controle'].concat(L.parteB.colunas.map((c) => c.rotulo), ['Observação'])],
-      L.parteB.linhas.map((l) => [l.rotulo].concat(l.valores.map(R), [l.obs || '']))), [44].concat(L.parteB.colunas.map(() => 14), [70]), (r, c) => (r > 3 && c > 0 ? FMT_V : null), 'LALUR_Parte_B');
-    folha('LALUR Premissas', tituloAba('LALUR: Premissas, fontes e pontos de validação').concat([['Tema', 'Premissa usada', 'Fonte / Base', 'Status', 'Comentário']], L.premissas),
-      [22, 70, 40, 18, 60], () => null, 'LALUR_Premissas');
-    // Base normalizada
-    folha('Base normalizada', [['Mês', 'Conta', 'Red.', 'Título da Conta', 'Saldo Ant.', 'Débitos', 'Créditos', 'Saldo Atual', 'Valor Usado', 'Critério']].concat(
-      rel.base.map((b) => [b.mes, b.conta, b.reduzido, b.titulo, R(b.saldoAnterior), R(b.debitos), R(b.creditos), R(b.saldoAtual), R(b.valor), b.criterio])),
-    [8, 18, 7, 40, 15, 15, 15, 15, 15, 16], (r, c) => (r > 0 && c >= 4 && c <= 8 ? FMT_V : null), 'Base_Normalizada');
-    const bytes = X.write(wb, { bookType: 'xlsx', type: 'array', compression: true });
+    const planilhas = [
+      folhaResumo(),
+      folhaDre('DRE mensal', 'DRE CPC 51 mensal detalhada', E.ano + ' · valores em R$ · receitas positivas, custos e despesas entre parênteses · AV % sobre a receita líquida · AH % sobre o mês anterior' + escolha +
+        ' · clique no + à esquerda para abrir as contas de um subtotal', dreMensalVisivel()),
+      folhaDre('DRE trimestral', 'DRE CPC 51 trimestral detalhada', E.ano + ' · valores em R$ · AV % sobre a receita líquida · AH % sobre o trimestre anterior · clique no + à esquerda para abrir as contas',
+        E.rel.dre.trimestral),
+      folhaBalancete('Balancete mensal', 'Balancete analítico mensal', E.ano + ' · contas 1 e 2: saldo final do mês · 3, 4 e 5: movimento do mês · AV % sobre a conta-mãe' + escolha +
+        ' · use os números 1 a 5 no canto esquerdo do Excel para abrir ou fechar os níveis', balanceteMensalVisivel()),
+      folhaBalancete('Balancete trimestral', 'Balancete analítico trimestral', E.ano + ' · contas 1 e 2: saldo no fim do trimestre · 3, 4 e 5: soma dos meses · AV % sobre a conta-mãe', E.rel.trimestral),
+    ].concat(folhasLalur(), [folhaBase()]);
+    const ordem = { resumo: 0, 'dre-mensal': 1, 'dre-trimestral': 2, 'balancete-mensal': 3, 'balancete-trimestral': 4, lalur: 5 };
+    return raiz.ExcelBonito.gerar({ planilhas, estilos: estilosDoExcel(), ativa: ordem[E.aba] || 0 });
+  }
+
+  function baixarExcel() {
+    let bytes;
+    try { bytes = montarExcel(); } catch (e) { console.error(e); T.avisoRapido('Não foi possível montar o Excel: ' + T.mensagemDeErro(e), 'erro'); return; }
     const arquivo = U.nomeSeguro('Apresentação ' + E.codigo + ' ' + E.emp.nome + ' ' + E.ano) + '.xlsx';
-    T.baixar(new Uint8Array(bytes), arquivo, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    T.baixar(bytes, arquivo, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     T.avisoRapido('Excel baixado: ' + arquivo + ' (pasta Downloads).', 'ok', 5000);
     app().armazenamento.registrarNoLog({ codigo: E.codigo, acao: 'apresentacao-excel', alvo: 'apresentacao/' + E.ano, detalhe: arquivo }).catch(() => {});
   }
 
-  raiz.TelaApresentacao = { mostrar };
+  // _teste: para as provas montarem o Excel sem a tela (estado = os mesmos campos de E).
+  raiz.TelaApresentacao = { mostrar, _teste: { definirEstado: (x) => Object.assign(E, x), montarExcel } };
 })(self);
