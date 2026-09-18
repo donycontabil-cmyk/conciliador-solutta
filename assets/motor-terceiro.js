@@ -1,7 +1,7 @@
 /*
  * Conciliador Solutta — motor-terceiro.js
  * Passo ③ — Fornecedores × contas a pagar do financeiro, no modelo "aging" (pedido do Dony,
- * 14/09/2026, cliente Univale):
+ * 14/09/2026, primeiro cliente):
  *   aging ANTERIOR (mês passado) + movimento do RAZÃO do mês = saldo esperado (a contabilidade);
  *   e o que sobra tem que bater com o aging DO MÊS, fornecedor por fornecedor.
  * O que não bate aparece para conciliar à MÃO (juntar nomes que a régua não juntou).
@@ -17,8 +17,8 @@
 
   const SEM = MotorNomes.SEM_FORNECEDOR;
 
-  // Fornecedor de um histórico da Univale: vem depois da última vírgula, ou depois de
-  // "<número>-" quando não há vírgula (ex.: "CONF. NF: 9673273-ALELO S.A"). Um CPF colado
+  // Fornecedor de um histórico do primeiro cliente: vem depois da última vírgula, ou depois de
+  // "<número>-" quando não há vírgula (ex.: "CONF. NF: 1234567-FORNECEDOR S.A"). Um CPF colado
   // no fim ("... 07659855867") é tirado. Confirmado com o Dony (14/09/2026).
   function fornecedorDoHistorico(historico) {
     let s = String(historico || '').trim();

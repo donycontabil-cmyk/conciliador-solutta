@@ -538,6 +538,17 @@
       if (casas) { E.casas = Number(casas.getAttribute('data-casas')); guardarPreferencias(); redesenharConteudo(el); return; }
       const milhar = ev.target.closest('button[data-milhar]');
       if (milhar) { E.milhar = milhar.getAttribute('data-milhar') === '1'; guardarPreferencias(); redesenharConteudo(el); return; }
+      // Relatório do cliente: tirar uma parte (✕ na folha) ou pôr de volta (↺ na barra); vale para o mês.
+      const tirarParte = ev.target.closest('button[data-rc-ocultar], button[data-rc-mostrar]');
+      if (tirarParte) {
+        const comp = compDoCliente();
+        const id = tirarParte.getAttribute('data-rc-ocultar') || tirarParte.getAttribute('data-rc-mostrar');
+        const lista = (textosDoCliente(comp).ocultas || []).filter((x) => x !== id);
+        if (tirarParte.hasAttribute('data-rc-ocultar')) lista.push(id);
+        guardarTextoCliente(comp, 'ocultas', lista);
+        redesenharFolha(el);
+        return;
+      }
       const rc = ev.target.closest('button[data-rc]');
       if (rc) { await acaoCliente(el, rc.getAttribute('data-rc')); return; }
       const mais = ev.target.closest('button[data-rc-mais]');
@@ -730,7 +741,8 @@
   function montarCliente(editavel) {
     const comp = compDoCliente();
     const r = raiz.RelatorioCliente.montar({ rel: relDoCliente(comp), comp, emp: { nome: E.emp.nome, cnpj: E.emp.cnpj, logo: E.emp.logo }, cor: corDoCliente(),
-      textos: textosDoCliente(comp), editavel, emissao: U.dataHoraLocal(U.agoraISO()).slice(0, 10), formato: { casas: E.casas, milhar: E.milhar } });
+      textos: textosDoCliente(comp), editavel, emissao: U.dataHoraLocal(U.agoraISO()).slice(0, 10), formato: { casas: E.casas, milhar: E.milhar },
+      ocultas: textosDoCliente(comp).ocultas || [] });
     if (editavel) E.ultimoCliente = r.textos;
     return r;
   }
@@ -745,6 +757,7 @@
     const barra = '<div class="rc-barra nao-imprimir">' +
       '<label>Mês do relatório <select class="apres-campo" id="rc-mes">' + ms.map((m) => '<option value="' + m.comp + '"' + (m.comp === comp ? ' selected' : '') + '>' + T.esc(m.rotulo) + '</option>').join('') + '</select></label>' +
       '<span class="rc-par">' + T.esc(par) + ' · ' + r.paginas + ' folhas</span>' +
+      (r.tiradas.length ? '<span class="rc-tiradas"><span class="suave pequeno">Tiradas:</span>' + r.tiradas.map((x) => '<button type="button" class="botao pequeno" data-rc-mostrar="' + T.esc(x.id) + '" title="Pôr de volta no relatório">↺ ' + T.esc(x.rotulo) + '</button>').join('') + '</span>' : '') +
       (E.emp.logo ? '<img class="rc-logo-mini" src="' + T.esc(E.emp.logo) + '" alt="Logo da empresa">' : '<span class="rc-sem-logo">sem logo</span>') +
       '<button type="button" class="botao pequeno" data-rc="logo">🖼 ' + (E.emp.logo ? 'Trocar o logo' : 'Colocar o logo da empresa') + '</button>' +
       (E.emp.logo ? '<button type="button" class="botao pequeno" data-rc="tirar-logo">Tirar o logo</button>' : '') +

@@ -39,7 +39,7 @@
   }
 
   // Sinônimos (Parte 5.2). Cada lista em ordem de preferência.
-  // "complhis" (complemento do histórico) vem ANTES de "historico": no razão da Univale o
+  // "complhis" (complemento do histórico) vem ANTES de "historico": no razão de um cliente o
   // texto de verdade está no COMPLHIS (14/09/2026, Dony); nos desenhos A/B não existe COMPLHIS,
   // então "historico" continua ganhando.
   // Razão de adiantamento de um cliente real (15/09/2026, desenho D): "Cont. Contábil | [nome da conta,

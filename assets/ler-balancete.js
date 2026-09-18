@@ -113,9 +113,11 @@
     if (!m) return null;
     return { codigo: m[1].replace(/-/g, '.'), resto: (m[2] || '').trim() };
   }
+  // Célula de D/C ao lado de um valor: "D", "C" ou "-" (valor zero, sem lado).
+  const ehMarca = (v) => !vazio(v) && /^[DC\-–—]$/i.test(String(v).trim());
   // Valor em centavos e o lado escrito na própria célula ("1.234,56 D" / "C"). null = não é número.
   function lerValor(v) {
-    if (vazio(v)) return { centavos: 0, vazio: true, lado: null };
+    if (vazio(v) || /^[-–—]$/.test(String(v).trim())) return { centavos: 0, vazio: true, lado: null };
     const n = Util.paraNumero(v);
     if (n === null) return null;
     const s = typeof v === 'number' ? '' : String(v).trim().toUpperCase();
@@ -143,6 +145,36 @@
       }
     }
     return null;
+  }
+
+  // Cabeçalho torto (Dony, 18/09/2026, balancete de outro cliente: o título "Débito período" em cima da
+  // coluna do D/C do saldo anterior e o número do débito na coluna do lado): cada campo de valor vai para a
+  // coluna de números mais perto (a própria, a da direita ou a da esquerda) e a coluna de D/C colada no
+  // saldo vira o lado dele.
+  function alinhar(linhas, inicio, m) {
+    const amostra = linhas.slice(inicio, inicio + 500).filter((l) => l && lerCodigo(l[m.conta]));
+    if (!amostra.length) return m;
+    const perfil = new Map();
+    const de = (i) => {
+      if (perfil.has(i)) return perfil.get(i);
+      let cheia = 0, num = 0, marca = 0, lado = 0;
+      amostra.forEach((l) => { const v = l[i]; if (vazio(v)) return; cheia++; if (ehMarca(v)) { marca++; if (ladoCelula(v)) lado++; } else if (Util.paraNumero(v) !== null) num++; });
+      const p = { numerica: cheia > 0 && num >= cheia * 0.7, marcas: cheia > 0 && lado > 0 && marca >= cheia * 0.8 };
+      perfil.set(i, p);
+      return p;
+    };
+    const out = Object.assign({}, m);
+    const usadas = () => new Set(['conta', 'titulo', 'reduzido', 'saldoAnterior', 'debitos', 'creditos', 'saldoAtual'].map((k) => out[k]).filter((i) => i !== undefined));
+    ['saldoAnterior', 'debitos', 'creditos', 'saldoAtual'].forEach((k) => {
+      const i = out[k];
+      if (i === undefined || de(i).numerica) return;
+      const livres = usadas();
+      if (de(i + 1).numerica && !livres.has(i + 1)) out[k] = i + 1;
+      else if (i > 0 && de(i - 1).numerica && !livres.has(i - 1)) out[k] = i - 1;
+    });
+    if (out.dcAnterior === undefined && out.saldoAnterior !== undefined && de(out.saldoAnterior + 1).marcas) out.dcAnterior = out.saldoAnterior + 1;
+    if (out.dcAtual === undefined && out.saldoAtual !== undefined && de(out.saldoAtual + 1).marcas) out.dcAtual = out.saldoAtual + 1;
+    return out;
   }
 
   function reconhecer(abas) {
@@ -207,17 +239,18 @@
       const nums = [], dcs = [];
       for (let i = colConta + 1; i < nCols; i++) {
         if (i === colTitulo) continue;
-        let cheias = 0, numeros = 0, marcas = 0, inteiros = 0;
+        let cheias = 0, numeros = 0, marcas = 0, ladosDC = 0, inteiros = 0;
         const distintos = new Set();
         comConta.forEach((r) => {
           const v = linhas[r][i];
           if (vazio(v)) return;
           cheias++;
-          if (ladoCelula(v)) { marcas++; return; }
+          if (ehMarca(v)) { marcas++; if (ladoCelula(v)) ladosDC++; return; }
           const n = Util.paraNumero(v);
           if (n !== null) { numeros++; distintos.add(n); if (Number.isInteger(n)) inteiros++; }
         });
-        if (marcas && marcas >= cheias * 0.8) { dcs.push(i); continue; }
+        // Coluna de D/C: "D", "C" e "-" (zero), com pelo menos um D ou C.
+        if (ladosDC && marcas >= cheias * 0.8) { dcs.push(i); continue; }
         if (numeros < comConta.length * 0.3 || numeros < cheias * 0.7) continue;
         if (inteiros === numeros && numeros >= 10 && distintos.size >= numeros * 0.95) continue; // código reduzido, não valor
         nums.push(i);
@@ -261,13 +294,28 @@
     return { aba: Number.isInteger(mapa.aba) && abas[mapa.aba] ? mapa.aba : 0, colunas, inicio: 0, como: 'mapa' };
   }
 
-  // Empresa, CNPJ e período escritos acima das contas.
+  const MESES_LONGOS = ['janeiro', 'fevereiro', 'marco', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'];
+  // Empresa, CNPJ e período escritos acima das contas. Também no desenho em que o rótulo fica numa célula e
+  // o valor na seguinte ("Empresa | NOME DA EMPRESA", "CNPJ: | 00.000…", "Ano: | 2026") e o mês vem por extenso
+  // ("Balancete - Julho").
   function topo(linhas, ate) {
     const r = { empresa: '', cnpj: '', periodo: null };
+    let mesExtenso = 0, ano = 0;
     for (let i = 0; i < ate; i++) {
-      for (const c of linhas[i] || []) {
-        if (c === null || c === undefined) continue;
-        const t = String(c).replace(/\s+/g, ' ').trim();
+      const celulas = (linhas[i] || []).map((c) => (c === null || c === undefined ? '' : String(c).replace(/\s+/g, ' ').trim()));
+      const seguinte = (k) => { for (let j = k + 1; j < celulas.length; j++) if (celulas[j]) return celulas[j]; return ''; };
+      celulas.forEach((t, k) => {
+        if (!t) return;
+        const s = Util.semAcento(t).toLowerCase().replace(/[:.]+$/, '').trim();
+        if (/^c\.?n\.?p\.?j\.?(\s*\(mf\))?$/.test(s)) { const d = Util.soDigitos(seguinte(k)); if (d.length === 14 && !r.cnpj) r.cnpj = d; }
+        if (/^(empresa|razao social|nome da empresa)$/.test(s) && !r.empresa) r.empresa = seguinte(k);
+        if (/^(ano|exercicio)$/.test(s)) { const a = Number(seguinte(k)); if (a >= 2000 && a <= 2100) ano = a; }
+        const m = MESES_LONGOS.indexOf(s);
+        if (m >= 0) mesExtenso = m + 1;
+        const mAno = s.match(/^(janeiro|fevereiro|marco|abril|maio|junho|julho|agosto|setembro|outubro|novembro|dezembro)\s*(?:\/|de)?\s*(20\d{2})$/);
+        if (mAno) { mesExtenso = MESES_LONGOS.indexOf(mAno[1]) + 1; ano = Number(mAno[2]); }
+      });
+      for (const t of celulas) {
         if (!t) continue;
         const s = Util.semAcento(t);
         const per = s.match(/periodo\s*:?\s*(?:de\s*)?(\d{1,2}\/\d{1,2}\/\d{2,4})\s*(?:a|ate|-)\s*(\d{1,2}\/\d{1,2}\/\d{2,4})/i) ||
@@ -275,8 +323,15 @@
         if (per) { const de = Util.lerData(per[1]), ateD = Util.lerData(per[2]); if (de && ateD) r.periodo = { de: de.texto, ate: ateD.texto }; continue; }
         const cnpj = s.match(/cnpj\s*:?\s*([\d./-]{14,18})/i);
         if (cnpj) { r.cnpj = Util.soDigitos(cnpj[1]); continue; }
-        if (!r.empresa && !/emissao|pagina|folha|balancete|periodo|data/i.test(s) && /[a-z]/i.test(s)) r.empresa = t;
+        const rotulo = s.toLowerCase().replace(/[:.]+$/, '').trim();
+        const ehRotulo = /^(empresa|razao social|nome da empresa|ano|exercicio|pag|pagina|folha|data|cnpj|c\.?n\.?p\.?j\.?(\s*\(mf\))?)$/.test(rotulo) || MESES_LONGOS.indexOf(rotulo) >= 0;
+        if (!r.empresa && !ehRotulo && !/emissao|pagina|folha|balancete|periodo|data:/i.test(s) && /[a-z]{3}/i.test(s)) r.empresa = t;
       }
+    }
+    // Mês por extenso + ano ("Balancete - Julho" … "Ano: 2026"): o mês inteiro.
+    if (!r.periodo && mesExtenso && ano) {
+      const comp = ano + '-' + String(mesExtenso).padStart(2, '0') + '-01';
+      r.periodo = { de: Util.inicioDaCompetencia(comp).texto, ate: Util.fimDaCompetencia(comp).texto };
     }
     return r;
   }
@@ -294,6 +349,80 @@
     const mudou = contas.some((c) => novo.get(c.conta) !== c.conta);
     contas.forEach((c) => { c.conta = novo.get(c.conta); });
     return mudou;
+  }
+
+  // A árvore (c.pai e c.nivel). Três jeitos de código:
+  //  - com pontos ("1.1.01.001"): a mãe é o código sem o último pedaço;
+  //  - sem pontos ("1101001"): a mãe é o maior código do balancete que é o começo dele (ganha os pontos);
+  //  - máscara com número sequencial no fim ("1.1.1.01.00005", todos com o mesmo número de pedaços e a
+  //    mãe "1.1.1.01" não existe como conta): o caminho é o código sem o último pedaço e sem os pedaços
+  //    zerados do fim ("1.1.0.00.00002" -> "1.1"); a primeira conta de cada caminho é a sintética dele, e
+  //    as seguintes com o mesmo caminho são as filhas (analíticas). A conta continua com o código do arquivo.
+  function montarArvore(contas) {
+    if (!contas.length) return 'vazia';
+    if (pontuar(contas)) { porPontos(contas); return 'sem-pontos'; }
+    const conj = new Set(contas.map((c) => c.conta));
+    const comPonto = contas.filter((c) => c.conta.indexOf('.') > 0);
+    const comMae = comPonto.filter((c) => conj.has(c.conta.slice(0, c.conta.lastIndexOf('.')))).length;
+    if (comPonto.length && comMae >= comPonto.length * 0.3) { porPontos(contas); return 'pontos'; }
+    // A mãe não existe como conta (máscara com número sequencial no fim, ou código sem árvore): pelo RECUO do
+    // nome (o sistema imprime cada nível mais para dentro) e pela máscara; fica o que faz mais contas-mãe
+    // baterem com a soma das filhas (o recuo ganha no empate: é o jeito que o próprio sistema mostra).
+    const candidatas = [];
+    const recuo = arvorePeloRecuo(contas);
+    if (recuo) candidatas.push({ jeito: 'recuo', arvore: recuo });
+    const mascara = arvorePelaMascara(contas);
+    if (mascara) candidatas.push({ jeito: 'mascara', arvore: mascara });
+    if (!candidatas.length) { contas.forEach((c) => { c.nivel = 1; c.pai = ''; }); return 'plana'; }
+    candidatas.forEach((x) => { x.erradas = maesQueNaoBatem(contas, x.arvore); });
+    candidatas.sort((a, b) => a.erradas - b.erradas);
+    const escolhida = candidatas[0];
+    contas.forEach((c, i) => { c.pai = escolhida.arvore[i].pai; c.nivel = escolhida.arvore[i].nivel; });
+    return escolhida.jeito;
+  }
+  // Pelo recuo do nome (espaços no começo): os recuos diferentes, em ordem, são os níveis; a mãe é a
+  // última conta do nível de cima. Só vale com pelo menos dois recuos diferentes.
+  function arvorePeloRecuo(contas) {
+    const recuos = Array.from(new Set(contas.map((c) => c.recuo || 0))).sort((a, b) => a - b);
+    if (recuos.length < 2) return null;
+    const nivelDe = new Map(recuos.map((r, i) => [r, i + 1]));
+    const pilha = [];
+    return contas.map((c) => {
+      const nivel = nivelDe.get(c.recuo || 0);
+      pilha.length = nivel - 1;
+      let mae = null;
+      for (let n = nivel - 2; n >= 0 && !mae; n--) mae = pilha[n] || null;
+      pilha[nivel - 1] = c;
+      return { nivel: mae ? nivel : 1, pai: mae ? mae.conta : '' };
+    });
+  }
+  // Pela máscara ("1.1.1.01.00005", todos com o mesmo número de pedaços): o caminho é o código sem o último
+  // pedaço e sem os pedaços zerados do fim; a primeira conta de cada caminho é a sintética dele.
+  function arvorePelaMascara(contas) {
+    const nSeg = contas[0].conta.split('.').length;
+    if (nSeg < 3 || !contas.every((c) => c.conta.split('.').length === nSeg)) return null;
+    const noDoCaminho = new Map();
+    const arvore = [];
+    contas.forEach((c, i) => {
+      const seg = c.conta.split('.').slice(0, -1);
+      while (seg.length > 1 && /^0+$/.test(seg[seg.length - 1])) seg.pop();
+      const caminho = seg.join('.');
+      const no = noDoCaminho.get(caminho);
+      if (no) { arvore[i] = { pai: no.c.conta, nivel: no.nivel + 1 }; return; }
+      let mae = null;
+      for (let n = seg.length - 1; n >= 1 && !mae; n--) mae = noDoCaminho.get(seg.slice(0, n).join('.')) || null;
+      arvore[i] = { pai: mae ? mae.c.conta : '', nivel: mae ? mae.nivel + 1 : 1 };
+      noDoCaminho.set(caminho, { c, nivel: arvore[i].nivel });
+    });
+    return arvore;
+  }
+  function maesQueNaoBatem(contas, arvore) {
+    const somas = new Map();
+    contas.forEach((c, i) => { const p = arvore[i].pai; if (p) somas.set(p, (somas.get(p) || 0) + c.saldoAtual); });
+    return contas.filter((c) => somas.has(c.conta) && Math.abs(somas.get(c.conta) - c.saldoAtual) > 1).length;
+  }
+  function porPontos(contas) {
+    contas.forEach((c) => { const partes = c.conta.split('.'); c.nivel = partes.length; c.pai = partes.length > 1 ? partes.slice(0, -1).join('.') : ''; });
   }
 
   // Saldo sem sinal nem D/C: o lado de cada saldo é o que fecha a conta (anterior + débitos − créditos =
@@ -352,13 +481,18 @@
       if (lf) sf = Math.abs(sf) * lf;
       if (la || lf || va.lado || vf.lado) comLado++;
       if (sa < 0 || sf < 0) negativos++;
+      // Recuo do nome (espaços no começo): em alguns sistemas é o que diz o nível da conta.
+      const brutoNome = col.titulo !== undefined && typeof l[col.titulo] === 'string' ? l[col.titulo] : typeof l[col.conta] === 'string' ? l[col.conta] : '';
       contas.push({ conta: cod.codigo, reduzido: texto(l, col.reduzido), titulo: tit || cod.resto, nivel: 1, pai: '', analitica: true,
-        saldoAnterior: sa, debitos: Math.abs(vd.centavos), creditos: Math.abs(vc.centavos), saldoAtual: sf });
+        saldoAnterior: sa, debitos: Math.abs(vd.centavos), creditos: Math.abs(vc.centavos), saldoAtual: sf, recuo: brutoNome.match(/^\s*/)[0].length });
     }
     const avisos = [];
-    // Código sem pontos: a hierarquia sai das próprias contas.
-    if (pontuar(contas)) avisos.push('Os códigos das contas vieram sem pontos: a hierarquia saiu das próprias contas do balancete (a conta-mãe é o maior código que é o começo da filha).');
-    contas.forEach((c) => { const partes = c.conta.split('.'); c.nivel = partes.length; c.pai = partes.length > 1 ? partes.slice(0, -1).join('.') : ''; });
+    // A árvore das contas (mãe e nível): pelos pontos do código, pelo começo do código (sem pontos) ou pela
+    // máscara com número sequencial no fim.
+    const arvore = montarArvore(contas);
+    contas.forEach((c) => { delete c.recuo; });
+    if (arvore === 'sem-pontos') avisos.push('Os códigos das contas vieram sem pontos: a hierarquia saiu das próprias contas do balancete (a conta-mãe é o maior código que é o começo da filha).');
+    if (arvore === 'plana') avisos.push('Não deu para montar a árvore das contas pelo código (todas ficaram no 1º nível).');
     // Saldo sem sinal nenhum (nem D/C): o lado sai da própria conta.
     const semSinal = !comLado && !negativos && contas.some((c) => c.saldoAnterior || c.saldoAtual);
     if (semSinal) {
@@ -423,7 +557,11 @@
     }
     const leituras = [];
     const cab = acharCabecalho(abas);
-    if (cab) leituras.push(montar(abas, { aba: cab.aba, inicio: cab.linha + cab.altura, linhaCabecalho: cab.linha, colunas: cab.mapa, como: 'cabecalho' }, op));
+    if (cab) {
+      const inicio = cab.linha + cab.altura;
+      const colunas = alinhar(abas[cab.aba].linhas || [], inicio, cab.mapa);
+      leituras.push(montar(abas, { aba: cab.aba, inicio, linhaCabecalho: cab.linha, colunas, como: 'cabecalho' }, op));
+    }
     if (op.inferir && !leituras.some((x) => x.qualidade >= 0.9 && x.contas.length >= 3)) {
       const inf = inferir(abas);
       if (inf) leituras.push(montar(abas, inf, op));
@@ -437,7 +575,7 @@
   // "Balancete_07_2026" / "07.2026" / "jan_26" / "janeiro 2026" -> 'AAAA-MM-01'.
   function competenciaPeloNome(nome) {
     const s = Util.semAcento(String(nome || '')).toLowerCase();
-    let m = s.match(/(?:^|[^\d])(0[1-9]|1[0-2])[.\-_ /](20\d{2})(?!\d)/);
+    let m = s.match(/(?:^|[^\d])(0[1-9]|1[0-2])[.\-_ /]?(20\d{2})(?!\d)/); // "07_2026", "07.2026", "072026"
     if (m) return m[2] + '-' + m[1] + '-01';
     m = s.match(/(?:^|[^a-z])(jan|fev|mar|abr|mai|jun|jul|ago|set|out|nov|dez)[a-z]*[.\-_ /]*(20\d{2}|\d{2})(?!\d)/);
     if (m) { const ano = m[2].length === 2 ? '20' + m[2] : m[2]; return ano + '-' + String(MESES_CURTOS.indexOf(m[1]) + 1).padStart(2, '0') + '-01'; }

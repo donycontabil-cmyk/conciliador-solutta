@@ -27,6 +27,10 @@
   // Indicadores da tabela da seção 5.
   const INDICADORES_TABELA = ['liquidezCorrente', 'liquidezSeca', 'liquidezImediata', 'liquidezGeral', 'margemBruta', 'margemOperacional', 'margemEbitda',
     'margemLiquida', 'endividamento', 'composicao', 'roi', 'roe'];
+  // Partes que dá para tirar do relatório (Dony, 18/09/2026: "poder excluir itens ou adicionar itens — os
+  // tributos sobre o lucro não fazem sentido com o trimestre ainda aberto"). Gráfico de grupo: 'grupo:<id>'.
+  const NOMES_PARTES = { sumario: 'Sumário executivo', faturamento: 'Faturamento e lucro bruto', grupos: 'Evolução dos grupos da DRE', resultados: 'Principais resultados',
+    indicadores: 'Indicadores', favoraveis: 'Maiores variações favoráveis', pressoes: 'Maiores pressões', tributos: 'Tributos sobre o lucro', recomendacoes: 'Recomendações' };
   // Textos que valem para todos os meses (os outros são de cada mês).
   const TEXTOS_FIXOS = ['nome', 'titulo', 'subtitulo'];
 
@@ -378,7 +382,10 @@
     let secao = 0;
     const cabecalho = (titulo) => '<div class="rc-topo-faixa"></div><header class="rc-cab"><div><div class="rc-cab-empresa">' + texto('nome', 'span', 'rc-nome') +
       ' | ANÁLISE GERENCIAL</div><h2>' + esc(titulo) + '</h2></div>' + logo + '</header>';
-    const pagina = (titulo, corpo) => paginas.push('<section class="rc-pagina">' + cabecalho(titulo) + '<div class="rc-corpo">' + corpo + '</div><div class="rc-numero">Página {{N}} de {{T}}</div></section>');
+    const oculta = new Set(op.ocultas || []);
+    const mostra = (id) => !oculta.has(id);
+    const botaoTirar = (id, texto) => (ed ? '<button type="button" class="rc-so-tela rc-tirar-parte" data-rc-ocultar="' + id + '" title="Tirar do relatório (dá para pôr de volta na barra de cima)">✕ ' + (texto || 'Tirar esta parte') + '</button>' : '');
+    const pagina = (titulo, corpo, parte) => paginas.push('<section class="rc-pagina">' + (parte ? botaoTirar(parte) : '') + cabecalho(titulo) + '<div class="rc-corpo">' + corpo + '</div><div class="rc-numero">Página {{N}} de {{T}}</div></section>');
     const leitura = (id) => {
       const agora = D.val(id, D.k), antes = D.a >= 0 ? D.val(id, D.a) : null;
       const vv = variacao(agora, antes);
@@ -405,39 +412,48 @@
       return '<div class="rc-cartao"><span>' + esc(rotulo) + '</span><b>' + rsV(agora) + '</b>' +
         (vv ? '<small class="' + classeVar(vv.d) + '">' + rsV(vv.d) + ' | ' + (vv.p === null ? 'n/a' : pctSinal(vv.p)) + '</small>' : '<small class="rc-neutro">sem mês anterior</small>') + '</div>';
     };
-    secao++;
-    pagina(secao + '. Sumário executivo', '<div class="rc-cartoes">' + cartao('receitaBruta', 'Receita bruta de vendas') + cartao('receitaLiquida', 'Receita líquida') +
-      cartao('lucroBruto', 'Lucro bruto') + cartao('ebitda', 'EBITDA gerencial') + cartao('lucroOperacional', 'Lucro ou prejuízo operacional') +
-      cartao('lucroLiquido', 'Lucro ou prejuízo líquido do período') + '</div>' +
-      '<div class="rc-caixa"><div class="rc-caixa-titulo">Leitura central</div>' + texto('leitura', 'div', '') + '</div>' +
-      ((T.prioridades || []).length || ed ? '<h3 class="rc-h3">Prioridades gerenciais</h3>' + bolinhas('prioridades') : ''));
+    if (mostra('sumario')) {
+      secao++;
+      pagina(secao + '. Sumário executivo', '<div class="rc-cartoes">' + cartao('receitaBruta', 'Receita bruta de vendas') + cartao('receitaLiquida', 'Receita líquida') +
+        cartao('lucroBruto', 'Lucro bruto') + cartao('ebitda', 'EBITDA gerencial') + cartao('lucroOperacional', 'Lucro ou prejuízo operacional') +
+        cartao('lucroLiquido', 'Lucro ou prejuízo líquido do período') + '</div>' +
+        '<div class="rc-caixa"><div class="rc-caixa-titulo">Leitura central</div>' + texto('leitura', 'div', '') + '</div>' +
+        ((T.prioridades || []).length || ed ? '<h3 class="rc-h3">Prioridades gerenciais</h3>' + bolinhas('prioridades') : ''), 'sumario');
+    }
 
     // 2. Faturamento e lucro bruto
-    secao++;
-    pagina(secao + '. Faturamento e lucro bruto', graficoDe('receitaBruta', 'Receita bruta de vendas') + leitura('receitaBruta') +
-      '<div class="rc-espaco"></div>' + graficoDe('lucroBruto', 'Lucro bruto') + leitura('lucroBruto') +
-      '<div class="rc-empurra"></div><div class="rc-caixa">' + texto('faturamento', 'div', '') + '</div>');
+    if (mostra('faturamento')) {
+      secao++;
+      pagina(secao + '. Faturamento e lucro bruto', graficoDe('receitaBruta', 'Receita bruta de vendas') + leitura('receitaBruta') +
+        '<div class="rc-espaco"></div>' + graficoDe('lucroBruto', 'Lucro bruto') + leitura('lucroBruto') +
+        '<div class="rc-empurra"></div><div class="rc-caixa">' + texto('faturamento', 'div', '') + '</div>', 'faturamento');
+    }
 
     // 3. Evolução dos grupos da DRE (dois por folha)
-    secao++;
-    const nGrupo = secao;
-    for (let i = 0; i < D.grupos.length; i += 2) {
-      pagina(nGrupo + '. Evolução dos grupos da DRE', D.grupos.slice(i, i + 2).map((g, j) => {
-        const nome = g.rotulo.replace(/^\(-\)\s*/, '');
-        return (j ? '<div class="rc-espaco"></div>' : '') + '<h3 class="rc-sub">' + nGrupo + '.' + (i + j + 1) + '. ' + esc(nome.charAt(0).toUpperCase() + nome.slice(1)) + '</h3>' +
-          graficoDe(g.id, g.rotulo) + leitura(g.id);
-      }).join(''));
+    const gruposVisiveis = D.grupos.filter((g) => mostra('grupo:' + g.id));
+    if (mostra('grupos') && gruposVisiveis.length) {
+      secao++;
+      const nGrupo = secao;
+      for (let i = 0; i < gruposVisiveis.length; i += 2) {
+        pagina(nGrupo + '. Evolução dos grupos da DRE', gruposVisiveis.slice(i, i + 2).map((g, j) => {
+          const nome = g.rotulo.replace(/^\(-\)\s*/, '');
+          return (j ? '<div class="rc-espaco"></div>' : '') + '<h3 class="rc-sub">' + nGrupo + '.' + (i + j + 1) + '. ' + esc(nome.charAt(0).toUpperCase() + nome.slice(1)) +
+            (ed ? ' <button type="button" class="rc-so-tela rc-tirar" data-rc-ocultar="grupo:' + g.id + '" title="Tirar só este gráfico">✕</button>' : '') + '</h3>' +
+            graficoDe(g.id, g.rotulo) + leitura(g.id);
+        }).join(''), 'grupos');
+      }
     }
 
     // 4. Principais resultados (quatro gráficos)
-    secao++;
     const pequeno = { largura: 340, altura: 250, fonte: 12, curtos: D.rotulos.length > 5 };
-    pagina(secao + '. Evolução mensal dos principais resultados', '<div class="rc-grade4">' + graficoDe('receitaLiquida', 'Receita líquida', pequeno) +
-      graficoDe('ebitda', 'EBITDA gerencial', pequeno) + graficoDe('lucroOperacional', 'Lucro ou prejuízo operacional', pequeno) +
-      graficoDe('antesTributos', 'Lucro antes do IRPJ e da CSLL', pequeno) + '</div><div class="rc-empurra"></div><div class="rc-caixa">' + texto('resultados', 'div', '') + '</div>');
+    if (mostra('resultados')) {
+      secao++;
+      pagina(secao + '. Evolução mensal dos principais resultados', '<div class="rc-grade4">' + graficoDe('receitaLiquida', 'Receita líquida', pequeno) +
+        graficoDe('ebitda', 'EBITDA gerencial', pequeno) + graficoDe('lucroOperacional', 'Lucro ou prejuízo operacional', pequeno) +
+        graficoDe('antesTributos', 'Lucro antes do IRPJ e da CSLL', pequeno) + '</div><div class="rc-empurra"></div><div class="rc-caixa">' + texto('resultados', 'div', '') + '</div>', 'resultados');
+    }
 
     // 5. Indicadores
-    secao++;
     const linhaInd = (id) => {
       const x = D.indicador(id);
       if (!x.l) return '';
@@ -449,33 +465,45 @@
       return '<tr><td><b>' + esc(x.l.rotulo) + '</b></td>' + (D.mesA ? '<td class="num">' + fmt(x.antes) + '</td>' : '') + '<td class="num">' + fmt(x.agora) + '</td><td class="num">' + dTxt + '</td>' +
         '<td class="rc-centro"><b class="' + (bom === null ? 'rc-neutro' : bom ? 'rc-bom' : 'rc-ruim') + '">' + (d === null ? '—' : bom === null ? 'Estável' : bom ? 'Melhora' : 'Piora') + '</b></td></tr>';
     };
-    pagina(secao + '. Indicadores financeiros e patrimoniais', '<table class="rc-tabela rc-tabela-ind"><thead><tr><th>Índice</th>' + (D.mesA ? '<th class="num">' + esc(D.mesA.rotulo) + '</th>' : '') +
-      '<th class="num">' + esc(D.mesK.rotulo) + '</th><th class="num">Variação</th><th class="rc-centro">Leitura</th></tr></thead><tbody>' + INDICADORES_TABELA.map(linhaInd).join('') + '</tbody></table>' +
-      '<p class="rc-nota">PL* = ativo total − passivo circulante − passivo não circulante. Balanço pelo saldo do fim do mês; resultado pelo movimento do mês.</p>' +
-      '<div class="rc-empurra"></div><div class="rc-caixa">' + texto('indicadores', 'div', '') + '</div>');
+    if (mostra('indicadores')) {
+      secao++;
+      pagina(secao + '. Indicadores financeiros e patrimoniais', '<table class="rc-tabela rc-tabela-ind"><thead><tr><th>Índice</th>' + (D.mesA ? '<th class="num">' + esc(D.mesA.rotulo) + '</th>' : '') +
+        '<th class="num">' + esc(D.mesK.rotulo) + '</th><th class="num">Variação</th><th class="rc-centro">Leitura</th></tr></thead><tbody>' + INDICADORES_TABELA.map(linhaInd).join('') + '</tbody></table>' +
+        '<p class="rc-nota">PL* = ativo total − passivo circulante − passivo não circulante. Balanço pelo saldo do fim do mês; resultado pelo movimento do mês.</p>' +
+        '<div class="rc-empurra"></div><div class="rc-caixa">' + texto('indicadores', 'div', '') + '</div>', 'indicadores');
+    }
 
     // 6 e 7. Maiores variações por conta
     const tabelaContas = (xs) => '<table class="rc-tabela rc-tabela-contas"><thead><tr><th>Conta</th><th>Descrição</th>' + (D.mesA ? '<th class="num">' + esc(D.mesA.rotulo) + '</th>' : '') +
       '<th class="num">' + esc(D.mesK.rotulo) + '</th><th class="num">Variação</th></tr></thead><tbody>' +
       (xs.length ? xs.map((x) => '<tr><td>' + esc(x.conta) + '</td><td>' + esc(x.titulo) + '</td>' + (D.mesA ? '<td class="num">' + rsV(x.antes) + '</td>' : '') + '<td class="num">' + rsV(x.agora) + '</td>' +
         '<td class="num"><b class="' + classeVar(x.d) + '">' + rsV(x.d) + '</b></td></tr>').join('') : '<tr><td colspan="5" class="rc-neutro">Nenhuma conta nesta situação.</td></tr>') + '</tbody></table>';
-    if (D.mesA) {
+    if (D.mesA && mostra('favoraveis')) {
       secao++;
-      pagina(secao + '. Maiores variações favoráveis por conta', tabelaContas(D.favoraveis) + '<div class="rc-empurra"></div><div class="rc-caixa">' + texto('favoraveis', 'div', '') + '</div>');
+      pagina(secao + '. Maiores variações favoráveis por conta', tabelaContas(D.favoraveis) + '<div class="rc-empurra"></div><div class="rc-caixa">' + texto('favoraveis', 'div', '') + '</div>', 'favoraveis');
+    }
+    if (D.mesA && mostra('pressoes')) {
       secao++;
-      pagina(secao + '. Maiores pressões sobre o resultado', tabelaContas(D.pressoes) + '<div class="rc-empurra"></div><div class="rc-caixa">' + texto('pressoes', 'div', '') + '</div>');
+      pagina(secao + '. Maiores pressões sobre o resultado', tabelaContas(D.pressoes) + '<div class="rc-empurra"></div><div class="rc-caixa">' + texto('pressoes', 'div', '') + '</div>', 'pressoes');
     }
 
-    // 8. Tributos sobre o lucro e recomendações
+    // 8. Tributos sobre o lucro e recomendações (cada bloco sai sozinho; os critérios ficam sempre)
+    const temFiscal = mostra('tributos'), temRecom = mostra('recomendacoes');
     secao++;
-    pagina(secao + '. Tributos sobre o lucro e recomendações', '<div class="rc-caixa"><div class="rc-caixa-titulo">Ponto de atenção fiscal</div>' + texto('fiscal', 'div', '') + '</div>' +
-      recomendacoes() + '<div class="rc-empurra"></div><div class="rc-caixa rc-caixa-cinza"><div class="rc-h4">Critérios e limitações</div>' + texto('criterios', 'div', 'rc-pequeno') +
+    pagina(secao + '. ' + (temFiscal && temRecom ? 'Tributos sobre o lucro e recomendações' : temFiscal ? 'Tributos sobre o lucro' : temRecom ? 'Recomendações' : 'Critérios e limitações'),
+      (temFiscal ? '<div class="rc-caixa rc-bloco">' + botaoTirar('tributos', 'Tirar') + '<div class="rc-caixa-titulo">Ponto de atenção fiscal</div>' + texto('fiscal', 'div', '') + '</div>' : '') +
+      (temRecom ? '<div class="rc-bloco">' + botaoTirar('recomendacoes', 'Tirar') + recomendacoes() + '</div>' : '') +
+      '<div class="rc-empurra"></div><div class="rc-caixa rc-caixa-cinza"><div class="rc-h4">Critérios e limitações</div>' + texto('criterios', 'div', 'rc-pequeno') +
       '<div class="rc-fonte">Fonte: balancetes de ' + esc(D.meses.find((m) => m.tem).rotulo) + ' a ' + esc(D.mesK.rotulo) + ' · Conciliador Solutta</div></div>');
 
     const total = paginas.length;
     const html = '<div class="rc" style="--rc-cor:' + cor + ';--rc-clara:' + misturar(cor, 0.9) + ';--rc-media:' + misturar(cor, 0.75) + '">' +
       paginas.map((p, i) => p.replace('{{N}}', String(i + 1)).replace('{{T}}', String(total))).join('') + '</div>';
-    return { html, paginas: total, auto, textos: T, dados: D };
+    const tiradas = Array.from(oculta).map((id) => {
+      const g = id.indexOf('grupo:') === 0 ? D.grupos.find((x) => 'grupo:' + x.id === id) : null;
+      return { id, rotulo: g ? 'Gráfico: ' + g.rotulo.replace(/^\(-\)\s*/, '') : NOMES_PARTES[id] || id };
+    });
+    return { html, paginas: total, auto, textos: T, dados: D, tiradas };
   }
 
   return { montar, textosAutomaticos, prepararDados, grafico, corDoLogo, nomeCurto, misturar, TEXTOS_FIXOS, GRUPOS, INDICADORES_TABELA, COR_PADRAO };

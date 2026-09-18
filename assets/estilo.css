@@ -841,6 +841,12 @@ table.rc-tabela-contas { font-size: 7.6pt; }
 .rc-so-tela { font: inherit; font-size: 11px; line-height: 1; padding: 3px 7px; border: 1px solid #c9ced6; border-radius: 4px; background: #fff; color: #56606c; cursor: pointer; }
 .rc-so-tela:hover { border-color: #2f4a64; color: #2f4a64; }
 .rc-tirar { margin-left: 4px; color: #b3261e; padding: 1px 5px; vertical-align: 1px; }
+/* Tirar uma parte do relatório (na prévia) e a lista das tiradas (na barra) */
+.rc-tirar-parte { position: absolute; top: 5mm; right: 17mm; z-index: 2; color: #b3261e; }
+.rc-bloco { position: relative; }
+.rc-bloco > .rc-tirar-parte { top: 2mm; right: 2mm; }
+.rc-sub .rc-tirar { font-size: 10px; }
+.rc-tiradas { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .rc-mais { margin: 1mm 0 0 7mm; }
 .rc-pagina.rc-estourou { outline: 3px solid #c0392b; outline-offset: 3px; }
 
