@@ -313,36 +313,102 @@
     const lalur = montarLalur({ ano, meses, trimestres, porMes, valor, linhaDoMes, indice, dreMensal, cfg });
 
     // ---------- Resumo (contas de 1º nível)
+    // RESUMO (Dony, 18/09/2026: "ativo, passivo, receitas, custos e despesas: somando tudo tem que dar zero —
+    // o resultado é acumulado, o mês anterior mais o atual"): o SALDO de cada conta de 1º nível no fim do mês,
+    // como no balancete (nas de resultado, o acumulado desde o último encerramento). Trimestre: o saldo do
+    // último mês com balancete do trimestre. A linha "soma" tem que dar zero em todas as colunas.
     const primeiroNivel = contas.filter((c) => c.nivel === 1);
-    const ultimoComSaldo = meses.filter((m) => m.tem).slice(-1)[0];
+    const saldoNoMes = (conta, m) => { if (!m || !m.tem) return null; const l = linhaDoMes(conta, m); return l ? l.saldoAtual : 0; };
+    const ultimoDoTrimestre = (tri) => { const com = tri.meses.filter((m) => m.tem); return com[com.length - 1] || null; };
+    const colunasResumo = meses.map((m) => ({ id: m.comp, rotulo: m.rotulo, falta: !m.tem, mes: m }))
+      .concat(trimestres.map((tri) => ({ id: tri.id, rotulo: tri.rotulo, trimestre: true, mes: ultimoDoTrimestre(tri) })));
     const resumo = {
-      colunas: meses.map((m) => ({ id: m.comp, rotulo: m.rotulo, falta: !m.tem }))
-        .concat([{ id: 'acumulado', rotulo: rotuloAcumulado(meses), acumulado: true }])
-        .concat(trimestres.map((t) => ({ id: t.id, rotulo: t.rotulo, trimestre: true }))),
-      linhas: primeiroNivel.map((c) => ({
-        conta: c.conta, titulo: c.titulo, patrimonial: c.patrimonial,
-        valores: meses.map((m) => valor(c.conta, m))
-          // Acumulado: soma dos meses nas de resultado; saldo do último mês nas patrimoniais (somar saldos de
-          // meses diferentes não dá um número que signifique alguma coisa).
-          .concat([c.patrimonial ? (ultimoComSaldo ? valor(c.conta, ultimoComSaldo) : null) : somaDe(meses.map((m) => valor(c.conta, m)))])
-          .concat(trimestres.map((t) => valorTrimestre(c.conta, t))),
-      })),
+      colunas: colunasResumo.map((c) => ({ id: c.id, rotulo: c.rotulo, falta: !!c.falta, trimestre: !!c.trimestre })),
+      linhas: primeiroNivel.map((c) => ({ conta: c.conta, titulo: c.titulo, patrimonial: c.patrimonial, valores: colunasResumo.map((col) => saldoNoMes(c.conta, col.mes)) })),
     };
+    resumo.soma = colunasResumo.map((col, k) => (col.mes && col.mes.tem ? resumo.linhas.reduce((s, l) => s + (l.valores[k] || 0), 0) : null));
+    const balanco = montarBalanco({ meses, contas, linhaDoMes, primeiroNivel, dreMensal });
 
     const avisos = [];
     const faltando = meses.filter((m) => !m.tem).map((m) => m.rotulo);
     if (faltando.length) avisos.push('Falta o balancete de ' + faltando.join(', ') + ': esses meses ficam vazios e os trimestres deles ficam parciais.');
     if (naoMapeadas.length) avisos.push(naoMapeadas.length + ' conta(s) de resultado sem linha no modelo da DRE entraram em "Outras contas de resultado" (' +
       naoMapeadas.slice(0, 3).map((n) => n.conta + ' ' + n.titulo).join('; ') + (naoMapeadas.length > 3 ? '; …' : '') + ').');
+    balanco.colunas.forEach((c, k) => { const d = balanco.conferencia.diferenca[k]; if (d !== null && Math.abs(d) > 1) avisos.push('Em ' + c.rotulo + ' o balanço não fecha: ativo − (passivo + PL + resultado da DRE) = ' + Util.formatarCentavos(d) + '.'); });
     conferencia.filter((c) => c.diferenca).forEach((c) => avisos.push('Em ' + c.mes + ' o lucro da DRE difere do resultado do balancete em ' + Util.formatarCentavos(c.diferenca) + ' (contas fora da DRE).'));
 
     return { ano, meses, trimestres, contas, base, mensal, trimestral, dre: { mensal: dreMensal, trimestral: dreTrimestral, foraDaDre, naoMapeadas, conferencia },
-      lalur, resumo, avisos, faltando };
+      lalur, resumo, balanco, avisos, faltando };
   }
 
   function rotuloAcumulado(meses) {
     if (!meses.length) return 'Acumulado';
     return NOMES_MES[meses[0].mes - 1] + '–' + NOMES_MES[meses[meses.length - 1].mes - 1];
+  }
+
+  // ------------------------------------------------------------------
+  // BALANÇO PATRIMONIAL simulado (Dony, 18/09/2026: "cria um balanço patrimonial e lança no resultado do
+  // exercício um simulado de acordo com a DRE: ativo e passivo têm que bater"). Em cada mês: o ativo; o
+  // passivo; o PL do balancete MAIS o resultado do exercício pela DRE desde o último encerramento (o mês mais
+  // recente em que as contas de resultado começaram zeradas: janeiro, e depois de cada encerramento).
+  // Conferências: ativo − (passivo + PL + resultado) = 0, e o resultado pela DRE = o das contas de resultado
+  // ainda abertas no balancete. Passivo e PL com o saldo credor positivo.
+  // ------------------------------------------------------------------
+  function montarBalanco(x) {
+    const { meses, contas, linhaDoMes, primeiroNivel, dreMensal } = x;
+    const saldo = (conta, m) => { if (!m.tem) return null; const l = linhaDoMes(conta, m); return l ? l.saldoAtual : 0; };
+    const doResultado = primeiroNivel.filter((c) => !patrimonial(c.conta));
+    const lucro = dreMensal.totais.get('lucroLiquido') || [];
+    const desde = meses.map((m, k) => {
+      if (!m.tem) return null;
+      for (let i = k; i >= 0; i--) {
+        if (!meses[i].tem) continue;
+        const abertura = doResultado.reduce((s, c) => { const l = linhaDoMes(c.conta, meses[i]); return s + (l ? l.saldoAnterior : 0); }, 0);
+        if (Math.abs(abertura) <= 1) return i;
+      }
+      return null; // o resultado aberto vem de antes do primeiro balancete carregado
+    });
+    const primeiro = meses.findIndex((m) => m.tem);
+    const resultadoDre = meses.map((m, k) => {
+      if (!m.tem) return null;
+      let s = 0;
+      for (let i = desde[k] === null ? primeiro : desde[k]; i <= k; i++) s += lucro[i] || 0;
+      return s;
+    });
+    const resultadoBalancete = meses.map((m) => (m.tem ? -doResultado.reduce((s, c) => s + (saldo(c.conta, m) || 0), 0) : null));
+    const soma = (listas) => meses.map((m, k) => (m.tem ? listas.reduce((s, vs) => s + (vs[k] || 0), 0) : null));
+    const filhas = (pai) => contas.filter((c) => c.pai === pai);
+    const daConta = (c, sinal, nivel, extra) => Object.assign({ conta: c.conta, rotulo: c.titulo, nivel, tipo: 'conta',
+      valores: meses.map((m) => { const v = saldo(c.conta, m); return v === null ? null : sinal * v; }) }, extra || {});
+    const cb = contasDoBalanco(contas);
+    const P = contas.find((c) => c.conta === '2') || null;
+    const zeros = meses.map((m) => (m.tem ? 0 : null));
+    const linhas = [];
+    const vAtivo = cb.ativo ? daConta(cb.ativo, 1, 1).valores : zeros;
+    linhas.push({ id: 'ativo', rotulo: 'ATIVO', tipo: 'total', nivel: 1, valores: vAtivo });
+    if (cb.ativo) filhas(cb.ativo.conta).forEach((c2) => { linhas.push(daConta(c2, 1, 2, { tipo: 'grupo' })); filhas(c2.conta).forEach((c3) => linhas.push(daConta(c3, 1, 3))); });
+    const gruposPassivo = P ? filhas(P.conta).filter((c) => !cb.pl || c.conta !== cb.pl.conta) : [];
+    const vPassivo = soma(gruposPassivo.map((c) => daConta(c, -1, 2).valores));
+    linhas.push({ id: 'passivo', rotulo: 'PASSIVO', tipo: 'total', nivel: 1, valores: vPassivo });
+    gruposPassivo.forEach((c2) => { linhas.push(daConta(c2, -1, 2, { tipo: 'grupo' })); filhas(c2.conta).forEach((c3) => linhas.push(daConta(c3, -1, 3))); });
+    const vPlBalancete = cb.pl ? daConta(cb.pl, -1, 2).valores : zeros;
+    const vPl = soma([vPlBalancete, resultadoDre]);
+    linhas.push({ id: 'pl', rotulo: 'PATRIMÔNIO LÍQUIDO', tipo: 'total', nivel: 1, valores: vPl });
+    if (cb.pl) {
+      linhas.push(daConta(cb.pl, -1, 2, { tipo: 'grupo', rotulo: cb.pl.titulo + ' (no balancete)' }));
+      filhas(cb.pl.conta).forEach((c3) => linhas.push(daConta(c3, -1, 3)));
+    }
+    linhas.push({ id: 'resultado', rotulo: 'Resultado do exercício (pela DRE, desde o último encerramento)', tipo: 'resultado', nivel: 2, valores: resultadoDre });
+    const vTotal = soma([vPassivo, vPl]);
+    linhas.push({ id: 'totalPassivoPl', rotulo: 'TOTAL DO PASSIVO E PATRIMÔNIO LÍQUIDO', tipo: 'total', nivel: 1, destaque: true, valores: vTotal });
+    const diferenca = meses.map((m, k) => (m.tem ? vAtivo[k] - vTotal[k] : null));
+    const difResultado = meses.map((m, k) => (m.tem ? resultadoBalancete[k] - resultadoDre[k] : null));
+    return {
+      colunas: meses.map((m, k) => ({ id: m.comp, rotulo: m.rotulo, falta: !m.tem, desde: desde[k] === null ? null : meses[desde[k]].rotulo, semEncerramento: m.tem && desde[k] === null })),
+      linhas,
+      conferencia: { diferenca, resultadoBalancete, resultadoDre, difResultado },
+      fecha: diferenca.every((d) => d === null || Math.abs(d) <= 1) && difResultado.every((d) => d === null || Math.abs(d) <= 1),
+    };
   }
 
   // ------------------------------------------------------------------

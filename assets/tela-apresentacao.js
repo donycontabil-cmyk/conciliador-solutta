@@ -27,6 +27,7 @@
   const MESES_LONGOS = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
   const ABAS = [
     { id: 'resumo', titulo: 'Resumo' },
+    { id: 'balanco', titulo: 'Balanço patrimonial' },
     { id: 'indicadores', titulo: 'Indicadores' },
     { id: 'dre-mensal', titulo: 'DRE mensal' },
     { id: 'dre-trimestral', titulo: 'DRE trimestral' },
@@ -212,7 +213,10 @@
         '▲▼ = mudança sobre a coluna anterior (verde melhora, vermelho piora).</span>';
     }
     if (E.aba === 'cliente') return '';
-    return '<span class="suave pequeno">Contas de 1º nível. No acumulado, ativo e passivo mostram o saldo do último mês escolhido; receitas, custos e despesas, a soma dos meses escolhidos.</span>';
+    if (E.aba === 'balanco') {
+      return '<span class="suave pequeno">Conferência: ativo = passivo + patrimônio líquido + resultado do exercício pela DRE (o lucro dos meses desde o último encerramento). Tem que fechar em todos os meses.</span>';
+    }
+    return '<span class="suave pequeno">Saldos de 1º nível no fim de cada mês, como no balancete: a soma de cada coluna tem que dar zero. Os cartões de cima são da DRE (a soma dos meses escolhidos).</span>';
   }
 
   // ------------------------------------------------------------------
@@ -222,7 +226,7 @@
   // somar só os meses escolhidos. AH % continua sobre o mês anterior de verdade.
   // E.selecao: null = todos os meses com balancete; senão, Set de competências.
   // ------------------------------------------------------------------
-  const ABAS_MENSAIS = { resumo: true, indicadores: true, 'dre-mensal': true, 'balancete-mensal': true };
+  const ABAS_MENSAIS = { resumo: true, balanco: true, indicadores: true, 'dre-mensal': true, 'balancete-mensal': true };
   function mesesComBalancete() { return E.rel.meses.filter((m) => m.tem); }
   function mesesVisiveis() {
     const com = mesesComBalancete();
@@ -262,19 +266,21 @@
     return { colunas: ks.map((k) => tab.colunas[k]),
       linhas: tab.linhas.map((l) => Object.assign({}, l, { valores: ks.map((k) => l.valores[k]), av: ks.map((k) => l.av[k]), ah: ks.map((k) => l.ah[k]) })) };
   }
-  // Resumo: os meses escolhidos, o acumulado deles (ativo e passivo: saldo do último mês escolhido) e os trimestres.
+  // Resumo (Dony, 18/09/2026: "somando ativo, passivo, receitas, custos e despesas tem que dar zero"): o saldo
+  // de 1º nível no fim de cada mês escolhido e de cada trimestre, como no balancete; a soma de cada coluna = 0.
   function resumoVisivel() {
     const r = E.rel.resumo;
-    const ks = indicesVisiveis();
-    const trimestres = r.colunas.map((c, i) => ({ c, i })).filter((x) => x.c.trimestre);
+    const idx = indicesVisiveis().concat(r.colunas.map((c, i) => (c.trimestre ? i : -1)).filter((i) => i >= 0));
     return {
-      colunas: ks.map((k) => r.colunas[k]).concat([{ id: 'acumulado', rotulo: rotuloSelecao(ks.map((k) => E.rel.meses[k])), acumulado: true }]).concat(trimestres.map((x) => x.c)),
-      linhas: r.linhas.map((l) => {
-        const vals = ks.map((k) => l.valores[k]);
-        const ac = l.patrimonial ? (vals.length ? vals[vals.length - 1] : null) : somaNos(l.valores, ks);
-        return Object.assign({}, l, { valores: vals.concat([ac]).concat(trimestres.map((x) => l.valores[x.i])) });
-      }),
+      colunas: idx.map((i) => r.colunas[i]),
+      linhas: r.linhas.map((l) => Object.assign({}, l, { valores: idx.map((i) => l.valores[i]) })),
+      soma: idx.map((i) => r.soma[i]),
     };
+  }
+  // ✓ 0,00 quando fecha; o valor em vermelho quando não fecha.
+  function marcaZero(v) {
+    if (v === null || v === undefined) return '';
+    return Math.abs(v) <= 1 ? '<span class="ok">✓ 0,00</span>' : '<span class="neg">' + dinheiro(v) + ' ✗</span>';
   }
   // O painel dos meses (como o exemplo que o Dony mandou): atalhos, o ano e um botão por mês.
   function seletorMeses() {
@@ -318,6 +324,7 @@
   function secao(aba, op) {
     const rel = E.rel;
     if (aba === 'resumo') return secaoResumo();
+    if (aba === 'balanco') return secaoBalanco();
     if (aba === 'indicadores') return secaoIndicadores();
     if (aba === 'cliente') return secaoCliente(op);
     if (aba === 'dre-mensal') return secaoDre(dreMensalVisivel(), 'DRE CPC 51 mensal detalhada', op);
@@ -354,9 +361,10 @@
   // ---------- Resumo
   function secaoResumo() {
     const r = resumoVisivel();
-    const colunas = r.colunas.map((c) => Object.assign({}, c, { cls: c.acumulado ? 'acum' : c.trimestre ? 'tri' : '' }));
+    const colunas = r.colunas.map((c) => Object.assign({}, c, { cls: c.trimestre ? 'tri' : '' }));
     const linhas = r.linhas.map((l) => '<tr class="nivel-1"><td class="fixa"><span class="cod">' + T.esc(l.conta) + '</span> ' + T.esc(l.titulo) + '</td>' +
-      l.valores.map((v, k) => '<td class="num' + (colunas[k].cls ? ' ' + colunas[k].cls : '') + '">' + dinheiro(v) + '</td>').join('') + '</tr>').join('');
+      l.valores.map((v, k) => '<td class="num' + (colunas[k].cls ? ' ' + colunas[k].cls : '') + '">' + dinheiro(v) + '</td>').join('') + '</tr>').join('') +
+      '<tr class="total resumo-soma"><td class="fixa">Soma (tem que dar zero)</td>' + r.soma.map((v, k) => '<td class="num' + (colunas[k].cls ? ' ' + colunas[k].cls : '') + '">' + marcaZero(v) + '</td>').join('') + '</tr>';
     const dre = dreMensalVisivel();
     const indicador = (id) => dre.linhas.find((l) => l.id === id);
     const iAcum = dre.colunas.findIndex((c) => c.acumulado); // o acumulado dos meses escolhidos, na última coluna
@@ -364,13 +372,45 @@
       const l = indicador(id);
       const total = l.valores[iAcum] || 0;
       const rl = indicador('receitaLiquida').valores[iAcum] || 0;
-      return '<div class="apres-ficha"><span>' + T.esc(l.rotulo) + ' · ' + T.esc(colunas.find((c) => c.acumulado).rotulo) + '</span><b>' + dinheiro(total) + '</b>' +
+      return '<div class="apres-ficha"><span>' + T.esc(l.rotulo) + ' · ' + T.esc(dre.colunas[iAcum].rotulo) + '</span><b>' + dinheiro(total) + '</b>' +
         (id !== 'receitaLiquida' && rl ? '<small>' + pct(total / rl) + ' da receita líquida</small>' : '') + '</div>';
     }).join('');
-    return tituloSecao('Resumo executivo', 'Contas de 1º nível, mês a mês, acumulado e por trimestre.') +
+    return tituloSecao('Resumo executivo', 'Os cartões: a DRE somada nos meses escolhidos. A tabela: o saldo das contas de 1º nível no fim de cada mês, como no balancete ' +
+      '(receitas, custos e despesas acumulados desde o último encerramento); a soma de cada coluna tem que dar zero.') +
       '<div class="apres-fichas">' + fichas + '</div>' +
       '<div class="apres-caixa"><table class="apres"><thead><tr><th class="fixa">Conta</th>' +
       colunas.map((c) => '<th class="num per' + (c.cls ? ' ' + c.cls : '') + (c.falta ? ' falta' : '') + '">' + T.esc(c.rotulo) + '</th>').join('') + '</tr></thead><tbody>' + linhas + '</tbody></table></div>';
+  }
+
+  // ---------- Balanço patrimonial (Dony, 18/09/2026: "cria um balanço e lança no resultado do exercício um
+  // simulado de acordo com a DRE: ativo e passivo têm que bater — para ver se está fazendo a coisa certa")
+  function secaoBalanco() {
+    const b = E.rel.balanco;
+    const ks = indicesVisiveis();
+    const conf = b.conferencia;
+    const linha = (l) => {
+      const cls = l.tipo === 'total' ? 'total' + (l.destaque ? ' destaque' : '') : l.tipo === 'grupo' ? 'bal-grupo' : l.tipo === 'resultado' ? 'bal-resultado' : 'bal-conta';
+      const rot = (l.conta ? '<span class="cod">' + T.esc(l.conta) + '</span> ' : '') + T.esc(l.rotulo);
+      return '<tr class="' + cls + '"><td class="fixa" style="padding-left:' + (8 + ((l.nivel || 1) - 1) * 16) + 'px">' + rot + '</td>' +
+        ks.map((k) => '<td class="num">' + dinheiro(l.valores[k]) + '</td>').join('') + '</tr>';
+    };
+    const conferencia = '<tr class="cat"><td class="fixa">Conferência</td><td colspan="' + ks.length + '"></td></tr>' +
+      '<tr class="bal-conf"><td class="fixa">Ativo − (passivo + PL + resultado) <small>tem que dar zero</small></td>' + ks.map((k) => '<td class="num">' + marcaZero(conf.diferenca[k]) + '</td>').join('') + '</tr>' +
+      '<tr><td class="fixa">Resultado pelo balancete <small>receitas, custos e despesas ainda não encerrados</small></td>' + ks.map((k) => '<td class="num">' + dinheiro(conf.resultadoBalancete[k]) + '</td>').join('') + '</tr>' +
+      '<tr><td class="fixa">Resultado pela DRE <small>lucro dos meses desde o último encerramento</small></td>' + ks.map((k) => '<td class="num">' + dinheiro(conf.resultadoDre[k]) + '</td>').join('') + '</tr>' +
+      '<tr class="bal-conf"><td class="fixa">Diferença entre os dois <small>tem que dar zero</small></td>' + ks.map((k) => '<td class="num">' + marcaZero(conf.difResultado[k]) + '</td>').join('') + '</tr>';
+    const cab = '<thead><tr><th class="fixa">Balanço patrimonial</th>' + ks.map((k) => { const c = b.colunas[k]; return '<th class="num per' + (c.falta ? ' falta' : '') + '">' + T.esc(c.rotulo) +
+      (c.desde ? '<small class="desde">resultado desde ' + T.esc(c.desde) + '</small>' : c.falta ? '<small>sem balancete</small>' : '') + '</th>'; }).join('') + '</tr></thead>';
+    const naoFecha = ks.filter((k) => (conf.diferenca[k] !== null && Math.abs(conf.diferenca[k]) > 1) || (conf.difResultado[k] !== null && Math.abs(conf.difResultado[k]) > 1)).map((k) => b.colunas[k].rotulo);
+    const semEnc = ks.filter((k) => b.colunas[k].semEncerramento).map((k) => b.colunas[k].rotulo);
+    const selo = naoFecha.length
+      ? '<div class="aviso ambar" style="margin:0 0 10px"><span class="icone-aviso">⚠️</span><div>O balanço <b>não fecha</b> em ' + T.esc(naoFecha.join(', ')) + '. Veja a conferência no fim da tabela.' +
+        (semEnc.length ? ' Em ' + T.esc(semEnc.join(', ')) + ' o resultado aberto vem de antes do primeiro balancete carregado: carregue os meses desde o último encerramento.' : '') + '</div></div>'
+      : '<div class="aviso verde" style="margin:0 0 10px"><span class="icone-aviso">✓</span><div>O balanço <b>fecha em todos os meses</b>: ativo = passivo + patrimônio líquido + resultado do exercício pela DRE, ' +
+        'e o resultado pela DRE é igual ao das contas de resultado ainda abertas no balancete.</div></div>';
+    return tituloSecao('Balanço patrimonial (conferência)', T.esc(E.ano) + ' · saldo do fim de cada mês · passivo e PL com o saldo credor positivo · o resultado do exercício vem da DRE ' +
+      '(o lucro dos meses desde o último encerramento, que no balancete ainda está nas contas de resultado)') + selo +
+      '<div class="apres-caixa"><table class="apres balanco">' + cab + '<tbody>' + b.linhas.map(linha).join('') + conferencia + '</tbody></table></div>';
   }
 
   // ---------- DRE
@@ -1141,13 +1181,37 @@
     return f;
   }
 
+  // Balanço patrimonial: os meses escolhidos e a conferência no fim.
+  function folhaBalanco() {
+    const b = E.rel.balanco;
+    const ks = indicesVisiveis();
+    const larg = larguraValor(b.linhas.map((l) => ks.map((k) => l.valores[k])), 16);
+    const f = novaFolha('Balanço patrimonial', [62].concat(ks.map(() => larg)));
+    f.titulo('Balanço patrimonial (conferência)', E.ano + ' · saldo do fim de cada mês · passivo e PL com o saldo credor positivo · resultado do exercício pela DRE (o lucro dos meses desde o último encerramento) · ' + valoresEm());
+    const r1 = f.add([{ v: 'Balanço patrimonial', e: 'cabEsq' }].concat(ks.map((k) => ({ v: b.colunas[k].rotulo + (b.colunas[k].desde ? '\n(resultado desde ' + b.colunas[k].desde + ')' : ''), e: 'cab' }))), { altura: 44 });
+    b.linhas.forEach((l) => {
+      const est = l.tipo === 'total' ? (l.destaque ? 'des' : 'tot') : l.tipo === 'grupo' ? 'sin' : l.tipo === 'resultado' ? 'inp' : 'ana';
+      f.add([{ v: (l.conta ? l.conta + '  ' : '') + l.rotulo, e: est + '.rot' + Math.min(5, (l.nivel || 1) - 1) }].concat(ks.map((k) => ({ v: R(l.valores[k]), e: est + '.val' }))));
+    });
+    f.vazia();
+    f.add([{ v: 'CONFERÊNCIA', e: 'cat' }].concat(ks.map(() => ({ v: '', e: 'cat' }))), { altura: 16 });
+    const c = b.conferencia;
+    [['Ativo − (passivo + PL + resultado): tem que dar zero', c.diferenca, 'tot'], ['Resultado pelo balancete (contas de resultado ainda abertas)', c.resultadoBalancete, 'ana'],
+      ['Resultado pela DRE (lucro dos meses desde o último encerramento)', c.resultadoDre, 'ana'], ['Diferença entre os dois: tem que dar zero', c.difResultado, 'tot']]
+      .forEach(([rot, vals, est]) => f.add([{ v: rot, e: est + '.rot0' }].concat(ks.map((k) => ({ v: R(vals[k]), e: est + '.val' })))));
+    f.congelar = { linhas: r1, colunas: 1 };
+    f.repetir = [r1, r1];
+    return f;
+  }
+
   function folhaResumo() {
     const r = resumoVisivel();
     const dre = dreMensalVisivel();
     const iAcum = dre.colunas.findIndex((c) => c.acumulado);
     const larg = larguraValor(r.linhas.map((l) => l.valores).concat([dre.linhas.map((l) => l.valores[iAcum])]), 16);
     const f = novaFolha('Resumo', [14, 44].concat(r.colunas.map(() => larg)));
-    f.titulo('Resumo executivo', 'Contas de 1º nível, mês a mês, acumulado e por trimestre' + (E.selecao ? ' · meses escolhidos: ' + rotuloSelecao(mesesVisiveis()) : '') + ' · ' + valoresEm());
+    f.titulo('Resumo executivo', 'Indicadores: a DRE somada nos meses escolhidos · Contas de 1º nível: o saldo no fim de cada mês, como no balancete (a soma de cada coluna tem que dar zero)' +
+      (E.selecao ? ' · meses escolhidos: ' + rotuloSelecao(mesesVisiveis()) : '') + ' · ' + valoresEm());
     // Os indicadores do período (as fichas do topo da tela).
     let n = f.add([{ v: 'Indicador', e: 'cabEsq' }, { v: '', e: 'cabEsq' }, { v: dre.colunas[iAcum].rotulo, e: 'cabAcum' }, { v: '% da receita líquida', e: 'cab' }], { altura: 30 });
     f.mesclar(0, n, 1, n);
@@ -1159,9 +1223,10 @@
       f.mesclar(0, n, 1, n);
     });
     f.vazia();
-    const estilo = (c) => (c.acumulado ? 'cabAcum' : c.trimestre ? 'cabTri' : 'cab');
+    const estilo = (c) => (c.trimestre ? 'cabTri' : 'cab');
     const r1 = f.add([{ v: 'Conta', e: 'cabEsq' }, { v: 'Título', e: 'cabEsq' }].concat(r.colunas.map((c) => ({ v: c.rotulo, e: estilo(c) }))), { altura: 20 });
-    r.linhas.forEach((l) => f.add([{ v: l.conta, e: 'n1.cod' }, { v: l.titulo, e: 'n1.rot0' }].concat(l.valores.map((v, k) => ({ v: R(v), e: 'n1.val' + (r.colunas[k].acumulado ? '.acum' : '') })))));
+    r.linhas.forEach((l) => f.add([{ v: l.conta, e: 'n1.cod' }, { v: l.titulo, e: 'n1.rot0' }].concat(l.valores.map((v) => ({ v: R(v), e: 'n1.val' })))));
+    f.add([{ v: '', e: 'tot.cod' }, { v: 'Soma (tem que dar zero)', e: 'tot.rot0' }].concat(r.soma.map((v) => ({ v: R(v), e: 'tot.val' }))));
     f.repetir = [r1, r1];
     return f;
   }
@@ -1289,6 +1354,7 @@
     const escolha = E.selecao ? ' · meses escolhidos: ' + rotuloSelecao(mesesVisiveis()) : '';
     const planilhas = [
       folhaResumo(),
+      folhaBalanco(),
       folhaIndicadores(),
       folhaDre('DRE mensal', 'DRE CPC 51 mensal detalhada', E.ano + ' · ' + valoresEm() + ' · receitas positivas, custos e despesas entre parênteses · AV % sobre a receita líquida · AH % sobre o mês anterior' + escolha +
         ' · clique no + à esquerda para abrir as contas de um subtotal', dreMensalVisivel()),
@@ -1298,7 +1364,7 @@
         ' · use os números 1 a 5 no canto esquerdo do Excel para abrir ou fechar os níveis', balanceteMensalVisivel()),
       folhaBalancete('Balancete trimestral', 'Balancete analítico trimestral', E.ano + ' · contas 1 e 2: saldo no fim do trimestre · 3, 4 e 5: soma dos meses · AV % sobre a conta-mãe', E.rel.trimestral),
     ].concat(folhasLalur(), [folhaBase()]);
-    const ordem = { resumo: 0, indicadores: 1, 'dre-mensal': 2, 'dre-trimestral': 3, 'balancete-mensal': 4, 'balancete-trimestral': 5, lalur: 6 };
+    const ordem = { resumo: 0, balanco: 1, indicadores: 2, 'dre-mensal': 3, 'dre-trimestral': 4, 'balancete-mensal': 5, 'balancete-trimestral': 6, lalur: 7 };
     return raiz.ExcelBonito.gerar({ planilhas, estilos: estilosDoExcel(), ativa: ordem[E.aba] || 0 });
   }
 

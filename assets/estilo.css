@@ -723,6 +723,15 @@ table.apres.premissas td { vertical-align: top; }
   .apres-impressao .apres-titulo h2 { font-size: 13px; }
 }
 
+/* ---------- Balanço patrimonial (conferência) e a soma do Resumo ---------- */
+table.apres.balanco tr.bal-grupo td { font-weight: 600; background: #f4f6f8; }
+table.apres.balanco tr.bal-conta td { color: #34404d; }
+table.apres.balanco tr.bal-resultado td { background: #eaf2fb; font-weight: 600; color: #0b3d91; }
+table.apres tr.bal-conf td { font-weight: 600; }
+table.apres td.fixa small { color: var(--texto-fraco); font-weight: 400; margin-left: 4px; }
+table.apres th.per small.desde { color: #cfe0f1; font-weight: 400; }
+table.apres tr.resumo-soma td { border-top: 1px solid #8fb0d0; }
+
 /* ---------- Indicadores (aba da apresentação) ---------- */
 table.apres.indicadores td.fixa b { display: block; font-weight: 600; }
 table.apres.indicadores td.fixa small { display: block; color: var(--texto-fraco); font-size: 11px; font-weight: 400; white-space: normal; max-width: 380px; }
