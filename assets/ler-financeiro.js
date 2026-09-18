@@ -253,7 +253,106 @@
     };
   }
 
+  // ------------------------------------------------------------------
+  // Relatório de NFFs de um quarto cliente real (18/09/2026, "Data Base NF 072026" e "Data Base 082026"):
+  // várias abas com o MESMO cabeçalho ("NFFs" com tudo, "base_aging_MM" já separada, às vezes outras),
+  // mais uma tabela dinâmica por TIPO, "Parâmetros" e "XDO_METADATA". Cabeçalho: "Número da NFF | Data da
+  // NFF | Valor da NFF | Fornecedor | Local | Data de Vencimento | Possui Adto? | Valor a Pagar | Status
+  // Pagamento | TIPO | … | Valor Pago | Data de Pagamento | …". Regra do Dony: a base é a aba base_aging e
+  // só entram as linhas com TIPO = FORNECEDOR (as outras — frete, frota, aluguel, impostos, empréstimos,
+  // devoluções… — ficam de fora, com a conta de quantas e quanto). Sem a aba base_aging, vale a primeira
+  // aba com esse cabeçalho, com o mesmo filtro. O valor é o Valor a Pagar (o que falta pagar: no título
+  // parcialmente pago é menor que o Valor da NFF); o documento é o Número da NFF inteiro (o mesmo que o
+  // razão cita em "Doc:"), com a parcela no terceiro pedaço ("4321-000-2-9876543" = parcela 2); o CNPJ
+  // (ou CPF) do fornecedor vem na coluna Local.
+  // ------------------------------------------------------------------
+  const TIPO_NFF = 'FORNECEDOR';
+  const RE_PARCELA_NFF = /^\d+-[^-\s]+-(\d{1,3})-\d+$/;
+
+  function acharRelatorioNFF(abas) {
+    const achados = [];
+    for (let a = 0; a < abas.length; a++) {
+      const linhas = abas[a].linhas;
+      for (let r = 0; r < Math.min(20, linhas.length); r++) {
+        const chaves = (linhas[r] || []).map(chaveTitulo);
+        const col = (nome) => { const i = chaves.indexOf(nome); return i >= 0 ? i : undefined; };
+        const m = { documento: col('numerodanff'), nome: col('fornecedor'), cnpj: col('local'), valor: col('valorapagar'),
+          vencimento: col('datadevencimento'), tipo: col('tipo'), status: col('statuspagamento'), valorNff: col('valordanff') };
+        if (m.documento === undefined || m.nome === undefined || m.valor === undefined || m.tipo === undefined) continue;
+        achados.push({ aba: a, linha: r, mapa: m });
+        break;
+      }
+    }
+    if (!achados.length) return null;
+    return achados.find((c) => /^baseaging/.test(chaveTitulo(abas[c.aba].nome))) || achados[0];
+  }
+
+  function lerRelatorioNFF(abas, cab, opcoes) {
+    const linhas = abas[cab.aba].linhas;
+    const mapa = cab.mapa;
+    const texto = (l, i) => (i === undefined || l[i] === null || l[i] === undefined ? '' : String(l[i]).replace(/\s+/g, ' ').trim());
+    const titulos = [];
+    const descartados = [];
+    const fora = new Map(); // tipo -> { quantidade, valor }
+    for (let r = cab.linha + 1; r < linhas.length; r++) {
+      const l = linhas[r];
+      if (!l || !l.some((c) => c !== null && String(c).trim() !== '')) continue;
+      const textoLinha = l.filter((c) => c !== null).map(String).join(' | ').slice(0, 300);
+      const documento = texto(l, mapa.documento);
+      const valor = Util.paraNumero(l[mapa.valor]);
+      if (!documento) {
+        // Total solto no pé da planilha (só o valor, sem número de NFF).
+        descartados.push({ linha: r + 1, motivo: 'linha sem Número da NFF (total ou linha solta)', texto: textoLinha });
+        continue;
+      }
+      const tipo = Util.semAcento(texto(l, mapa.tipo)).toUpperCase();
+      if (tipo !== TIPO_NFF) {
+        const k = texto(l, mapa.tipo) || 'vazio';
+        const f = fora.get(k) || { quantidade: 0, valor: 0 };
+        f.quantidade++;
+        f.valor += valor === null ? 0 : Util.centavos(valor);
+        fora.set(k, f);
+        continue;
+      }
+      const nome = texto(l, mapa.nome);
+      if (valor === null) { descartados.push({ linha: r + 1, motivo: 'sem Valor a Pagar', texto: textoLinha }); continue; }
+      if (!nome) { descartados.push({ linha: r + 1, motivo: 'sem fornecedor', texto: textoLinha }); continue; }
+      const cnpj = Util.soDigitos(texto(l, mapa.cnpj));
+      const venc = mapa.vencimento !== undefined ? Util.lerData(l[mapa.vencimento]) : null;
+      const p = documento.match(RE_PARCELA_NFF);
+      const titulo = {
+        nome, cnpj,
+        cnpjValido: cnpj.length === 14 ? Util.cnpjValido(cnpj) : (cnpj.length === 11 ? Util.cpfValido(cnpj) : false),
+        valor: Util.centavos(valor),
+        vencimento: venc ? venc.texto : '',
+        documento, parcela: p ? p[1] : '',
+        status: texto(l, mapa.status),
+      };
+      // Parcialmente pago: guarda o valor da NFF para mostrar que o valor a pagar é só o que falta.
+      const valorNff = mapa.valorNff !== undefined ? Util.paraNumero(l[mapa.valorNff]) : null;
+      if (valorNff !== null && Util.centavos(valorNff) !== titulo.valor) titulo.valorOriginal = Util.centavos(valorNff);
+      titulos.push(titulo);
+    }
+    fora.forEach((f, tipo) => descartados.push({ linha: null, motivo: 'TIPO "' + (tipo === 'vazio' ? 'sem tipo' : tipo) + '" (só entra ' + TIPO_NFF + ')',
+      quantidade: f.quantidade, valor: f.valor, texto: '' }));
+    const invalidos = titulos.filter((t) => t.cnpj && !t.cnpjValido).length;
+    return {
+      tipo: (opcoes && opcoes.tipo) || 'financeiro_pagar',
+      titulos,
+      total: titulos.reduce((t, x) => t + x.valor, 0),
+      descartados,
+      avisos: invalidos ? [invalidos + ' título(s) com CNPJ/CPF de dígito verificador inválido (serão reconhecidos só pelo nome).'] : [],
+      posicao: null,
+      formato: 'aba "' + abas[cab.aba].nome + '": só as linhas do TIPO ' + TIPO_NFF + ', pelo Valor a Pagar',
+    };
+  }
+
   function reconhecer(abas) {
+    const nff = acharRelatorioNFF(abas);
+    if (nff) {
+      return { tipo: 'financeiro_pagar', certeza: true, cabecalho: nff, relatorioNFF: true,
+        motivo: 'Contas a pagar (relatório de NFFs, aba "' + abas[nff.aba].nome + '"): só as linhas do TIPO ' + TIPO_NFF + ', pelo Valor a Pagar.' };
+    }
     const pagar = acharAbaPagar(abas);
     if (pagar) {
       return { tipo: 'financeiro_pagar', certeza: true, cabecalho: pagar, abaPagar: true,
@@ -280,6 +379,7 @@
   function lerTitulos(abas, opcoes) {
     const rec = reconhecer(abas);
     if (!rec.tipo) throw new Error(rec.motivo);
+    if (rec.relatorioNFF) return lerRelatorioNFF(abas, rec.cabecalho, opcoes);
     if (rec.abaPagar) return lerAbaPagar(abas, rec.cabecalho, opcoes);
     if (rec.porParticipante) return lerAgingPorParticipante(abas, rec.cabecalho, opcoes);
     const { aba, linha: linhaCab, mapa } = rec.cabecalho;
@@ -293,7 +393,10 @@
       const textoLinha = l.filter((c) => c !== null).map(String).join(' | ');
       const primeira = l.find((c) => c !== null && String(c).trim() !== '');
       const nome = l[mapa.nome] === null || l[mapa.nome] === undefined ? '' : String(l[mapa.nome]).trim();
-      if (/^total/i.test(Util.semAcento(String(primeira)).trim()) || /^total/i.test(Util.semAcento(nome))) {
+      // Linha com vencimento de verdade é título, mesmo que o fornecedor se chame "TOTAL …" (caso real,
+      // 18/09/2026: três títulos de um fornecedor assim sumiam como se fossem a linha de total).
+      const temVencimento = mapa.vencimento !== undefined && !!Util.lerData(l[mapa.vencimento]);
+      if (!temVencimento && (/^total/i.test(Util.semAcento(String(primeira)).trim()) || /^total/i.test(Util.semAcento(nome)))) {
         descartados.push({ linha: r + 1, motivo: 'linha de TOTAL (o total é recalculado pelos títulos)', texto: textoLinha });
         continue;
       }
@@ -355,5 +458,5 @@
     return null;
   }
 
-  return { reconhecer, lerTitulos, pareceExtrato, SINONIMOS };
+  return { reconhecer, lerTitulos, pareceExtrato, SINONIMOS, TIPO_NFF };
 });

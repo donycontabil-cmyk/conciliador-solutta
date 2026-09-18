@@ -250,7 +250,7 @@
       const d = r.porLinha.get(l.digital);
       const lados = ladosDoRazao(entrada.natureza, lc);
       const x = guardar({ id: 'RZ:' + Util.hash8(l.digital), lado: 'A', fonte: lados.aumento > 0 ? 'nota' : 'baixa',
-        doc: documentoDaLinha(lc), parcela: lc.parcela || '', chave: d.chave, nome: d.nome, cnpj: '', data: lc.data, ordem: l.dia,
+        doc: documentoDaLinha(lc), parcela: lc.parcela || '', chave: d.chave, nome: d.nome, cnpj: lc.cnpj || '', data: lc.data, ordem: l.dia,
         historico: lc.historico || '', valor: lados.aumento > 0 ? lados.aumento : -lados.reducao, linha: l.i });
       legado.set('RAZ:' + l.digital, x.id);
     });
@@ -785,6 +785,9 @@
     return (l) => {
       const doc = documentoDaLinha(l);
       const u = doc ? unico(doc) : null;
+      // O CNPJ que o próprio razão traz no histórico (desenho G, 18/09/2026: "Forn: … - <CNPJ> , Doc: …") vale.
+      const proprio = Util.soDigitos(l.cnpj || '');
+      if (proprio.length === 14 && Util.cnpjValido(proprio)) return { nome: l.fornecedor || (u && u.nome) || '', cnpj: proprio };
       if (!l.fornecedor) return u ? { nome: u.nome, cnpj: u.cnpj || undefined } : { nome: '' };
       if (u && u.cnpj && primeira(u.nome) && primeira(u.nome) === primeira(l.fornecedor)) return { nome: l.fornecedor, cnpj: u.cnpj };
       return { nome: l.fornecedor };

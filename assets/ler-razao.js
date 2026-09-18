@@ -12,6 +12,8 @@
  *    cabeçalho "DATA | LOTE | LANC | C/PARTIDA | HISTORICO | DÉBITO | CRÉDITO | SALDO",
  *    "Saldo anterior", "Totais conta:"; o período pode vir só no nome do arquivo.
  *  - Desenhos C, D e E: ver lerFlat e lerPorContrapartida. Desenho F: ver lerAnalitico.
+ *  - Desenho G ("Lançamentos Detalhados", uma linha por lançamento com Período e Categoria): ver
+ *    lerLancamentosDetalhados.
  *
  * Saída (igual para todos os desenhos). VALORES EM CENTAVOS INTEIROS.
  * Saldos no sentido DÉBITO − CRÉDITO (devedor positivo, credor negativo), como o
@@ -723,11 +725,130 @@
     return { tipo: 'razao', desenho: 'F', empresa: info.empresa, cnpj: info.cnpj, titulo: info.titulo, periodo, periodoOrigem, contas: lidas, avisos, linhasIgnoradas };
   }
 
+  // ------------------------------------------------------------------
+  // Desenho G — "Lançamentos Detalhados" de um quarto cliente real (18/09/2026): uma aba, uma linha por
+  // lançamento, cabeçalho "Período | Data | Débito | Crédito | Saldo | Empresa | Filial | Conta |
+  // Contrapartida | Descrição Conta | Centro de Custo | Intercompania | Histórico | Status | Origem |
+  // Categoria | Lote | Lançamento". O "Saldo" é o da PRÓPRIA linha (débito − crédito), não o acumulado, e
+  // não há saldo anterior: o saldo inicial vem do aging do mês passado. O período vem da coluna Período
+  // ("Aug-26"), nunca do nome do arquivo (o nome traz a hora em que foi exportado).
+  // O histórico diz o fornecedor, o CNPJ (ou CPF) e o documento — o mesmo "Número da NFF" do relatório de
+  // contas a pagar, com a parcela no terceiro pedaço:
+  //   "Forn: EMPRESA X LTDA - 12345678000195 , Doc: 4321-000-1-9876543 , Data: 03-AUG-26"          (nota)
+  //   "Forn: EMPRESA X LTDA - 12345678000195 , Doc: 4321-000-1-9876543 , Data: 03-AUG-26 , Pgto: 5555" (pagamento)
+  // Às vezes sem o CNPJ ("Forn: EMPRESA Y -  , Doc: 1234 , …"); lançamento manual pode ter texto livre.
+  // ------------------------------------------------------------------
+  const RE_FORN_G = /^\s*forn\s*:\s*(.*?)\s+-\s*(\d{11,14})?\s*,\s*doc\s*:\s*(.*?)\s*,\s*data\s*:\s*(\d{1,2}-[a-z]{3}-\d{2,4})(?:\s*,\s*pgto\s*:\s*(\S+))?\s*$/i;
+  const RE_PARCELA_G = /^\d+-[^-\s]+-(\d{1,3})-\d+$/;
+  const MESES_G = { jan: 1, feb: 2, fev: 2, mar: 3, apr: 4, abr: 4, may: 5, mai: 5, jun: 6, jul: 7, aug: 8, ago: 8, sep: 9, set: 9, oct: 10, out: 10, nov: 11, dec: 12, dez: 12 };
+
+  function cabecalhoG(linha) {
+    const chaves = (linha || []).map(chaveTitulo);
+    const tem = (c) => chaves.indexOf(c) >= 0;
+    if (!['data', 'debito', 'credito', 'conta', 'historico'].every(tem)) return null;
+    const extras = ['periodo', 'contrapartida', 'descricaoconta', 'categoria', 'origem', 'lote', 'lancamento', 'status'].filter(tem).length;
+    if (extras < 3) return null;
+    const col = (c) => { const i = chaves.indexOf(c); return i >= 0 ? i : undefined; };
+    return { periodo: col('periodo'), data: col('data'), debito: col('debito'), credito: col('credito'), conta: col('conta'),
+      contrapartida: col('contrapartida'), descricaoConta: col('descricaoconta'), historico: col('historico'), status: col('status'),
+      origem: col('origem'), categoria: col('categoria'), filial: col('filial') };
+  }
+  function ehLancamentosDetalhados(abas) {
+    return abas.some((a) => a.linhas.slice(0, 20).some((l) => l && cabecalhoG(l)));
+  }
+  // Fornecedor, CNPJ, documento (a NFF), parcela e número do pagamento de um histórico do desenho G.
+  function lancamentoG(historico) {
+    const m = String(historico || '').match(RE_FORN_G);
+    if (!m) return { fornecedor: '', cnpj: '', nota: '', parcela: '', pagamento: '' };
+    const nota = m[3].replace(/\s+/g, ' ').trim();
+    const p = nota.match(RE_PARCELA_G);
+    return { fornecedor: m[1].replace(/\s+/g, ' ').trim(), cnpj: m[2] || '', nota, parcela: p ? p[1] : '', pagamento: m[5] || '' };
+  }
+  // "Aug-26" / "ago/26" / "08/2026" -> { de, ate } do mês inteiro.
+  function periodoDoMes(v) {
+    const s = Util.semAcento(String(v === null || v === undefined ? '' : v)).trim().toLowerCase();
+    let mes = null, ano = null;
+    let m = s.match(/^([a-z]{3})[a-z]*[\s\-\/.]+(\d{2}|\d{4})$/);
+    if (m && MESES_G[m[1]]) { mes = MESES_G[m[1]]; ano = Number(m[2]); }
+    m = mes ? null : s.match(/^(\d{1,2})[\-\/.](\d{4})$/);
+    if (m) { mes = Number(m[1]); ano = Number(m[2]); }
+    if (!mes || mes > 12) return null;
+    if (ano < 100) ano += 2000;
+    const fim = Util.fimDaCompetencia(ano + '-' + String(mes).padStart(2, '0') + '-01');
+    return fim ? { de: Util.montarData(1, mes, ano).texto, ate: fim.texto } : null;
+  }
+
+  function lerLancamentosDetalhados(abas) {
+    const avisos = [];
+    const contasMap = new Map();
+    let linhasIgnoradas = 0;
+    const periodos = new Set();
+    const texto = (linha, i) => (i === undefined || linha[i] === null || linha[i] === undefined ? '' : String(linha[i]).replace(/\s+/g, ' ').trim());
+    for (const aba of abas) {
+      const linhas = aba.linhas;
+      const rCab = linhas.slice(0, 20).findIndex((l) => l && cabecalhoG(l));
+      if (rCab < 0) continue;
+      const mapa = cabecalhoG(linhas[rCab]);
+      for (let r = rCab + 1; r < linhas.length; r++) {
+        const linha = linhas[r];
+        if (!linha || !celulasCheias(linha).length) continue;
+        if (cabecalhoG(linha)) continue;
+        const data = Util.lerData(linha[mapa.data]);
+        const deb = numeroDe(linha[mapa.debito]);
+        const cred = numeroDe(linha[mapa.credito]);
+        const codigo = texto(linha, mapa.conta);
+        if (!data || (deb === null && cred === null) || !codigo) { linhasIgnoradas++; continue; }
+        if (mapa.periodo !== undefined && texto(linha, mapa.periodo)) periodos.add(texto(linha, mapa.periodo));
+        let conta = contasMap.get(codigo);
+        if (!conta) {
+          // Sem saldo anterior no arquivo (como o desenho C): zero aqui; no ③ o saldo inicial é o aging do mês passado.
+          conta = { codigo, classificacao: '', nome: texto(linha, mapa.descricaoConta), saldoAnterior: 0, lancamentos: [],
+            totalDebitoDeclarado: null, totalCreditoDeclarado: null, saldoFinalDeclarado: null, avisos: [] };
+          contasMap.set(codigo, conta);
+        }
+        const historico = texto(linha, mapa.historico);
+        const lido = lancamentoG(historico);
+        conta.lancamentos.push({
+          data: data.texto, dia: data.dia, mes: data.mes, ano: data.ano,
+          numero: lido.pagamento ? 'Pgto ' + lido.pagamento : '',
+          historico, contrapartida: texto(linha, mapa.contrapartida),
+          documento: lido.nota, nota: lido.nota, parcela: lido.parcela, fornecedor: lido.fornecedor, cnpj: lido.cnpj,
+          categoria: texto(linha, mapa.categoria), origem: texto(linha, mapa.origem), filial: texto(linha, mapa.filial),
+          debito: deb || 0, credito: cred || 0, saldo: null,
+        });
+      }
+    }
+    const contas = Array.from(contasMap.values());
+    // Período: a coluna Período (um mês só); senão, as datas dos lançamentos.
+    let periodo = null, periodoOrigem = null;
+    if (periodos.size === 1) { periodo = periodoDoMes(periodos.values().next().value); if (periodo) periodoOrigem = 'conteudo'; }
+    if (!periodo) {
+      const numeros = [];
+      contas.forEach((c) => c.lancamentos.forEach((l) => numeros.push(Util.montarData(l.dia, l.mes, l.ano).numero)));
+      if (numeros.length) {
+        periodo = { de: Util.dataDeNumero(Math.min.apply(null, numeros)).texto, ate: Util.dataDeNumero(Math.max.apply(null, numeros)).texto };
+        periodoOrigem = 'datas-dos-lancamentos';
+        avisos.push(periodos.size > 1 ? 'O arquivo traz mais de um período (' + Array.from(periodos).join(', ') + '): usei a primeira e a última data. Confirme a competência.'
+          : 'O arquivo não diz o período: usei a primeira e a última data dos lançamentos. Confirme a competência.');
+      }
+    }
+    for (const c of contas) {
+      conferirConta(c);
+      c.confere = true;
+      c.avisos.push('Lançamentos detalhados (uma linha por lançamento), sem saldo anterior no arquivo: o saldo inicial vem do aging do mês passado.');
+    }
+    if (!contas.length) avisos.push('Não achei lançamentos neste arquivo (confira se os títulos das colunas batem).');
+    return { tipo: 'razao', desenho: 'G', empresa: '', cnpj: '', titulo: 'Lançamentos detalhados', periodo, periodoOrigem, contas, avisos, linhasIgnoradas };
+  }
+
   /**
    * Diz se as abas são um razão, um balancete ou outra coisa.
    * @returns { tipo: 'razao' | 'balancete' | null, motivo }
    */
   function reconhecer(abas) {
+    if (ehLancamentosDetalhados(abas)) {
+      return { tipo: 'razao', detalhado: true, motivo: 'Razão em lançamentos detalhados: uma linha por lançamento, com Período, Conta, Contrapartida, Histórico ("Forn: … , Doc: …"), Débito e Crédito.' };
+    }
     if (ehRazaoPorContrapartida(abas)) {
       return { tipo: 'razao', porContrapartida: true, motivo: 'Razão por contrapartida: blocos "Conta Contábil" com Data, Histórico, Contra-Partida, Débito e Crédito.' };
     }
@@ -759,7 +880,9 @@
    */
   function ler(abas, opcoes) {
     const nomeArquivo = (opcoes && opcoes.nomeArquivo) || '';
-    // Razão por contrapartida (desenho E) e razão analítico (desenho F) têm leitores próprios.
+    // Lançamentos detalhados (desenho G), razão por contrapartida (desenho E) e razão analítico (desenho F)
+    // têm leitores próprios.
+    if (ehLancamentosDetalhados(abas)) return lerLancamentosDetalhados(abas);
     if (ehRazaoPorContrapartida(abas)) return lerPorContrapartida(abas);
     if (ehRazaoAnalitico(abas)) return lerAnalitico(abas, opcoes);
     // Razão em lista (desenho C) tem um leitor próprio: uma linha por lançamento, conta na coluna.
@@ -973,5 +1096,5 @@
     delete c.totalCreditoDeclarado;
   }
 
-  return { reconhecer, ler, mapearCabecalho, ehCabecalho, lerLinhaDeConta, periodoPeloNome, lerFaixaDeDatas, notaEFornecedorE, lancamentoF };
+  return { reconhecer, ler, mapearCabecalho, ehCabecalho, lerLinhaDeConta, periodoPeloNome, lerFaixaDeDatas, notaEFornecedorE, lancamentoF, lancamentoG, periodoDoMes };
 });

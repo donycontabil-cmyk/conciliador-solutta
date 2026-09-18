@@ -445,7 +445,8 @@
     }
     X.utils.book_append_sheet(wb, folha(versoes, [30, 18, 8, 40, 18, 16, 12, 16, 12, 10, 10, 14], [11], 1), 'Versões');
 
-    const bytes = X.write(wb, { bookType: 'xlsx', type: 'array' });
+    // Compactado: com dezenas de milhares de linhas o arquivo cai para perto de um quarto (medido: 22 MB → 6 MB).
+    const bytes = X.write(wb, { bookType: 'xlsx', type: 'array', compression: true });
     T.baixar(new Uint8Array(bytes), nomeDoArquivo('.xlsx'), 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     T.avisoRapido('Excel baixado: ' + nomeDoArquivo('.xlsx') + ' (pasta Downloads).', 'ok', 5000);
     app().armazenamento.registrarNoLog({ codigo: R.codigo, acao: 'terceiro-relatorio-excel', alvo: d.registro.id, detalhe: U.nomeCompetencia(R.comp) }).catch(() => {});
