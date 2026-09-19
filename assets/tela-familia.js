@@ -223,7 +223,8 @@
 
   function desenharPassos(el, codigo, comp, fam, arqs, completo, passo1, ab, inativos) {
     const base = '#/empresa/' + encodeURIComponent(codigo) + '/fornecedores/' + U.anoMes(comp) + '/';
-    const ativos = fam.passos.filter((p) => !inativos.has(p.id));
+    // Passo que sai de outro (1.3 sai do ①) some junto quando o outro está inativo.
+    const ativos = fam.passos.filter((p) => !inativos.has(p.id) && !(p.dependeDe && inativos.has(p.dependeDe)));
     if (!ativos.length) {
       el.innerHTML = '<div class="cartao"><div class="vazio">Todos os passos desta família estão inativos nesta empresa. Ative em "Passos inativos", lá embaixo.</div></div>';
       return;
@@ -234,6 +235,7 @@
           '<p class="suave" style="line-height:1.5">' + T.esc(p.texto) + '</p>' +
           '<div class="acoes"><span class="pilula cinza">em construção · Etapa ' + p.etapa + '</span>' + botaoInativar(p) + '</div></div>';
       }
+      if (p.id === 'passo13') return cartao13(p, base, completo, arqs, passo1);
       if (ab[p.id]) return cartaoAB(p, codigo, comp, base, ab[p.id]);
       const temF = arqs.F.length > 0;
       const temA = arqs.A.length > 0;
@@ -258,6 +260,19 @@
         // Os razões sobem DENTRO do passo (Dony, 15/09/2026): Abrir fica sempre liberado.
         '<div class="acoes"><a class="botao primario" href="' + base + 'passo1">' + (temF && temA ? 'Abrir →' : '📁 Abrir e subir arquivos') + '</a>' + botaoInativar(p) + '</div></div>';
     }).join('');
+  }
+
+  // 1.3 · razão limpo (Dony, 19/09/2026): sai do resultado do ① (os mesmos arquivos e decisões); abre com o ① pronto.
+  function cartao13(p, base, completo, arqs, passo1) {
+    const pronto = completo && arqs.F.length > 0 && arqs.A.length > 0;
+    const estado = pronto ? '<span class="pilula verde">pronto</span>' : '<span class="pilula cinza">espera o ①</span>';
+    const porque = pronto ? '' : 'Sai do Passo ①: ' + (!completo ? 'marque os dois itens de "Antes de conciliar"' : 'carregue os dois razões dentro do ①') + '.';
+    return '<div class="cartao passo"><div class="linha-flex"><span class="numero">' + p.numero + '</span><h3 style="flex:1">' + T.esc(p.titulo) + '</h3>' + estado + '</div>' +
+      '<p class="suave" style="line-height:1.5">' + T.esc(p.texto) + '</p>' +
+      (pronto && !passo1 ? '<p class="suave pequeno">O ① ainda não tem decisão gravada: sai com as reclassificações que o programa sugere.</p>' : '') +
+      (porque ? '<p class="pequeno" style="color:var(--ambar)">' + T.esc(porque) + '</p>' : '') +
+      '<div class="acoes">' + (pronto ? '<a class="botao primario" href="' + base + 'passo13">Abrir →</a>' : '<a class="botao" href="' + base + 'passo1">Abrir o ①</a>') +
+      botaoInativar(p) + '</div></div>';
   }
 
   // Cartão de um passo A × B (③ contas a pagar ou ② adiantamentos): precisa do aging do mês

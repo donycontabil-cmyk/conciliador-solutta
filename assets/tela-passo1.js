@@ -32,23 +32,62 @@
   // ------------------------------------------------------------------
   // Abrir
   // ------------------------------------------------------------------
-  async function mostrar(el, codigo, anoMes, conferir) {
+  // Os dados do ① de uma competência: arquivos, registro com as decisões e a entrada do motor. Serve também
+  // o 1.3 (razão limpo), que parte do mesmo cálculo. null = outra tela foi aberta no meio do caminho.
+  async function carregarDados(codigo, anoMes, conferir) {
     const arm = app().armazenamento;
     const emp = app().empresas.find((e) => String(e.codigo) === String(codigo));
+    if (!emp) return { erro: 'Empresa não cadastrada.' };
     const comp = anoMes + '-01';
-    const voltar = '#/empresa/' + encodeURIComponent(codigo) + '/fornecedores/' + anoMes;
-    if (!emp) { el.innerHTML = '<div class="aviso ambar">Empresa não cadastrada. <a href="#/">Voltar</a></div>'; return; }
-    T.carregando(el, 'Abrindo o Passo ① de ' + U.nomeCompetencia(comp) + '…');
-
     const concs = await arm.conciliacoes(codigo, comp);
     const metas = await arm.arquivos(codigo);
-    if (conferir && !conferir()) return;
+    if (conferir && !conferir()) return null;
     const arqs = raiz.TelaFamilia.arquivosDoPasso1(metas, comp);
-    // Os arquivos sobem AQUI, cada um no seu lugar (Dony, 15/09/2026: "tem que ser em todas").
     // Subir continua liberado com o checklist pendente; a conciliação, não (Parte 7.1).
     const checklist = concs.find((c) => c.id === raiz.TelaFamilia.idChecklist(codigo, comp));
     const checklistOk = raiz.TelaFamilia.checklistCompleto(checklist);
     const falta = !arqs.F.length || !arqs.A.length;
+    const dados = { emp, comp, arqs, checklistOk, falta };
+    if (!checklistOk || falta) return dados;
+    const carregar = async (m) => ({ meta: m, conteudo: await arm.conteudoDoArquivo(m.id) });
+    const F = await Promise.all(arqs.F.map(carregar));
+    const A = await Promise.all(arqs.A.map(carregar));
+    const pagar = arqs.pagar ? await carregar(arqs.pagar) : null;
+    if (conferir && !conferir()) return null;
+    const idReg = raiz.TelaFamilia.idPasso1(codigo, comp);
+    const registro = concs.find((c) => c.id === idReg) || {
+      id: idReg, codigo, tipo: 'fornecedor_adiantamento', competencia: comp, situacao: 'andamento', arquivos: [], decisoes: {}, resumo: {},
+    };
+    const d = registro.decisoes || {};
+    const fonte = (x) => ({ arquivoId: x.meta.id, conta: x.conteudo.conta, saldoAnterior: x.conteudo.conta.saldoAnterior,
+      saldoFinal: x.conteudo.conta.saldoFinalDeclarado, lancamentos: x.conteudo.conta.lancamentos, periodo: x.conteudo.periodo });
+    const periodos = F.concat(A).map((x) => x.conteudo.periodo).filter(Boolean);
+    const menor = periodos.map((p) => U.lerData(p.de)).filter(Boolean).sort((a, b) => a.numero - b.numero)[0];
+    const maior = periodos.map((p) => U.lerData(p.ate)).filter(Boolean).sort((a, b) => b.numero - a.numero)[0];
+    return Object.assign(dados, {
+      registro, arquivos: { F, A, pagar },
+      entrada: {
+        natureza: 'fornecedores', competencia: comp,
+        periodo: menor && maior ? { de: menor.texto, ate: maior.texto } : null,
+        contas: { F: F.map(fonte), A: A.map(fonte) },
+        titulos: pagar ? pagar.conteudo.titulos : [],
+      },
+      decisoes: {
+        recusadas: d.recusadas || [], aceitas: d.aceitas || [], manuais: d.manuais || [], desfeitas: d.desfeitas || [],
+        donos: d.donos || {}, historico: d.historico || [],
+      },
+    });
+  }
+
+  async function mostrar(el, codigo, anoMes, conferir) {
+    const comp = anoMes + '-01';
+    const voltar = '#/empresa/' + encodeURIComponent(codigo) + '/fornecedores/' + anoMes;
+    T.carregando(el, 'Abrindo o Passo ① de ' + U.nomeCompetencia(comp) + '…');
+    const dados = await carregarDados(codigo, anoMes, conferir);
+    if (!dados) return;
+    if (dados.erro) { el.innerHTML = '<div class="aviso ambar">' + T.esc(dados.erro) + ' <a href="#/">Voltar</a></div>'; return; }
+    const { emp, arqs, checklistOk, falta } = dados;
+    // Os arquivos sobem AQUI, cada um no seu lugar (Dony, 15/09/2026: "tem que ser em todas").
     if (!checklistOk || falta) {
       el.innerHTML = '<a class="voltar" href="' + voltar + '">← Fornecedores · ' + U.nomeCompetencia(comp) + '</a>' +
         '<div class="cabecalho"><div class="titulos"><h1>Passo ① · Fornecedores × Adiantamento</h1>' +
@@ -62,38 +101,15 @@
       ligarPainelDoPasso1(el.querySelector('.arquivos-passo'), codigo, comp, arqs);
       return;
     }
-    const carregar = async (m) => ({ meta: m, conteudo: await arm.conteudoDoArquivo(m.id) });
-    const F = await Promise.all(arqs.F.map(carregar));
-    const A = await Promise.all(arqs.A.map(carregar));
-    const pagar = arqs.pagar ? await carregar(arqs.pagar) : null;
-    if (conferir && !conferir()) return;
-
-    const idReg = raiz.TelaFamilia.idPasso1(codigo, comp);
-    const registro = concs.find((c) => c.id === idReg) || {
-      id: idReg, codigo, tipo: 'fornecedor_adiantamento', competencia: comp, situacao: 'andamento', arquivos: [], decisoes: {}, resumo: {},
-    };
-    const d = registro.decisoes || {};
-    const fonte = (x) => ({ arquivoId: x.meta.id, conta: x.conteudo.conta, saldoAnterior: x.conteudo.conta.saldoAnterior,
-      saldoFinal: x.conteudo.conta.saldoFinalDeclarado, lancamentos: x.conteudo.conta.lancamentos, periodo: x.conteudo.periodo });
-    const periodos = F.concat(A).map((x) => x.conteudo.periodo).filter(Boolean);
-    const menor = periodos.map((p) => U.lerData(p.de)).filter(Boolean).sort((a, b) => a.numero - b.numero)[0];
-    const maior = periodos.map((p) => U.lerData(p.ate)).filter(Boolean).sort((a, b) => b.numero - a.numero)[0];
+    const registro = dados.registro;
 
     // A tela mora num contêiner próprio: ao sair dela, o contêiner some junto com os eventos.
     el.innerHTML = '<div class="tela-passo1"></div>';
     E = {
       el: el.firstChild, codigo, comp, emp, voltar, registro,
-      arquivos: { F, A, pagar },
-      entrada: {
-        natureza: 'fornecedores', competencia: comp,
-        periodo: menor && maior ? { de: menor.texto, ate: maior.texto } : null,
-        contas: { F: F.map(fonte), A: A.map(fonte) },
-        titulos: pagar ? pagar.conteudo.titulos : [],
-      },
-      decisoes: {
-        recusadas: d.recusadas || [], aceitas: d.aceitas || [], manuais: d.manuais || [], desfeitas: d.desfeitas || [],
-        donos: d.donos || {}, historico: d.historico || [],
-      },
+      arquivos: dados.arquivos,
+      entrada: dados.entrada,
+      decisoes: dados.decisoes,
       cache: {},
       aba: app().lerLocal('conciliador-solutta.aba-passo1') || 'bateuF',
       filtros: {},
@@ -207,6 +223,8 @@
       '<p class="suave pequeno">Fornecedores: ' + contaTxt(E.arquivos.F) + ' · Adiantamento: ' + contaTxt(E.arquivos.A) +
       (E.arquivos.pagar ? ' · Contas a pagar: ' + E.arquivos.pagar.meta.titulos + ' títulos (ajuda a reconhecer nomes)' : '') + '</p></div>' +
       '<div class="linha-flex" style="gap:12px"><span class="guardado" id="guardado" title="Cada decisão é gravada na hora, sozinha">' + (E.guardadoEm ? 'guardado às ' + U.horaLocal(E.guardadoEm) : 'nenhuma decisão tomada ainda') + '</span>' +
+      // 1.3 (Dony, 19/09/2026): o que sobra em cada conta depois deste passo, para imprimir e mandar.
+      '<button type="button" class="botao" data-acao="razao-limpo" title="1.3 · Razão limpo: só o que compõe o saldo de cada conta depois deste passo, por lançamento ou por fornecedor, para imprimir ou baixar em Excel">📄 1.3 Razão limpo</button>' +
       // Arquivos em cima à direita (Dony, 15/09/2026: "um lugar de carregar novos arquivos" e excluir).
       raiz.TelaSubir.botao(chaveDoPainel1(E.codigo, E.comp)) + '</div></div>' +
       painelDoPasso1(E.codigo, E.comp, E.arqs, false) +
@@ -672,6 +690,8 @@
       const acao = alvo.closest('[data-acao]');
       if (acao) {
         const a = acao.getAttribute('data-acao');
+        // 1.3: espera a última decisão ser gravada, para o razão limpo sair com ela.
+        if (a === 'razao-limpo') { acao.disabled = true; await E.fila; app().ir(E.voltar + '/passo13'); return; }
         if (a === 'baixar') baixarArquivo();
         if (a === 'limpar-selecao') { E.selecao.clear(); redesenharAbaMantendoRolagem(); }
         if (a === 'reclassificar-mao') await reclassificarAMao();
@@ -857,5 +877,5 @@
     gravar('dono-trocado', digital, resultado.nome);
   }
 
-  raiz.TelaPasso1 = { mostrar, estado: () => E };
+  raiz.TelaPasso1 = { mostrar, estado: () => E, carregarDados };
 })(self);

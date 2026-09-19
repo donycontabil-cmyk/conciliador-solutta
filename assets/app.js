@@ -11,7 +11,7 @@
   // Aqui se confere: faltando algum, a tela diz qual.
   const MODULOS = ['CONFIG', 'XLSX', 'Util', 'LerPlanilha', 'LerRazao', 'LerFinanceiro', 'LerBalancete', 'Familias', 'Leitor', 'MotorNomes',
     'MotorReclass', 'MotorFechamento', 'MotorTerceiro', 'MotorApresentacao', 'ExcelBonito', 'RelatorioCliente', 'LayoutAjustes', 'Demonstracao', 'Diagnostico', 'Armazenamento', 'ArmazenamentoPasta', 'ArmazenamentoMemoria',
-    'Tela', 'TelaPasta', 'TelaCarteira', 'TelaEmpresa', 'TelaFamilia', 'TelaSubir', 'TelaPasso1', 'TelaPasso3', 'TelaRelatorio3', 'TelaApresentacao', 'TelaSuporte'];
+    'Tela', 'TelaPasta', 'TelaCarteira', 'TelaEmpresa', 'TelaFamilia', 'TelaSubir', 'TelaPasso1', 'TelaPasso13', 'TelaPasso3', 'TelaRelatorio3', 'TelaApresentacao', 'TelaSuporte'];
 
   const CHAVE_USUARIO = 'conciliador-solutta.usuario';
   // Menu da esquerda fixo ou flutuante (Dony, 18/09/2026: "uma setinha que eu possa fixar quando eu quiser;
@@ -188,6 +188,8 @@
       else if (r.nome === 'apresentacao') await raiz.TelaApresentacao.mostrar(conteudo, r.codigo, r.ano, conferir);
       else if (r.nome === 'familia') await raiz.TelaFamilia.mostrar(conteudo, r.codigo, r.familia, r.anoMes, conferir);
       else if (r.nome === 'passo' && r.passo === 'passo1') await raiz.TelaPasso1.mostrar(conteudo, r.codigo, r.anoMes, conferir);
+      // 1.3 · razão limpo: o que compõe os saldos depois do ① (para imprimir e mandar ao financeiro).
+      else if (r.nome === 'passo' && r.passo === 'passo13') await raiz.TelaPasso13.mostrar(conteudo, r.codigo, r.anoMes, conferir);
       // Passos no modelo "Conciliar A × B": ③ Fornecedores × contas a pagar e ② Adiantamento × financeiro.
       else if (r.nome === 'passo' && (r.passo === 'passo3' || r.passo === 'passo2')) await raiz.TelaPasso3.mostrar(conteudo, r.codigo, r.anoMes, conferir, r.passo);
       else if (r.nome === 'passo' && (r.passo === 'passo3-relatorio' || r.passo === 'passo2-relatorio')) await raiz.TelaRelatorio3.mostrar(conteudo, r.codigo, r.anoMes, conferir, r.passo.replace('-relatorio', ''));

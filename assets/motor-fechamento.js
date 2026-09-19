@@ -653,8 +653,114 @@
     };
   }
 
+  // ------------------------------------------------------------------
+  // 1.3 — RAZÃO LIMPO: o que compõe o saldo de cada conta depois do ① (Dony, 19/09/2026: "o razão de
+  // fornecedores limpo, só o que tiver a crédito, já que a gente tirou tudo que era débito; e o razão de
+  // adiantamento, só o que for a débito — só os saldos que ambos compõem —, por lançamento ou por fornecedor,
+  // para mandar ao financeiro encontrar o que aconteceu com esses pagamentos").
+  // Parte do resultado do calcularPasso1 e usa as reclassificações do arquivo de ajustes (marcadas e à mão):
+  //  - o que bateu dentro do razão sai;
+  //  - reclassificação direta: abate o mesmo valor nas duas contas, no fim da competência;
+  //  - inversa: o saldo devedor do fornecedor sai de fornecedores e entra no adiantamento como os PAGAMENTOS
+  //    que o formam (as notas abatem os pagamentos mais antigos; ficam os mais novos);
+  //  - em cada fornecedor e conta, o que diminui o saldo abate o que forma o saldo, do mais antigo para o
+  //    mais novo (a nota mais antiga é paga primeiro). Fica só o que forma o saldo, com o valor em aberto.
+  // Conferência: a soma do que fica + o saldo anterior (que o razão não abre por fornecedor) = o em aberto do ①.
+  // ------------------------------------------------------------------
+  // Dentro de um fornecedor e de uma conta: o negativo abate o positivo, do mais antigo para o mais novo, e
+  // cada um guarda o que o abateu (resto = o que sobra em aberto).
+  function abater(itens) {
+    const ordem = (a, b) => a.dia - b.dia || a.i - b.i;
+    const formam = itens.filter((x) => x.resto > 0).sort(ordem);
+    const baixam = itens.filter((x) => x.resto < 0).sort(ordem);
+    let k = 0;
+    for (const b of baixam) {
+      while (b.resto < 0 && k < formam.length) {
+        const f = formam[k];
+        const v = Math.min(f.resto, -b.resto);
+        f.resto -= v;
+        b.resto += v;
+        f.abatimentos.push({ data: b.data, valor: v, historico: b.historico, numero: b.numero, origem: b.origem });
+        b.abatimentos.push({ data: f.data, valor: v, historico: f.historico, numero: f.numero, origem: f.origem });
+        if (f.resto === 0) k++;
+      }
+    }
+  }
+
+  function composicao(r) {
+    const fim = Util.fimDaCompetencia(r.competencia) || Util.hoje();
+    const pools = { F: new Map(), A: new Map() };
+    const doPool = (lado, chave) => { if (!pools[lado].has(chave)) pools[lado].set(chave, []); return pools[lado].get(chave); };
+    const daLinha = (l) => ({ lado: l.lado, chave: l.dono.chave, data: l.data, dia: l.dia, i: l.i, historico: l.historico || '', numero: l.numero || '',
+      contrapartida: l.contrapartida || '', conta: l.conta, contaNome: l.contaNome || '', valor: l.valor, resto: l.valor, origem: 'razao', abatimentos: [], digital: l.digital });
+    const virtual = (lado, chave, valor, historico, origem) => ({ lado, chave, data: fim.texto, dia: fim.numero, i: Infinity, historico: historico || '', numero: '',
+      contrapartida: '', conta: '', contaNome: '', valor, resto: valor, origem, abatimentos: [], virtual: true });
+    const hist = (x) => (x.lancamentos && x.lancamentos[0] ? x.lancamentos[0].historico : '');
+    const movidas = new Set();
+
+    // Inversas: as linhas de fornecedores saem de lá; o que elas deixam devedor (os pagamentos que sobram
+    // depois de as notas abaterem os mais antigos) entra no adiantamento do dono de cada linha.
+    const inversas = r.sugestoes.filter((s) => s.marcada && s.sentido === 'inversa').map((s) => ({ linhas: s.linhasF, historico: hist(s) }))
+      .concat(r.manuais.filter((m) => m.sentido === 'inversa').map((m) => ({ linhas: m.linhasF, historico: hist(m) })));
+    for (const inv of inversas) {
+      const itens = inv.linhas.map((i) => r.linhas[i]).map((l) => { movidas.add(l.i); return daLinha(l); });
+      abater(itens);
+      for (const x of itens) {
+        if (x.resto >= 0) continue;
+        doPool('A', x.chave).push(Object.assign({}, x, { lado: 'A', valor: -x.valor, resto: -x.resto, origem: 'inversa', reclassificacao: inv.historico,
+          abatimentos: x.abatimentos.map((a) => Object.assign({}, a, { daNota: true })) }));
+      }
+    }
+    // O que não bateu dentro do razão (e não foi para o adiantamento pela inversa).
+    for (const l of r.linhas) {
+      if (l.situacao === 'bateu' || movidas.has(l.i)) continue;
+      doPool(l.lado, l.dono.chave).push(daLinha(l));
+    }
+    // Diretas: abatem o mesmo valor nas duas contas, no fim da competência (cada conta no dono das linhas dela).
+    const dono = (idxs, reserva) => (idxs && idxs.length ? r.linhas[idxs[0]].dono.chave : reserva);
+    for (const s of r.sugestoes) {
+      if (!s.marcada || s.sentido !== 'direta') continue;
+      for (const lado of ['F', 'A']) doPool(lado, s.fornecedor).push(virtual(lado, s.fornecedor, -s.valor, hist(s), 'direta'));
+    }
+    for (const m of r.manuais) {
+      if (m.sentido !== 'direta') continue;
+      doPool('F', dono(m.linhasF, m.chave)).push(virtual('F', dono(m.linhasF, m.chave), -m.valor, hist(m), 'direta'));
+      doPool('A', dono(m.linhasA, m.chave)).push(virtual('A', dono(m.linhasA, m.chave), -m.valor, hist(m), 'direta'));
+    }
+
+    const nomeDe = (chave) => (chave === SEM ? { nome: 'Sem fornecedor', cnpj: '' } : r.fornecedores[chave] || { nome: chave, cnpj: '' });
+    function daConta(lado) {
+      const itens = [];
+      for (const [chave, lista] of pools[lado]) {
+        // Linhas sem fornecedor não se abatem umas com as outras (podem ser de fornecedores diferentes): ficam como estão.
+        if (chave !== SEM) abater(lista);
+        const f = nomeDe(chave);
+        for (const x of lista) if (x.resto !== 0) itens.push(Object.assign(x, { nome: f.nome, cnpj: f.cnpj || '' }));
+      }
+      itens.sort((a, b) => a.dia - b.dia || (a.nome < b.nome ? -1 : a.nome > b.nome ? 1 : 0) || a.i - b.i);
+      const porChave = new Map();
+      for (const x of itens) {
+        if (!porChave.has(x.chave)) porChave.set(x.chave, { chave: x.chave, nome: x.nome, cnpj: x.cnpj, itens: [], total: 0 });
+        const g = porChave.get(x.chave);
+        g.itens.push(x);
+        g.total += x.resto;
+      }
+      const fornecedores = Array.from(porChave.values()).sort((a, b) => (a.chave === SEM) - (b.chave === SEM) || Util.normalizarNome(a.nome).localeCompare(Util.normalizarNome(b.nome)));
+      const total = itens.reduce((t, x) => t + x.resto, 0);
+      const t = r.totais[lado];
+      return {
+        lado, titulo: r.textos[lado], contas: r.contas[lado], saldoAnterior: t.saldoAnterior, itens, fornecedores, total,
+        saldo: t.saldoAnterior + total, emAberto: t.emAberto, confere: t.saldoAnterior + total === t.emAberto,
+        // Conta com o lado trocado (fornecedores devedor, adiantamento credor) que não foi reclassificada.
+        invertidos: itens.filter((x) => x.resto < 0).length,
+        parciais: itens.filter((x) => x.resto !== x.valor).length,
+      };
+    }
+    return { competencia: r.competencia, fim: fim.texto, F: daConta('F'), A: daConta('A') };
+  }
+
   return {
     JANELA_DIAS, MAX_ITENS, MAX_CANDIDATAS, MAX_PASSOS, TEXTOS,
-    valorNoLado, saldoNoLado, montarLinhas, buscarSoma, etapa1, aplicarManuais, idDaBatida, idDaManual, calcularPasso1,
+    valorNoLado, saldoNoLado, montarLinhas, buscarSoma, etapa1, aplicarManuais, idDaBatida, idDaManual, calcularPasso1, composicao,
   };
 });

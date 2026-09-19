@@ -110,6 +110,12 @@
           texto: 'Confere no razão novo se cada ajuste do ① entrou com valor, data e contas certas.', construido: false, etapa: 2 },
         { id: 'passo12', numero: '1.2', tipo: 'fornecedor_auditoria_razao', titulo: 'Auditoria do razão',
           texto: 'Guarda o razão final congelado e avisa quando alguém mexe num mês já fechado.', construido: false, etapa: 2 },
+        // Dony, 19/09/2026: "o razão de fornecedores limpo, só o que tiver a crédito, e o de adiantamento, só o que for a
+        // débito — só os saldos que ambos compõem —, por lançamento ou por fornecedor, para imprimir e mandar ao financeiro".
+        // Sai do resultado do ① (o checklist e os razões são os dele).
+        { id: 'passo13', numero: '1.3', tipo: 'fornecedor_razao_limpo', titulo: 'Razão limpo: o que compõe os saldos',
+          texto: 'Depois do ①, só o que fica em aberto em cada conta: em fornecedores, as notas a pagar; no adiantamento, os pagamentos sem nota. Por fornecedor ou por lançamento, para imprimir ou baixar em Excel e mandar a quem vai investigar.',
+          construido: true, semChecklist: true, dependeDe: 'passo1' },
         // Dony, 15/09/2026: "exatamente igual ao de fornecedores" — Parte A = aging de adiantamentos do
         // mês passado + razão de adiantamento do mês; Parte B = aging de adiantamentos do mês.
         { id: 'passo2', numero: '②', tipo: 'adiantamento_financeiro', titulo: 'Adiantamento × financeiro',
