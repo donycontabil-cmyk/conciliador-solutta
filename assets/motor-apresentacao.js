@@ -899,6 +899,75 @@
   }
 
   // ------------------------------------------------------------------
+  // COMPARATIVO com o ano anterior (Dony, 21/09/2026: "quero poder jogar os balancetes de 2025 das empresas,
+  // para poder fazer comparação" — escolheu a aba Comparativo): os meses escolhidos do ano ao lado dos MESMOS
+  // meses do ano anterior. DRE: a soma dos meses; balanço: o saldo do fim do último mês escolhido; indicadores:
+  // o período (resultado somado nos meses, balanço do último mês). Variação em R$ (atual − anterior) e em %
+  // sobre o valor do ano anterior sem o sinal: custo que cresce dá variação negativa, como o lucro que cai.
+  // Conta que só existe num dos anos entra no lugar dela da árvore, com zero no outro.
+  // ks: os índices dos meses (0 a 11) escolhidos no ano atual.
+  // ------------------------------------------------------------------
+  function comparativo(atual, anterior, ks) {
+    const comBalancete = (rel) => ks.filter((k) => rel.meses[k] && rel.meses[k].tem);
+    const kA = comBalancete(atual), kB = comBalancete(anterior);
+    const soma = (vs, lista) => { let s = 0, tem = false; lista.forEach((k) => { const v = (vs || [])[k]; if (v !== null && v !== undefined) { s += v; tem = true; } }); return tem ? s : null; };
+    const variacao = (a, b) => ({ varR: a === null || b === null ? null : a - b, varP: a === null || b === null || !b ? null : (a - b) / Math.abs(b) });
+    // As linhas dos dois anos, na ordem do atual; a que só existe no anterior entra antes da próxima que os dois têm.
+    function mesclar(la, lb, chave) {
+      const emA = new Set(la.map(chave));
+      const posB = new Map(lb.map((x, i) => [chave(x), i]));
+      const out = [];
+      let j = 0;
+      la.forEach((x) => {
+        const p = posB.get(chave(x));
+        if (p !== undefined) {
+          for (; j < p; j++) if (!emA.has(chave(lb[j]))) out.push({ b: lb[j] });
+          j = Math.max(j, p + 1);
+        }
+        out.push({ a: x, b: p !== undefined ? lb[p] : null });
+      });
+      for (; j < lb.length; j++) if (!emA.has(chave(lb[j]))) out.push({ b: lb[j] });
+      return out;
+    }
+    const doAno = (l, lista) => (l ? soma(l.valores, lista) : lista.length ? 0 : null);
+
+    const rlA = soma((atual.dre.mensal.linhas.find((l) => l.id === 'receitaLiquida') || {}).valores, kA);
+    const rlB = soma((anterior.dre.mensal.linhas.find((l) => l.id === 'receitaLiquida') || {}).valores, kB);
+    const dre = mesclar(atual.dre.mensal.linhas, anterior.dre.mensal.linhas, (l) => l.id).map(({ a, b }) => {
+      const base = a || b;
+      const va = doAno(a, kA), vb = doAno(b, kB);
+      return Object.assign({ id: base.id, tipo: base.tipo, grupo: base.grupo, conta: base.conta, rotulo: base.rotulo, categoria: base.categoria, destaque: !!base.destaque,
+        semLinha: !!base.semLinha, atual: va, anterior: vb, avAtual: div(va, rlA), avAnterior: div(vb, rlB), soNoAnterior: !a, soNoAtual: !b }, variacao(va, vb));
+    });
+    dre.forEach((l) => { if (l.tipo === 'grupo') l.filhas = dre.filter((x) => x.tipo === 'analitica' && x.grupo === l.id).length; });
+
+    const kUlt = kA.length ? kA[kA.length - 1] : null;
+    const temB = kUlt !== null && !!(anterior.meses[kUlt] && anterior.meses[kUlt].tem);
+    const balanco = mesclar(atual.balanco.linhas, anterior.balanco.linhas, (l) => l.id || 'c:' + l.conta).map(({ a, b }) => {
+      const base = a || b;
+      const va = kUlt === null ? null : a ? a.valores[kUlt] : 0;
+      const vb = !temB ? null : b ? b.valores[kUlt] : 0;
+      return Object.assign({ id: base.id, tipo: base.tipo, conta: base.conta, rotulo: base.rotulo, nivel: base.nivel, destaque: !!base.destaque, atual: va, anterior: vb }, variacao(va, vb));
+    });
+
+    const indA = kA.length ? indicadores(atual, kA, { acumulado: true }) : null;
+    const indB = kB.length ? indicadores(anterior, kB, { acumulado: true }) : null;
+    const doPeriodo = (ind, i) => { if (!ind) return null; const vs = ind.linhas[i].valores; return vs[vs.length - 1]; };
+    const indic = INDICADORES.map((d, i) => {
+      const va = doPeriodo(indA, i), vb = doPeriodo(indB, i);
+      return Object.assign({}, d, { atual: va, anterior: vb, diferenca: va === null || vb === null ? null : va - vb });
+    });
+
+    return {
+      mesesAtual: kA, mesesAnterior: kB,
+      // Os meses escolhidos que o ano anterior não tem (a comparação desses meses fica só de um lado).
+      faltamNoAnterior: ks.filter((k) => !(anterior.meses[k] && anterior.meses[k].tem)),
+      mesDoBalanco: kUlt, balancoSemAnterior: kUlt !== null && !temB,
+      dre, balanco, indicadores: indic,
+    };
+  }
+
+  // ------------------------------------------------------------------
   // Versões de um balancete: contas que entraram, saíram e mudaram (mesmo formato do compararVersoes
   // do razão e do aging: entraram e saíram trazem também as que mudaram).
   // ------------------------------------------------------------------
@@ -917,6 +986,6 @@
     return { tipo: 'balancete', iguais: la.length - sairam.length, entraram, sairam, mudaram, qtdAntes: la.length, qtdDepois: ld.length, antes: totais(la), depois: totais(ld) };
   }
 
-  return { montar, compararBalancetes, indicadores, INDICADORES, contasDoBalanco, MODELO_DRE, FORA_DA_DRE, PARAMETROS, AJUSTES_MODELO, CONTA_PAT_MODELO, PREMISSAS, rotuloMes, compararContas, valorUsado,
+  return { montar, compararBalancetes, indicadores, comparativo, INDICADORES, contasDoBalanco, MODELO_DRE, FORA_DA_DRE, PARAMETROS, AJUSTES_MODELO, CONTA_PAT_MODELO, PREMISSAS, rotuloMes, compararContas, valorUsado,
     LINHAS_DO_MAPA, sugerirMapaDre, mapaDoModelo, linhaNoMapa, linhaDoModelo, avaliarModelo, linhasSugeridas, nomeNormal };
 });

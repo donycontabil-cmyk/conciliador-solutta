@@ -29,6 +29,7 @@
     { id: 'resumo', titulo: 'Resumo' },
     { id: 'balanco', titulo: 'Balanço patrimonial' },
     { id: 'indicadores', titulo: 'Indicadores' },
+    { id: 'comparativo', titulo: 'Comparativo' },
     { id: 'dre-mensal', titulo: 'DRE mensal' },
     { id: 'dre-trimestral', titulo: 'DRE trimestral' },
     { id: 'balancete-mensal', titulo: 'Balancete mensal' },
@@ -42,7 +43,7 @@
   // Estado da tela (continua entre redesenhos).
   const E = { codigo: null, ano: null, emp: null, rel: null, registro: null, config: {}, lugares: [], metas: [],
     aba: 'dre-mensal', avah: true, nivel: 5, semZeradas: false, abertos: new Set(), selecao: null, marcarLalur: false, balancetes: [], fila: null, clienteMes: null, cacheCliente: null, ultimoCliente: null, casas: 2, milhar: false,
-    dreEdicao: null };
+    dreEdicao: null, balancetesAnt: [], relAnt: null };
   (function lerPreferencias() {
     try {
       const p = JSON.parse((raiz.localStorage && raiz.localStorage.getItem(CHAVE_PREF)) || '{}') || {};
@@ -94,7 +95,7 @@
   // nem movimento; se tiver saldo, logo tem movimento"): Todas · Sem as zeradas. Vale no balanço, na DRE, no
   // balancete e nas linhas da DRE (tela, impressão e Excel). Esconder não muda nenhum total: a conta escondida
   // é zero em todas as colunas.
-  const ABAS_COM_CONTAS = { balanco: true, 'dre-mensal': true, 'dre-trimestral': true, 'balancete-mensal': true, 'balancete-trimestral': true };
+  const ABAS_COM_CONTAS = { balanco: true, comparativo: true, 'dre-mensal': true, 'dre-trimestral': true, 'balancete-mensal': true, 'balancete-trimestral': true };
   function opcoesContas() {
     const bt = [[false, 'Todas', 'Mostra todas as contas do plano'], [true, 'Sem as zeradas', 'Esconde as contas sem saldo e sem movimento nos meses da tela (conta com saldo continua aparecendo)']]
       .map(([z, texto, dica]) => '<button type="button" class="seg' + (E.semZeradas === z ? ' ativo' : '') + '" data-zeradas="' + (z ? 1 : 0) + '" title="' + dica + '" aria-pressed="' + (E.semZeradas === z) + '">' + texto + '</button>').join('');
@@ -163,10 +164,19 @@
       const c = await arm.conteudoDoArquivo(l.arquivos[0].id);
       if (c && c.contas) balancetes.push({ competencia: l.competencia, contas: c.contas });
     }
+    // Os balancetes do ano anterior, para a aba Comparativo.
+    const balancetesAnt = [];
+    for (let i = 1; i <= 12; i++) {
+      const comp = (anoEscolhido - 1) + '-' + String(i).padStart(2, '0') + '-01';
+      const doMes = doTipo.filter((m) => m.competencia === comp).sort((a, b) => U.paraMs(b.enviadoEm) - U.paraMs(a.enviadoEm));
+      if (!doMes.length) continue;
+      const c = await arm.conteudoDoArquivo(doMes[0].id);
+      if (c && c.contas) balancetesAnt.push({ competencia: comp, contas: c.contas });
+    }
     const registro = (await arm.conciliacoes(codigo, anoEscolhido + '-01-01')).find((r) => r.id === idRegistro(codigo, anoEscolhido)) || null;
     if (conferir && !conferir()) return;
     if (E.codigo !== codigo || E.ano !== anoEscolhido) { E.abertos = new Set(); E.selecao = null; E.dreEdicao = null; }
-    Object.assign(E, { codigo, ano: anoEscolhido, emp, metas, lugares, registro, balancetes, config: (registro && registro.config) || {} });
+    Object.assign(E, { codigo, ano: anoEscolhido, emp, metas, lugares, registro, balancetes, balancetesAnt, relAnt: null, config: (registro && registro.config) || {} });
     E.rel = montarRel();
     // O ano anterior sempre aparece na escolha (Dony, 21/09/2026: "quero poder jogar os balancetes de 2025 das
     // empresas, para poder fazer comparação"): sem balancete nenhum dele ainda, é por ali que eles sobem.
@@ -257,6 +267,14 @@
         '▲▼ = mudança sobre a coluna anterior (verde melhora, vermelho piora).</span>';
     }
     if (E.aba === 'cliente') return '';
+    if (E.aba === 'comparativo') {
+      if (dreFechada()) return '';
+      return '<button type="button" class="botao pequeno" data-opcao="abrir-tudo">＋ Abrir todas as contas</button>' +
+        '<button type="button" class="botao pequeno" data-opcao="fechar-tudo">－ Fechar todas</button>' +
+        '<label class="caixa-opcao"><input type="checkbox" data-opcao="avah"' + (E.avah ? ' checked' : '') + '> AV %</label>' +
+        '<span class="suave pequeno">Os meses escolhidos ao lado dos mesmos meses de ' + (E.ano - 1) + '. DRE: a soma dos meses; balanço: o fim do último mês. ' +
+        'Variação % sobre ' + (E.ano - 1) + ' (verde melhora, vermelho piora).</span>';
+    }
     if (E.aba === 'balanco') {
       return '<span class="suave pequeno">Conferência: ativo = passivo + patrimônio líquido + resultado do exercício pela DRE (o lucro dos meses desde o último encerramento). Tem que fechar em todos os meses.</span>';
     }
@@ -270,7 +288,7 @@
   // somar só os meses escolhidos. AH % continua sobre o mês anterior de verdade.
   // E.selecao: null = todos os meses com balancete; senão, Set de competências.
   // ------------------------------------------------------------------
-  const ABAS_MENSAIS = { resumo: true, balanco: true, indicadores: true, 'dre-mensal': true, 'balancete-mensal': true };
+  const ABAS_MENSAIS = { resumo: true, balanco: true, indicadores: true, comparativo: true, 'dre-mensal': true, 'balancete-mensal': true };
   function mesesComBalancete() { return E.rel.meses.filter((m) => m.tem); }
   function mesesVisiveis() {
     const com = mesesComBalancete();
@@ -329,7 +347,7 @@
   // O painel dos meses (como o exemplo que o Dony mandou): atalhos, o ano e um botão por mês.
   function seletorMeses() {
     if (!ABAS_MENSAIS[E.aba]) return '';
-    if ((E.aba === 'dre-mensal' && (dreFechada() || E.dreEdicao)) || (E.aba === 'indicadores' && dreFechada())) return '';
+    if ((E.aba === 'dre-mensal' && (dreFechada() || E.dreEdicao)) || ((E.aba === 'indicadores' || E.aba === 'comparativo') && dreFechada())) return '';
     const com = mesesComBalancete();
     const vis = new Set(mesesVisiveis().map((m) => m.comp));
     const todos = !E.selecao || vis.size === com.length;
@@ -372,6 +390,7 @@
     if (aba === 'resumo') return secaoResumo();
     if (aba === 'balanco') return secaoBalanco();
     if (aba === 'indicadores') return dreFechada() ? (impressao ? '' : tituloSecao('Indicadores financeiros e patrimoniais', '') + avisoDreFechada('Os indicadores ficam fechados')) : secaoIndicadores();
+    if (aba === 'comparativo') return dreFechada() ? (impressao ? '' : tituloSecao('Comparativo com ' + (E.ano - 1), '') + avisoDreFechada('O comparativo fica fechado')) : secaoComparativo(op);
     if (aba === 'cliente') return dreFechada() ? (impressao ? '' : avisoDreFechada('O relatório do cliente fica fechado')) : secaoCliente(op);
     if (/^dre-/.test(aba) && dreFechada() && impressao) return '';
     if (/^dre-/.test(aba) && (dreFechada() || E.dreEdicao) && !impressao) return secaoLinhasDre();
@@ -800,6 +819,8 @@
         else if (q === 'fechar-tudo') { E.dreEdicao.abertos.clear(); redesenharFolha(el); }
         return;
       }
+      const irAno = ev.target.closest('button[data-ir-ano]');
+      if (irAno) { app().ir('#/empresa/' + encodeURIComponent(E.codigo) + '/apresentacao/' + irAno.getAttribute('data-ir-ano')); return; }
       const lb = ev.target.closest('button[data-lalur]');
       if (lb) { marcarConta(el, lb.getAttribute('data-conta'), lb.getAttribute('data-lalur')); return; }
       const lt = ev.target.closest('button[data-lalur-tirar]');
@@ -993,6 +1014,125 @@
       '. Os indicadores que dependem dessas contas ficam vazios.</div></div>' : '';
     return tituloSecao('Indicadores financeiros e patrimoniais', T.esc(E.ano) + ' · liquidez, endividamento, rentabilidade e retorno (ROI e ROE) e prazos médios') + falta +
       '<div class="apres-caixa"><table class="apres indicadores"><thead><tr><th class="fixa">Indicador</th>' + colunas + '<th>Evolução</th></tr></thead><tbody>' + corpo + '</tbody></table></div>' + contas;
+  }
+
+  // ------------------------------------------------------------------
+  // COMPARATIVO com o ano anterior (Dony, 21/09/2026: "quero poder jogar os balancetes de 2025 das empresas,
+  // para poder fazer comparação" — escolheu a aba Comparativo): os meses escolhidos lado a lado com os mesmos
+  // meses do ano anterior. O relatório do ano anterior é montado com as mesmas linhas da DRE da empresa.
+  // ------------------------------------------------------------------
+  function relAnterior() {
+    if (!E.balancetesAnt || !E.balancetesAnt.length) return null;
+    const m = mapaDaEmpresa();
+    const chave = E.balancetesAnt.length + '|' + E.rel.dre.situacao + '|' + (m ? (m.conferidoEm || '') + Object.keys(m.contas).length : '');
+    if (!E.relAnt || E.relAnt.chave !== chave) {
+      E.relAnt = { chave, rel: motor().montar({ ano: E.ano - 1, balancetes: E.balancetesAnt, config: {}, mapaDre: m, dreModo: E.rel.dre.situacao === 'modelo' ? 'modelo' : undefined }) };
+    }
+    return E.relAnt.rel;
+  }
+  function comparativoVisivel() {
+    const ant = relAnterior();
+    return ant ? { ant, c: motor().comparativo(E.rel, ant, indicesVisiveis()) } : null;
+  }
+  // "Jan–Jul/26", "Jul/26", "Jan, Mar/26".
+  function periodoDoAno(rel, lista, ano) {
+    if (!lista.length) return 'sem balancete';
+    const r = rotuloSelecao(lista.map((k) => rel.meses[k]));
+    return /\/\d{2}$/.test(r) ? r : r + '/' + String(ano).slice(2);
+  }
+  function rotulosComparativo(c, ant) {
+    const k = c.mesDoBalanco;
+    return { atual: periodoDoAno(E.rel, c.mesesAtual, E.ano), anterior: periodoDoAno(ant, c.mesesAnterior, E.ano - 1),
+      balAtual: k === null ? '' : 'Fim de ' + E.rel.meses[k].rotulo, balAnterior: k === null ? '' : 'Fim de ' + ant.meses[k].rotulo };
+  }
+  // A variação com a cor: verde quando melhora, vermelho quando piora (na DRE e no balanço, o valor maior é melhor
+  // nas receitas e no lucro; nas linhas de custo e despesa o valor vem negativo, então o maior também é o melhor).
+  function variacaoCor(v, texto) {
+    if (v === null || v === undefined || !isFinite(v) || !Math.round(v * 1000)) return texto;
+    return '<span class="' + (v > 0 ? 'var-bom' : 'var-ruim') + '">' + texto + '</span>';
+  }
+  function difIndicador(l) {
+    const d = l.diferenca;
+    if (d === null || d === undefined || !isFinite(d) || Math.abs(d) < LIMITE_IND[l.tipo]) return d === null || d === undefined ? '' : '<span class="zero">–</span>';
+    const bom = (d > 0) === (l.melhor === 'maior');
+    const sinal = d > 0 ? '+' : '−';
+    const t = l.tipo === 'x' ? sinal + Math.abs(d).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + 'x'
+      : l.tipo === '%' ? sinal + (Math.abs(d) * 100).toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + ' p.p.'
+        : l.tipo === 'dias' ? sinal + Math.round(Math.abs(d)) + ' dias' : sinal + ' ' + dinheiro(Math.abs(d));
+    return '<span class="ind-seta ' + (bom ? 'bom' : 'ruim') + '">' + (d > 0 ? '▲' : '▼') + '</span> <span class="' + (bom ? 'var-bom' : 'var-ruim') + '">' + t + '</span>';
+  }
+  const zeradaNosDois = (l) => !Math.round(l.atual || 0) && !Math.round(l.anterior || 0);
+
+  function secaoComparativo(op) {
+    const x = comparativoVisivel();
+    const anoAnt = E.ano - 1;
+    if (!x) {
+      return tituloSecao('Comparativo com ' + anoAnt, '') +
+        '<div class="aviso ambar"><span class="icone-aviso">📂</span><div><b>Ainda não há balancete de ' + anoAnt + ' nesta empresa.</b> Para comparar, escolha <b>' + anoAnt +
+        '</b> no ano, lá em cima, e carregue o balancete de cada mês no lugar dele. Depois volte para ' + E.ano + ' e abra esta aba.' +
+        '<div style="margin-top:8px"><button type="button" class="botao" data-ir-ano="' + anoAnt + '">Ir para ' + anoAnt + '</button></div></div></div>';
+    }
+    const { c, ant } = x;
+    const rot = rotulosComparativo(c, ant);
+    const avah = E.avah;
+    const abrirTudo = !!(op && op.abrirTudo);
+    const faltam = c.faltamNoAnterior.map((k) => ant.meses[k].rotulo);
+    const aviso = faltam.length
+      ? '<div class="aviso ambar" style="margin:0 0 10px"><span class="icone-aviso">⚠️</span><div>' + anoAnt + ' não tem balancete de <b>' + T.esc(faltam.join(', ')) + '</b>: ' +
+        (c.mesesAnterior.length ? 'a comparação desses meses fica só com ' + E.ano + '.' : 'não há o que comparar nos meses escolhidos.') +
+        (c.balancoSemAnterior ? ' O balanço de ' + T.esc(ant.meses[c.mesDoBalanco].rotulo) + ' também fica sem o ano anterior.' : '') + '</div></div>'
+      : '';
+    // DRE: as linhas da DRE com os dois anos, a variação e (com AV %) a análise vertical de cada ano.
+    const nCols = 5 + (avah ? 2 : 0);
+    const SEM_FAIXA = { 'Subtotal CPC 51': true, Subtotal: true, Resultado: true };
+    let categoria = null;
+    const celulas = (l) => '<td class="num">' + dinheiro(l.atual) + '</td>' + (avah ? '<td class="num pct">' + pct(l.avAtual) + '</td>' : '') +
+      '<td class="num">' + dinheiro(l.anterior) + '</td>' + (avah ? '<td class="num pct">' + pct(l.avAnterior) + '</td>' : '') +
+      '<td class="num acum">' + variacaoCor(l.varR, dinheiro(l.varR)) + '</td><td class="num pct acum">' + variacaoCor(l.varP, pct(l.varP)) + '</td>';
+    const dre = c.dre.map((l) => {
+      let faixa = '';
+      if (l.categoria !== categoria) {
+        categoria = l.categoria;
+        if (!SEM_FAIXA[categoria]) faixa = '<tr class="cat"><td class="fixa">' + T.esc(categoria) + '</td><td colspan="' + (nCols - 1) + '"></td></tr>';
+      }
+      const aberto = abrirTudo || E.abertos.has(l.grupo || l.id);
+      if (l.tipo === 'analitica') {
+        if (!aberto || (E.semZeradas && zeradaNosDois(l))) return faixa;
+        const so = l.soNoAnterior ? ' <small class="suave">(só em ' + anoAnt + ')</small>' : l.soNoAtual ? ' <small class="suave">(nova em ' + E.ano + ')</small>' : '';
+        return faixa + '<tr class="analitica" data-de="' + T.esc(l.grupo) + '"><td class="fixa"><span class="cod">' + T.esc(l.conta) + '</span> ' + T.esc(l.rotulo) + so + '</td>' + celulas(l) + '</tr>';
+      }
+      if (l.tipo === 'grupo') {
+        return faixa + '<tr class="grupo" data-grupo="' + T.esc(l.id) + '" title="' + (aberto ? 'Fechar' : 'Abrir') + ' as ' + l.filhas + ' conta(s)"><td class="fixa"><span class="abre nao-imprimir">' +
+          (aberto ? '▾' : '▸') + '</span>' + T.esc(l.rotulo) + ' <small>' + l.filhas + '</small></td>' + celulas(l) + '</tr>';
+      }
+      return faixa + '<tr class="total' + (l.destaque ? ' destaque' : '') + '"><td class="fixa">' + T.esc(l.rotulo) + '</td>' + celulas(l) + '</tr>';
+    }).join('');
+    const cabDre = '<thead><tr><th class="fixa">Linha / Conta analítica</th><th class="num per">' + T.esc(rot.atual) + '</th>' + (avah ? '<th class="num pct">AV %</th>' : '') +
+      '<th class="num per">' + T.esc(rot.anterior) + '</th>' + (avah ? '<th class="num pct">AV %</th>' : '') + '<th class="num per acum">Variação R$</th><th class="num pct acum">Variação %</th></tr></thead>';
+    // Balanço: o fim do último mês escolhido nos dois anos.
+    const balanco = c.balanco.map((l) => {
+      if (E.semZeradas && l.conta && l.tipo === 'conta' && zeradaNosDois(l)) return '';
+      const cls = l.tipo === 'total' ? 'total' + (l.destaque ? ' destaque' : '') : l.tipo === 'grupo' ? 'bal-grupo' : l.tipo === 'resultado' ? 'bal-resultado' : 'bal-conta';
+      return '<tr class="' + cls + '"><td class="fixa" style="padding-left:' + (8 + ((l.nivel || 1) - 1) * 16) + 'px">' + (l.conta ? '<span class="cod">' + T.esc(l.conta) + '</span> ' : '') + T.esc(l.rotulo) + '</td>' +
+        '<td class="num">' + dinheiro(l.atual) + '</td><td class="num">' + dinheiro(l.anterior) + '</td><td class="num acum">' + dinheiro(l.varR) + '</td><td class="num pct acum">' + pct(l.varP) + '</td></tr>';
+    }).join('');
+    // Indicadores do período nos dois anos e a diferença.
+    let grupo = null;
+    const indicadores = c.indicadores.map((l) => {
+      let faixa = '';
+      if (l.grupo !== grupo) { grupo = l.grupo; faixa = '<tr class="cat"><td class="fixa">' + T.esc(grupo) + '</td><td colspan="3"></td></tr>'; }
+      return faixa + '<tr><td class="fixa"><b>' + T.esc(l.rotulo) + '</b><small>' + T.esc(l.formula) + '</small></td><td class="num">' + fmtIndicador(l.tipo, l.atual) + '</td><td class="num">' +
+        fmtIndicador(l.tipo, l.anterior) + '</td><td class="num acum">' + difIndicador(l) + '</td></tr>';
+    }).join('');
+    return tituloSecao('Comparativo com ' + anoAnt, T.esc(rot.atual) + ' × ' + T.esc(rot.anterior) + ' · ' + valoresEm() + ' · receitas positivas, custos e despesas entre parênteses' + semZeradasTexto()) + aviso +
+      '<h3 class="apres-sub">DRE · a soma dos meses</h3>' +
+      '<div class="apres-caixa"><table class="apres dre comparativo">' + cabDre + '<tbody>' + dre + '</tbody></table></div>' +
+      '<h3 class="apres-sub">Balanço patrimonial · o saldo do fim do mês</h3>' +
+      '<div class="apres-caixa"><table class="apres balanco comparativo"><thead><tr><th class="fixa">Balanço patrimonial</th><th class="num per">' + T.esc(rot.balAtual) + '</th><th class="num per">' +
+      T.esc(rot.balAnterior) + '</th><th class="num per acum">Variação R$</th><th class="num pct acum">Variação %</th></tr></thead><tbody>' + balanco + '</tbody></table></div>' +
+      '<h3 class="apres-sub">Indicadores · o período (resultado somado nos meses, balanço do último mês)</h3>' +
+      '<div class="apres-caixa"><table class="apres indicadores comparativo"><thead><tr><th class="fixa">Indicador</th><th class="num per">' + T.esc(rot.atual) + '</th><th class="num per">' + T.esc(rot.anterior) +
+      '</th><th class="num per acum">Diferença</th></tr></thead><tbody>' + indicadores + '</tbody></table></div>';
   }
 
   // ------------------------------------------------------------------
@@ -1295,7 +1435,8 @@
       titulo: 'Imprimir ou salvar em PDF',
       corpo: '<p class="suave pequeno" style="margin:0 0 8px">Escolha as partes. Cada uma começa numa folha nova, deitada. O balancete sai até o nível e com as opções que estão na tela.' +
         (dreFechada() ? ' <b>A DRE e os indicadores ficam de fora até as linhas da DRE desta empresa serem conferidas.</b>' : '') + '</p>' +
-        ABAS.filter((a) => a.id !== 'cliente' && !(dreFechada() && (/^dre-/.test(a.id) || a.id === 'indicadores'))).map((a) => '<label class="item-aba"><input type="checkbox" value="' + a.id + '"' + (/^balancete/.test(a.id) ? '' : ' checked') + '> ' + a.titulo + '</label>').join('') +
+        ABAS.filter((a) => a.id !== 'cliente' && !(dreFechada() && (/^dre-/.test(a.id) || a.id === 'indicadores' || a.id === 'comparativo')) && !(a.id === 'comparativo' && !E.balancetesAnt.length))
+          .map((a) => '<label class="item-aba"><input type="checkbox" value="' + a.id + '"' + (/^balancete/.test(a.id) ? '' : ' checked') + '> ' + a.titulo + '</label>').join('') +
         '<label class="item-aba" style="margin-top:8px"><input type="checkbox" id="apres-imp-abrir" checked> DRE com todas as contas analíticas abertas</label>',
       botoes: [{ texto: 'Cancelar', valor: null }, { texto: '🖨 Imprimir', tipo: 'primario', antes: (j) => {
         const partes = Array.from(j.querySelectorAll('input[type=checkbox][value]:checked')).map((x) => x.value);
@@ -1472,6 +1613,63 @@
     ind.contas.forEach((c) => f.add([{ v: c.nome, e: 'ind.formula' }, { v: c.conta ? c.conta + ' ' + c.titulo : c.calculo ? 'calculado: ' + c.calculo : 'não achada', e: 'ind.formula' }]));
     f.congelar = { linhas: r1, colunas: 1 };
     f.repetir = [r1, r1];
+    return f;
+  }
+
+  // Comparativo com o ano anterior: a DRE (soma dos meses), o balanço (fim do último mês) e os indicadores do período.
+  function folhaComparativo() {
+    const { c, ant } = comparativoVisivel();
+    const rot = rotulosComparativo(c, ant);
+    const avah = E.avah;
+    const larg = larguraValor([].concat(...[c.dre, c.balanco].map((ls) => [ls.map((l) => l.atual), ls.map((l) => l.anterior), ls.map((l) => l.varR)])), 16);
+    const lpct = Math.max(9, larguraPct([c.dre.map((l) => l.varP), c.balanco.map((l) => l.varP)]));
+    const f = novaFolha('Comparativo', [52, 18, larg].concat(avah ? [9] : [], [larg], avah ? [9] : [], [larg, lpct]), { resumoAcima: true });
+    f.titulo('Comparativo com ' + (E.ano - 1), rot.atual + ' × ' + rot.anterior + ' · DRE: a soma dos meses · balanço: o saldo do fim do último mês · indicadores: o período · ' +
+      'variação % sobre ' + (E.ano - 1) + ' · receitas positivas, custos e despesas entre parênteses' + semZeradasTexto());
+    const faltam = c.faltamNoAnterior.map((k) => ant.meses[k].rotulo);
+    if (faltam.length) f.add([{ v: (E.ano - 1) + ' não tem balancete de ' + faltam.join(', ') + ': a comparação desses meses fica só com ' + E.ano + '.', e: 'subtitulo' }]);
+    const nCols = 5 + (avah ? 2 : 0);
+    const cab = (titulo, a, b, meio, fim) => f.add([{ v: titulo, e: 'cabEsq' }, { v: meio || 'Conta', e: 'cab' }, { v: a, e: 'cab' }].concat(avah ? [{ v: 'AV %', e: 'cab' }] : [], [{ v: b, e: 'cab' }],
+      avah ? [{ v: 'AV %', e: 'cab' }] : [], [{ v: fim ? fim[0] : 'Variação R$', e: 'cabAcum' }, { v: fim ? fim[1] : 'Variação %', e: 'cabAcum' }]), { altura: 30 });
+    const r1 = cab('DRE · a soma dos meses', rot.atual, rot.anterior);
+    const SEM_FAIXA = { 'Subtotal CPC 51': true, Subtotal: true, Resultado: true };
+    let categoria = null;
+    const valores = (t, l, comAv) => [{ v: R(l.atual), e: t + '.val' }].concat(avah ? [{ v: comAv ? P(l.avAtual) : null, e: t + '.pct' }] : [], [{ v: R(l.anterior), e: t + '.val' }],
+      avah ? [{ v: comAv ? P(l.avAnterior) : null, e: t + '.pct' }] : [], [{ v: R(l.varR), e: t + '.val.acum' }, { v: P(l.varP), e: t + '.pct.acum' }]);
+    c.dre.forEach((l) => {
+      if (l.categoria !== categoria) {
+        categoria = l.categoria;
+        if (!SEM_FAIXA[categoria]) f.add([{ v: categoria.toUpperCase(), e: 'cat' }].concat(Array.from({ length: nCols }, () => ({ v: '', e: 'cat' }))), { altura: 16 });
+      }
+      const aberto = E.abertos.has(l.grupo || l.id);
+      if (l.tipo === 'analitica') {
+        if (E.semZeradas && zeradaNosDois(l)) return;
+        f.add([{ v: l.rotulo, e: 'ana.rot2' }, { v: l.conta, e: 'ana.cod' }].concat(valores('ana', l, true)), { nivel: 1, escondida: !aberto });
+      } else if (l.tipo === 'grupo') {
+        f.add([{ v: l.rotulo, e: 'grp.rot0' }, { v: '', e: 'grp.cod' }].concat(valores('grp', l, true)), { recolhida: !aberto && l.filhas > 0 });
+      } else {
+        const t = l.destaque ? 'des' : 'tot';
+        f.add([{ v: l.rotulo, e: t + '.rot0' }, { v: '', e: t + '.cod' }].concat(valores(t, l, true)));
+      }
+    });
+    f.vazia();
+    cab('Balanço patrimonial · o fim do mês', rot.balAtual, rot.balAnterior);
+    c.balanco.forEach((l) => {
+      if (E.semZeradas && l.conta && l.tipo === 'conta' && zeradaNosDois(l)) return;
+      const t = l.tipo === 'total' ? (l.destaque ? 'des' : 'tot') : l.tipo === 'grupo' ? 'sin' : l.tipo === 'resultado' ? 'inp' : 'ana';
+      f.add([{ v: l.rotulo, e: t + '.rot' + Math.min(5, (l.nivel || 1) - 1) }, { v: l.conta || '', e: t + '.cod' }].concat(valores(t, l, false)));
+    });
+    f.vazia();
+    cab('Indicadores · o período', rot.atual, rot.anterior, 'Fórmula', ['Diferença', '']);
+    const ESTILO = { x: 'ind.x', '%': 'ind.pct', 'R$': 'ind.val', dias: 'ind.dias' };
+    let grupo = null;
+    c.indicadores.forEach((l) => {
+      if (l.grupo !== grupo) { grupo = l.grupo; f.add([{ v: grupo.toUpperCase(), e: 'cat' }].concat(Array.from({ length: nCols }, () => ({ v: '', e: 'cat' }))), { altura: 16 }); }
+      const v = (x) => (l.tipo === 'R$' ? R(x) : P(x));
+      f.add([{ v: l.rotulo, e: 'ana.rot0' }, { v: l.formula, e: 'ind.formula' }, { v: v(l.atual), e: ESTILO[l.tipo] }].concat(avah ? [{ v: null, e: 'ind.formula' }] : [], [{ v: v(l.anterior), e: ESTILO[l.tipo] }],
+        avah ? [{ v: null, e: 'ind.formula' }] : [], [{ v: v(l.diferenca), e: ESTILO[l.tipo] + '.acum' }, { v: null, e: 'ind.formula' }]));
+    });
+    f.congelar = { linhas: r1, colunas: 1 };
     return f;
   }
 
@@ -1660,6 +1858,7 @@
       ['resumo', () => folhaResumo()],
       ['balanco', () => folhaBalanco()],
       ['indicadores', () => folhaIndicadores(), fechada],
+      ['comparativo', () => folhaComparativo(), fechada || !E.balancetesAnt.length],
       ['dre-mensal', () => folhaDre('DRE mensal', 'DRE CPC 51 mensal detalhada', E.ano + ' · ' + valoresEm() + ' · receitas positivas, custos e despesas entre parênteses · AV % sobre a receita líquida · AH % sobre o mês anterior' + escolha +
         ' · clique no + à esquerda para abrir as contas de um subtotal' + semZeradasTexto(), dreMensalVisivel(), ficamNaDre('mensal')), fechada],
       ['dre-trimestral', () => folhaDre('DRE trimestral', 'DRE CPC 51 trimestral detalhada', E.ano + ' · ' + valoresEm() + ' · AV % sobre a receita líquida · AH % sobre o trimestre anterior · clique no + à esquerda para abrir as contas' + semZeradasTexto(),

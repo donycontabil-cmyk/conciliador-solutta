@@ -806,6 +806,15 @@ table.apres.indicadores td.evolucao svg { display: block; width: 110px; height: 
 .ind-contas { font-size: 12px; color: var(--texto-suave); margin: 10px 0 0; line-height: 1.6; }
 .ind-contas b { color: var(--texto); font-weight: 600; }
 
+/* ---------- Comparativo com o ano anterior (aba da apresentação) ---------- */
+.apres-sub { margin: 18px 0 6px; font-size: 13.5px; color: #1f4e78; }
+.apres-sub:first-of-type { margin-top: 6px; }
+.var-bom { color: var(--verde); }
+.var-ruim { color: var(--vermelho); }
+table.apres.comparativo { width: auto; min-width: 60%; }
+table.apres.comparativo td.fixa small { font-weight: 400; }
+@media print { .apres-sub { break-after: avoid; } }
+
 /* ---------- Relatório para o cliente: folhas A4 em pé no desenho do "Relatório de Variações Mensais" ---------- */
 .rc-barra { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; background: #fff; border: 1px solid var(--borda); border-radius: 8px; padding: 10px 12px; margin-bottom: 10px; }
 .rc-barra label { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
