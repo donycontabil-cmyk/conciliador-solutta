@@ -477,12 +477,15 @@
   function detalheSugestao(s) {
     const r = E.r;
     const linhasDe = (idx) => idx.map((i) => r.linhas[i]);
+    // O código do fornecedor no sistema (a coluna Participante do razão), que vai no arquivo ao lado da conta.
+    const participante = (p) => (p ? ' <span class="suave pequeno" title="Participante (o código do fornecedor no sistema contábil)">· part. ' + T.esc(p) + '</span>' : '');
     const tabelaLinhas = (titulo, ls) => ls.length ? '<p class="pequeno" style="margin:8px 0 4px"><b>' + titulo + '</b> (' + ls.length + ' · ' +
       T.moeda(ls.reduce((t, l) => t + l.valor, 0)) + ')</p><div class="tabela-caixa"><table class="tabela"><thead><tr><th>Data</th><th>Histórico</th><th class="num">Débito</th><th class="num">Crédito</th></tr></thead><tbody>' +
       ls.slice(0, 60).map((l) => '<tr><td class="num">' + l.data + '</td><td class="historico">' + T.esc(l.historico) + '</td>' + T.tdValor(l.debito) + T.tdValor(l.credito) + '</tr>').join('') +
       '</tbody></table></div>' + (ls.length > 60 ? '<p class="suave pequeno">… e mais ' + (ls.length - 60) + ' linhas (veja em Não bateu).</p>' : '') : '';
     const lanc = '<p class="pequeno" style="margin:4px 0"><b>Lançamento(s) que vão para o arquivo</b></p><div class="tabela-caixa"><table class="tabela"><thead><tr><th>Data</th><th>Conta débito</th><th>Conta crédito</th><th class="num">Valor</th><th>Histórico</th></tr></thead><tbody>' +
-      s.lancamentos.map((l) => '<tr><td class="num">' + l.data + '</td><td>' + T.esc(l.contaDebito) + '</td><td>' + T.esc(l.contaCredito) + '</td>' + T.tdValor(l.valor) + '<td class="historico">' + T.esc(l.historico) + '</td></tr>').join('') +
+      s.lancamentos.map((l) => '<tr><td class="num">' + l.data + '</td><td>' + T.esc(l.contaDebito) + participante(l.participanteDebito) + '</td><td>' + T.esc(l.contaCredito) + participante(l.participanteCredito) + '</td>' +
+        T.tdValor(l.valor) + '<td class="historico">' + T.esc(l.historico) + '</td></tr>').join('') +
       '</tbody></table></div>';
     if (s.sentido === 'direta') {
       return lanc + tabelaLinhas('Sobras em fornecedores', linhasDe(s.linhasF)) + tabelaLinhas('Sobras no adiantamento', linhasDe(s.linhasA));
@@ -784,8 +787,8 @@
     if (!r.invariantes.ok) { T.avisoRapido('A conferência falhou: revise antes de baixar o arquivo.', 'erro'); return; }
     const cfg = app().config.layoutAjustes || {};
     const g = raiz.LayoutAjustes.gerar(r.ajustes, cfg);
-    const nome = raiz.LayoutAjustes.nomeDoArquivo(E.codigo, E.comp, 'Fornecedores', cfg.extensao);
-    T.baixar(g.bytes, nome, 'text/plain');
+    const nome = raiz.LayoutAjustes.nomeDoArquivo(E.codigo, E.comp, 'Fornecedores', g.extensao);
+    T.baixar(g.bytes, nome, g.tipo || 'text/plain');
     E.ultimoArquivo = { nome, bytes: g.bytes, linhas: g.linhas, total: g.total };
     historico('Baixou o arquivo de ajustes: ' + g.linhas + ' lançamentos, ' + U.formatarCentavos(g.total));
     gravar('arquivo-ajustes-baixado', nome, g.linhas + ' lançamentos · R$ ' + U.formatarCentavos(g.total));

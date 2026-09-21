@@ -97,7 +97,7 @@
             arquivoId: fonte.arquivoId || '', data: data.texto, dia: data.numero, historico: l.historico || '',
             contrapartida: l.contrapartida || '', numero: l.numero || '', debito: l.debito, credito: l.credito,
             dc: l.debito !== 0 ? (l.debito > 0 ? 'D' : 'C') : (l.credito >= 0 ? 'C' : 'D'),
-            valor, fornecedorDeclarado: l.fornecedorDeclarado || null,
+            valor, fornecedorDeclarado: l.fornecedorDeclarado || null, participante: l.participante || '',
           });
         }
         resumoConta.saldoFinal = resumoConta.saldoAnterior + resumoConta.movimento;
@@ -398,6 +398,23 @@
       return melhor;
     }
 
+    // O participante (o código do fornecedor no sistema contábil, quando o razão traz — desenho H) de um conjunto
+    // de linhas, para as colunas de participante do arquivo de ajustes: o que leva mais valor entre as linhas do
+    // sinal pedido (as notas, os adiantamentos, os pagamentos); sem nenhuma, o de qualquer linha; senão, vazio.
+    function participanteDe(ls, sinal) {
+      const melhor = (so) => {
+        const soma = new Map();
+        for (const l of ls || []) {
+          if (!l || !l.participante || (so && Math.sign(l.valor) !== so)) continue;
+          soma.set(l.participante, (soma.get(l.participante) || 0) + Math.abs(l.valor));
+        }
+        let quem = '', maior = -1;
+        soma.forEach((v, p) => { if (v > maior) { maior = v; quem = p; } });
+        return quem;
+      };
+      return melhor(sinal) || melhor(0);
+    }
+
     function historico(sentido, nome, cnpj, contaF, contaA) {
       const trechoCnpj = cnpj ? ' - CNPJ ' + Util.formatarCnpj(cnpj) : '';
       const a = contaA ? contaA.codigo + ' ' + contaA.nome : '';
@@ -453,10 +470,15 @@
         sug.desmarcadaPorSuspeita = !!suspeita && !aceitas.has(k) && !sug.recusada;
       }
       if (sug) {
+        // Participantes: na direta, o das notas (D fornecedores) e o dos adiantamentos (C adiantamento); na inversa,
+        // o do pagamento que muda de conta, nos dois lados.
+        const pagos = (p) => participanteDe((p.pagamentos || []).map((i) => linhas[i]), -1) || participanteDe(s.F, -1);
         sug.lancamentos = sug.partes.map((p) => (sug.sentido === 'direta'
           ? { data: p.data, contaDebito: sug.contaF ? sug.contaF.codigo : '', contaCredito: sug.contaA ? sug.contaA.codigo : '', valor: p.valor,
+            participanteDebito: participanteDe(s.F, 1), participanteCredito: participanteDe(s.A, 1),
             historico: historico('direta', sug.nome, sug.cnpj, sug.contaF, sug.contaA), sentido: 'direta', origem: sug.chave }
           : { data: p.data, contaDebito: sug.contaA ? sug.contaA.codigo : '', contaCredito: sug.contaF ? sug.contaF.codigo : '', valor: p.valor,
+            participanteDebito: pagos(p), participanteCredito: pagos(p),
             historico: historico('inversa', sug.nome, sug.cnpj, sug.contaF, sug.contaA), sentido: 'inversa', origem: sug.chave }));
         sugestoes.push(sug);
         sugestaoDe.set(chave, sug);
@@ -471,11 +493,14 @@
       const contaF = contaDoLado('F', lsF), contaA = contaDoLado('A', lsA);
       m.contaF = contaF;
       m.contaA = contaA;
+      const pagos = (p) => participanteDe((p.marcas || []).map((d) => base.porDigital.get(d)), -1) || participanteDe(lsF, -1);
       m.lancamentos = m.sentido === 'direta'
         ? [{ data: fimComp.texto, contaDebito: contaF ? contaF.codigo : '', contaCredito: contaA ? contaA.codigo : '', valor: m.valor,
+          participanteDebito: participanteDe(lsF, 1), participanteCredito: participanteDe(lsA, 1),
           historico: historico('direta', m.nome, m.cnpj, contaF, contaA), sentido: 'direta', origem: m.id }]
         : m.partes.map((p) => ({ data: inicioPeriodo && p.dia < inicioPeriodo.numero ? inicioPeriodo.texto : p.data,
           contaDebito: contaA ? contaA.codigo : '', contaCredito: contaF ? contaF.codigo : '', valor: p.valor,
+          participanteDebito: pagos(p), participanteCredito: pagos(p),
           historico: historico('inversa', m.nome, m.cnpj, contaF, contaA), sentido: 'inversa', origem: m.id }));
     }
     const manualDe = new Map();

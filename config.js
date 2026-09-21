@@ -15,8 +15,8 @@
     // Número e carimbo da versão publicada. Preenchidos sozinhos pelo montar-site.js a cada
     // publicação (o número sobe 1, 2, 3…), para quem usa saber se pegou a versão nova (Ctrl+F5).
     // build 'local' = rodando neste PC, ainda não publicado.
-    numero: 43,
-    build: '19/09/2026 15:43',
+    numero: 44,
+    build: '21/09/2026 16:45',
 
     // Onde os dados moram:
     //   'pasta'    -> numa pasta do computador de quem usa (hoje)
@@ -38,10 +38,11 @@
       primaria: '#2f4a64',
     },
 
-    // Arquivo de lançamentos para o sistema contábil (Parte 7.3). Confirmar com o arquivo modelo.
+    // Arquivo de lançamentos para o sistema contábil (Parte 7.3): a planilha de importação do sistema do
+    // escritório (21/09/2026). formato: 'planilha' (Data | Conta débito | Participante | Conta crédito |
+    // Participante | Valor | Histórico, sem títulos) ou 'texto' (o layout antigo de referência).
     layoutAjustes: {
-      cabecalho: true,
-      extensao: '.txt',
+      formato: 'planilha',
     },
   };
   if (typeof module === 'object' && module.exports) module.exports = CONFIG;

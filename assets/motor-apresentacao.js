@@ -304,7 +304,8 @@
   function mesDe(comp) { const p = Util.partesCompetencia(comp); return p ? p.mes : 0; }
   function anoDe(comp) { const p = Util.partesCompetencia(comp); return p ? p.ano : 0; }
   function rotuloMes(comp) { return NOMES_MES[mesDe(comp) - 1] + '/' + String(anoDe(comp)).slice(-2); }
-  function classeDe(conta) { return String(conta).split('.')[0]; }
+  // A classe é o primeiro pedaço do código, sem o zero na frente ("01.1.1.01.001" é do ativo, como "1.1.1.01.001").
+  function classeDe(conta) { return String(conta).split('.')[0].replace(/^0+(?=\d)/, ''); }
   function patrimonial(conta) { const c = classeDe(conta); return c === '1' || c === '2'; }
   // Ordem de conta: pedaço por pedaço, como número ("1.10" depois de "1.9").
   function compararContas(a, b) {

@@ -16,7 +16,8 @@
  *     ATUAL na maior parte das contas (é essa conta que diz que é um balancete).
  * Valores: número, "1.234,56", "(1.234,56)", "1.234,56-", "-1.234,56", "1.234,56 D"/"C" ou uma coluna D/C
  * ao lado do saldo. Saldo sem sinal nenhum: o lado de cada conta sai da própria conta (anterior + débitos
- * − créditos = atual). Código: "1.1.01.001", "1-1-01-001", "1.1.01.001 - CAIXA" (código e nome na mesma
+ * − créditos = atual). Saldo com sinal PELA NATUREZA da conta (positivo no lado normal dela, negativo no
+ * contrário): ver acertarNatureza. Código: "1.1.01.001", "1-1-01-001", "1.1.01.001 - CAIXA" (código e nome na mesma
  * célula) ou sem pontos ("11101001"): a hierarquia sai das contas do próprio balancete (a mãe é o maior
  * código que é o começo dele) e o código ganha os pontos ("1.1.1.01.001").
  *
@@ -48,7 +49,7 @@
     if (/^(red|reduzido|reduzida|codreduzido|contareduzida|codigoreduzido|codred|reduz|codigored|creduzido)$/.test(k)) return 'reduzido';
     if (/^(contacontabil|conta|classificacao|classificacaocontabil|classif|codigodaconta|contaclassificacao|codconta|contacodigo|numerodaconta|numeroconta|nconta|mascara|estrutura|codigocontabil|contas)$/.test(k)) return 'conta';
     if (/^(codigo|cod|codig)$/.test(k)) return 'codigo';
-    if (/^(titulodaconta|titulo|descricaodaconta|descricao|descricaoconta|nomedaconta|nome|nomeconta|denominacao|especificacao|discriminacao|contadescricao|historicodaconta|contanome)$/.test(k)) return 'titulo';
+    if (/^(titulodaconta|titulo|descricaodaconta|descricao|descricaoconta|nomedaconta|nome|nomeconta|denominacao|especificacao|discriminacao|contadescricao|historicodaconta|contanome|nomedacontacontabil|descricaodacontacontabil)$/.test(k)) return 'titulo';
     if (/^saldoem/.test(k)) return 'saldoEm';
     if ((/anterior|inicial|abertura/.test(k) || /^(saldoant|sldant|sdoant|sdant|salant|ant|saldoini|sldini)$/.test(k)) && !/debit|credit/.test(k)) return 'saldoAnterior';
     if (/debit|^debs?$/.test(k)) return 'debitos';
@@ -59,7 +60,7 @@
 
   function mapearCabecalho(celulas) {
     const m = {};
-    const saldoEm = [], dcs = [], codigos = [];
+    const saldoEm = [], dcs = [], codigos = [], contas = [];
     const chaves = (celulas || []).map(chaveTitulo);
     chaves.forEach((k, i) => {
       const campo = campoDoTitulo(k);
@@ -67,8 +68,17 @@
       if (campo === 'dc') dcs.push(i);
       else if (campo === 'saldoEm') saldoEm.push(i);
       else if (campo === 'codigo') codigos.push(i);
+      else if (campo === 'conta') contas.push(i);
       else if (m[campo] === undefined) m[campo] = i;
     });
+    // "Conta" e "Classificação" juntas (21/09/2026, o balancete do sistema do escritório: "Conta | Classificação |
+    // Nome da conta contábil"): a Classificação é a conta (com os pontos, a árvore) e a outra é o reduzido.
+    if (contas.length) {
+      const classificacao = contas.find((i) => /^classifica/.test(chaves[i]));
+      m.conta = classificacao !== undefined ? classificacao : contas[0];
+      const outra = contas.find((i) => i !== m.conta);
+      if (outra !== undefined && m.reduzido === undefined) m.reduzido = outra;
+    }
     // "Código" é a conta quando não há outra coluna de conta; havendo (ex.: "Classificação"), é o reduzido.
     codigos.forEach((i) => { if (m.conta === undefined) m.conta = i; else if (m.reduzido === undefined) m.reduzido = i; });
     // "Saldo em 31/12/2025" e "Saldo em 31/01/2026": o primeiro é o anterior, o último o atual.
@@ -137,6 +147,11 @@
         for (const t of tentativas) {
           const m = mapearCabecalho(t.celulas);
           if (m.temHistorico || m.temMes || !completo(m)) continue;
+          // Duas colunas de código: a conta é a que tem a árvore (os pontos) no conteúdo; a outra, o reduzido.
+          if (m.reduzido !== undefined) {
+            const pontos = (i) => linhas.slice(r + t.altura, r + t.altura + 200).filter((l) => { const c = l && lerCodigo(l[i]); return c && c.codigo.indexOf('.') > 0; }).length;
+            if (pontos(m.reduzido) > pontos(m.conta)) { const x = m.conta; m.conta = m.reduzido; m.reduzido = x; }
+          }
           // Conta repetida em muitas linhas também é tabela de vários meses (ou relatório de outro tipo).
           const codigos = linhas.slice(r + t.altura).map((l) => { const c = l && lerCodigo(l[m.conta]); return c ? c.codigo : ''; }).filter(Boolean);
           if (codigos.length && new Set(codigos).size < codigos.length * 0.9) continue;
@@ -451,6 +466,35 @@
     });
   }
 
+  // Saldo com sinal, mas PELA NATUREZA da conta (21/09/2026, o balancete do sistema do escritório): o positivo é
+  // o lado normal dela (devedor no ativo e nas despesas, credor no passivo, no PL e nas receitas) e o negativo,
+  // entre parênteses, o lado contrário ("(-) Depreciação acumulada (11.107.692,43)" no ativo; prejuízo acumulado
+  // no PL). Aí "anterior + débitos − créditos = atual" só fecha nas contas devedoras; nas credoras fecha
+  // "anterior − débitos + créditos = atual". Cada conta com movimento fica com o jeito que fecha; a sem movimento
+  // (ou com débito = crédito), com o da conta-mãe; sem nenhuma decidida acima, com o da maioria da classe.
+  // Só entra quando o jeito devedor − credor deixa muitas contas sem fechar e este fecha quase todas.
+  function acertarNatureza(contas) {
+    const fechaDC = (c) => Math.abs(c.saldoAnterior + c.debitos - c.creditos - c.saldoAtual) <= 1;
+    const fechaCD = (c) => Math.abs(c.saldoAnterior - c.debitos + c.creditos - c.saldoAtual) <= 1;
+    const comMov = contas.filter((c) => c.debitos !== c.creditos);
+    if (comMov.length < 3) return false;
+    const dc = comMov.filter(fechaDC).length;
+    const algum = comMov.filter((c) => fechaDC(c) || fechaCD(c)).length;
+    if (dc >= comMov.length * 0.9 || algum < comMov.length * 0.9) return false;
+    const natureza = new Map();
+    comMov.forEach((c) => { const a = fechaDC(c), b = fechaCD(c); if (a !== b) natureza.set(c.conta, a ? 1 : -1); });
+    const porConta = new Map(contas.map((c) => [c.conta, c]));
+    const classe = {};
+    natureza.forEach((s, conta) => { const k = conta.split('.')[0]; classe[k] = (classe[k] || 0) + s; });
+    contas.forEach((c) => {
+      let s = natureza.get(c.conta);
+      for (let p = porConta.get(c.pai); s === undefined && p; p = porConta.get(p.pai)) s = natureza.get(p.conta);
+      if (s === undefined) s = (classe[c.conta.split('.')[0]] || 1) >= 0 ? 1 : -1;
+      if (s < 0) { c.saldoAnterior = -c.saldoAnterior; c.saldoAtual = -c.saldoAtual; }
+    });
+    return true;
+  }
+
   function montar(abas, escolha, opcoes) {
     const linhas = (abas[escolha.aba] || {}).linhas || [];
     const col = escolha.colunas;
@@ -463,9 +507,16 @@
       if (!l || !l.some((c) => !vazio(c))) continue;
       const cod = lerCodigo(l[col.conta]);
       const tit = texto(l, col.titulo);
+      // Resumo no fim, com o valor ao lado do rótulo ("Total de débitos | 36.350.651,68" e "Total de créditos | …").
+      const rotulo = Util.semAcento(texto(l, l.findIndex((c) => !vazio(c)))).toLowerCase().replace(/[^a-z]+/g, '');
+      if (/^totalde(debitos|creditos)$/.test(rotulo)) {
+        const n = l.map((c) => (typeof c === 'string' && /[a-z]/i.test(c) ? null : lerValor(c))).find((x) => x && !x.vazio);
+        if (n) { total = total || { debitos: null, creditos: null }; total[/debitos$/.test(rotulo) ? 'debitos' : 'creditos'] = Math.abs(n.centavos); }
+        continue;
+      }
       if (/^total/i.test(Util.semAcento(texto(l, col.conta))) || (!cod && /^total/i.test(Util.semAcento(tit)))) {
         const d = lerValor(l[col.debitos]), c = lerValor(l[col.creditos]);
-        if (d && c) total = { debitos: Math.abs(d.centavos), creditos: Math.abs(c.centavos) };
+        if (d && c && !(d.vazio && c.vazio)) total = { debitos: Math.abs(d.centavos), creditos: Math.abs(c.centavos) };
         continue;
       }
       if (!cod) { linhasIgnoradas++; continue; }
@@ -498,6 +549,8 @@
     if (semSinal) {
       acertarSinais(contas);
       avisos.push('Os saldos vieram sem sinal nem D/C: o lado (devedor ou credor) de cada conta saiu da própria conta (saldo anterior + débitos − créditos = saldo atual).');
+    } else if (!comLado && acertarNatureza(contas)) {
+      avisos.push('Os saldos vieram pela natureza da conta (positivo no lado normal dela, negativo entre parênteses no lado contrário): o programa guardou devedor positivo e credor negativo.');
     }
     // Analítica = conta sem filha no balancete.
     const pais = new Set(contas.map((c) => c.pai).filter(Boolean));
@@ -511,7 +564,7 @@
     const soma = (xs, k) => xs.reduce((s, x) => s + x[k], 0);
     let confere = !erradas.length;
     if (total) {
-      if (soma(primeiras, 'debitos') !== total.debitos || soma(primeiras, 'creditos') !== total.creditos) {
+      if ((total.debitos !== null && soma(primeiras, 'debitos') !== total.debitos) || (total.creditos !== null && soma(primeiras, 'creditos') !== total.creditos)) {
         confere = false;
         avisos.push('Os débitos e créditos das contas de 1º nível não batem com o Total Geral do arquivo.');
       }

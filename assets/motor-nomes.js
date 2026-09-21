@@ -64,7 +64,7 @@
 
   // Ruído retirado antes de normalizar (sobre o texto sem acento, em maiúsculas).
   const RUIDOS = [
-    /^RECLASS\.?\s*/,
+    /^RECLASS(?:\.|\s)\s*/,          // "Reclass. …" — RECLASSIFICACAO por extenso não é esse prefixo
     /PAGAMENTO\s+(NAO\s+)?CONCILIADO\s+(COM|NO)\s+(O\s+)?SISTEMA\s+INTERNO\s*-?\s*/g,
     /-?\s*\d+\s+BAIXAS\b.*$/,
     /VALOR\s+REFERENTE\s*/g,
@@ -145,7 +145,7 @@
     { id: 'reclass-pagamento-sistema', lado: '*', tipo: 'pagamento', nome: 'Reclass. Pagamento (não) conciliado com o sistema interno',
       re: /^RECLASS\.?\s*PAGAMENTO (?:NAO )?CONCILIADO (?:COM|NO) (?:O )?SISTEMA INTERNO\s*-\s*(?<resto>.+)$/, pega: 'depois-do-meio' },
     { id: 'reclass', lado: '*', tipo: 'pagamento', nome: 'Reclass. <outro histórico>',
-      re: /^RECLASS\.?\s*(?<resto>.+)$/, pega: 'reler' },
+      re: /^RECLASS(?:\.|\s)\s*(?<resto>.+)$/, pega: 'reler' },
     { id: 'pagamento-sistema', lado: 'D', tipo: 'pagamento', nome: 'Pagamento (não) conciliado com o sistema interno - ...',
       re: /^PAGAMENTO (?:NAO )?CONCILIADO (?:COM|NO) (?:O )?SISTEMA INTERNO\s*-\s*(?<resto>.+)$/, pega: 'depois-do-meio' },
     { id: 'aquisicao-nota-fiscal', lado: 'C', tipo: 'nota', nome: 'AQUISICAO CONFORME NOTA FISCAL 123 - NOME',

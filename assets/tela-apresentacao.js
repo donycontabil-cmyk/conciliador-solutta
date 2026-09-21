@@ -168,7 +168,10 @@
     if (E.codigo !== codigo || E.ano !== anoEscolhido) { E.abertos = new Set(); E.selecao = null; E.dreEdicao = null; }
     Object.assign(E, { codigo, ano: anoEscolhido, emp, metas, lugares, registro, balancetes, config: (registro && registro.config) || {} });
     E.rel = montarRel();
-    E.anos = Array.from(new Set(anosComBalancete.concat([anoAtual, anoEscolhido]))).sort((a, b) => b - a);
+    // O ano anterior sempre aparece na escolha (Dony, 21/09/2026: "quero poder jogar os balancetes de 2025 das
+    // empresas, para poder fazer comparação"): sem balancete nenhum dele ainda, é por ali que eles sobem.
+    E.anos = Array.from(new Set(anosComBalancete.concat([anoAtual, anoAtual - 1, anoEscolhido]))).sort((a, b) => b - a);
+    E.anosComBalancete = anosComBalancete;
     desenhar(el);
   }
 
@@ -192,7 +195,8 @@
       '<div class="cabecalho nao-imprimir"><div class="titulos"><h1>📊 Relatório de apresentação</h1>' +
       '<p class="suave">' + T.esc(emp.codigo + ' · ' + emp.nome) + ' · ' + E.ano + (periodo ? ' · ' + T.esc(periodo) + ' · ' + carregados.length + ' balancete(s)' : ' · nenhum balancete ainda') + '</p></div>' +
       '<div class="linha-flex">' +
-      (E.anos.length > 1 ? '<select class="apres-campo" id="apres-ano" title="Ano do relatório">' + E.anos.map((a) => '<option value="' + a + '"' + (a === E.ano ? ' selected' : '') + '>' + a + '</option>').join('') + '</select>' : '') +
+      (E.anos.length > 1 ? '<select class="apres-campo" id="apres-ano" title="Ano do relatório (para subir os balancetes de outro ano, escolha o ano aqui)">' +
+        E.anos.map((a) => '<option value="' + a + '"' + (a === E.ano ? ' selected' : '') + '>' + a + (E.anosComBalancete.indexOf(a) < 0 ? ' · sem balancete' : '') + '</option>').join('') + '</select>' : '') +
       raiz.TelaSubir.botao(chave) +
       (semBalancete ? '' : '<button type="button" class="botao" data-aba="cliente" title="As folhas para mandar ao cliente, com o logo da empresa">📄 Relatório do cliente</button>' +
         '<button type="button" class="botao" id="apres-excel" title="As mesmas abas da planilha modelo">⬇ Excel</button>' +

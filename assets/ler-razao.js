@@ -14,6 +14,7 @@
  *  - Desenhos C, D e E: ver lerFlat e lerPorContrapartida. Desenho F: ver lerAnalitico.
  *  - Desenho G ("Lançamentos Detalhados", uma linha por lançamento com Período e Categoria): ver
  *    lerLancamentosDetalhados.
+ *  - Desenho H ("Razão e livro caixa", a data numa linha só dela e a coluna Participante): ver lerLivroCaixa.
  *
  * Saída (igual para todos os desenhos). VALORES EM CENTAVOS INTEIROS.
  * Saldos no sentido DÉBITO − CRÉDITO (devedor positivo, credor negativo), como o
@@ -841,11 +842,183 @@
     return { tipo: 'razao', desenho: 'G', empresa: '', cnpj: '', titulo: 'Lançamentos detalhados', periodo, periodoOrigem, contas, avisos, linhasIgnoradas };
   }
 
+  // ------------------------------------------------------------------
+  // Desenho H — "Razão e livro caixa" do sistema contábil do escritório (21/09/2026, CSV com ";" em ANSI;
+  // Dony: "um novo layout de razão [...] independente da empresa"): cabeçalho "Histórico | Documento | Chave |
+  // Contra | Participante | Débito | Crédito | Saldo", SEM coluna de data. A conta numa linha "2001 -
+  // 02.1.1.02.001 - Fornecedores Serviços" com "Saldo anterior:" e o valor na coluna do saldo; a DATA numa linha
+  // só dela ("01/01/2026"), valendo para os lançamentos de baixo; linhas em branco e ";;;;;;;" no meio; no fim da
+  // conta, "Conta <nome> - Total de débitos: | X | Total de créditos: | Y". Saldo corrido no lado da conta (o
+  // credor positivo em fornecedores). O período vem no nome do arquivo ("de 01012026 até 31072026").
+  // Documento = a nota; Chave = o número do lançamento; Contra = a contrapartida (código reduzido); Participante =
+  // o código do fornecedor no sistema — o "1" é o genérico (o pagamento que não disse a quem, em linhas de
+  // fornecedores diferentes).
+  // O histórico diz o fornecedor: "Serviços tomados ref. NF nº 123 - NOME", "NF4 - NOME", "123 - NOME" (notas);
+  // "PAGAMENTO - NOME - <extrato>", "Pagamento NF 123 NOME - …", "Pagamento de Boleto NOME", "PAGTO ELETRON
+  // COBRANCA 12345 NOME", "Pix - Enviado 01/06 15:46 NOME", "PIX ENVIADO 1234 5678 NOME", "PIX ENVIADO 1234567 DES:
+  // NOME 31/07" (pagamentos).
+  // ------------------------------------------------------------------
+  const RE_CONTA_H = /^\s*(\d+)\s*-\s*(\d+(?:\.\d+)+)\s*-\s*(.*\S)\s*$/;
+  const PADROES_H = [
+    { re: /^servi[cç]os\s+tomados\s+ref\.?\s+nf\s*n?[º°o.]*\s*(\S+)\s*-\s*(.+)$/i, nota: 1, nome: 2 },
+    { re: /^nf\s*(\d\S*)\s*-\s*(.+)$/i, nota: 1, nome: 2 },
+    { re: /^(\d+)\s+-\s+(.+)$/, nota: 1, nome: 2 },
+    { re: /^pagamento\s+nf\s+(?:fatura\s+)?(\S+)(?:\s+parc\s+\d+\s*\/\s*\d+)?\s+(.+?)(?:\s+-\s+.*)?$/i, nota: 1, nome: 2 },
+    { re: /^pagamento\s*-\s*(.+?)(?:\s+-\s+.*)?$/i, nome: 1 },
+    { re: /^pagamento\s+de\s+boleto\s+(?:[\d.\/-]+\s+)?(.+)$/i, nome: 1 },
+    { re: /^pagto\s+eletron\s+cobranca\s+(?:\d+\s+)?(?:-\s*)?(.+)$/i, nome: 1 },
+    { re: /^(?:pix|transferencia|transf|ted|doc)\b.*?\bdes\s*:?\s+(.+?)(?:\s+\d{1,2}\/\d{1,2})?(?:\s+\d+)?\s*$/i, nome: 1 },
+    // "Pix - Enviado 01/06 15:46 NOME", "Pix - Enviado 71.302 13/07 17:34 NOME", "PIX ENVIADO 1504 1612 NOME"
+    { re: /^pix\s*-?\s*enviado\s+(?:[\d.:\/]+\s+)*(.+)$/i, nome: 1 },
+    { re: /^conta\s+de\s+.+?--\s*(.+)$/i, nome: 1 },
+  ];
+  // Nota e fornecedor de um histórico do desenho H.
+  function lancamentoH(historico) {
+    const h = String(historico || '').replace(/^"+/, '').replace(/\s+/g, ' ').trim();
+    for (const p of PADROES_H) {
+      const m = h.match(p.re);
+      if (!m) continue;
+      const nome = m[p.nome].replace(/^[\d.\/-]+\s+/, '').replace(/\s+/g, ' ').trim();
+      return { nota: p.nota ? m[p.nota] : '', fornecedor: /[a-z]{2}/i.test(nome) ? nome : '' };
+    }
+    return { nota: '', fornecedor: '' };
+  }
+  // A primeira palavra própria de um nome (para saber se um participante é de um fornecedor só).
+  const GENERICAS_H = new Set(['DOS', 'DAS', 'DE', 'DA', 'DO', 'LTDA', 'CIA', 'ME', 'EPP', 'EIRELI', 'COMERCIO', 'SERVICOS', 'COM']);
+  function primeiraPalavraH(nome) {
+    return Util.semAcento(nome).toUpperCase().replace(/[^A-Z ]+/g, ' ').split(' ').find((p) => p.length >= 3 && !GENERICAS_H.has(p)) || '';
+  }
+  function cnpjDoTextoH(texto) {
+    const m = String(texto || '').match(/\d{2}\.?\d{3}\.?\d{3}\/?\d{4}-?\d{2}/g) || [];
+    const bons = m.map(Util.limparCnpj).filter((d) => Util.cnpjValido(d));
+    return bons.length ? bons[0] : '';
+  }
+  function cabecalhoH(linha) {
+    const chaves = (linha || []).map(chaveTitulo);
+    const col = (c) => { const i = chaves.indexOf(c); return i >= 0 ? i : undefined; };
+    if (col('data') !== undefined || col('historico') === undefined || col('debito') === undefined || col('credito') === undefined) return null;
+    if (col('participante') === undefined && col('contra') === undefined) return null;
+    return { historico: col('historico'), documento: col('documento'), chave: col('chave'), contra: col('contra'),
+      participante: col('participante'), debito: col('debito'), credito: col('credito'), saldo: col('saldo') };
+  }
+  function ehLivroCaixa(abas) {
+    return abas.some((a) => {
+      const r = a.linhas.slice(0, 30).findIndex((l) => l && cabecalhoH(l));
+      if (r < 0) return false;
+      return a.linhas.slice(r + 1, r + 60).some((l) => { const c = l && celulasCheias(l); return c && c.length && typeof c[0].v === 'string' && RE_CONTA_H.test(c[0].v); });
+    });
+  }
+
+  function lerLivroCaixa(abas, opcoes) {
+    const nomeArquivo = (opcoes && opcoes.nomeArquivo) || '';
+    const avisos = [];
+    const contas = [];
+    const lidos = [];
+    let linhasIgnoradas = 0;
+    const texto = (linha, i) => (i === undefined || linha[i] === null || linha[i] === undefined ? '' : String(linha[i]).replace(/\s+/g, ' ').trim());
+    for (const aba of abas) {
+      const linhas = aba.linhas;
+      let mapa = null, conta = null, data = null;
+      for (let r = 0; r < linhas.length; r++) {
+        const linha = linhas[r];
+        if (!linha) continue;
+        const cheias = celulasCheias(linha);
+        if (!cheias.length) continue;
+        const cab = cabecalhoH(linha);
+        if (cab) { mapa = cab; continue; }
+        if (!mapa) { linhasIgnoradas++; continue; }
+        const primeira = typeof cheias[0].v === 'string' ? cheias[0].v : String(cheias[0].v);
+        const mc = cheias[0].i === 0 ? primeira.match(RE_CONTA_H) : null;
+        if (mc && ehSaldoAnterior(linha)) {
+          conta = { codigo: mc[1], classificacao: mc[2], nome: mc[3], saldoAnterior: null, lancamentos: [],
+            totalDebitoDeclarado: null, totalCreditoDeclarado: null, saldoFinalDeclarado: null, avisos: [] };
+          const sa = mapa.saldo !== undefined ? numeroDe(linha[mapa.saldo]) : null;
+          conta.saldoAnterior = sa !== null ? sa : ultimoNumero(linha);
+          contas.push(conta);
+          data = null;
+          continue;
+        }
+        // A data numa linha só dela vale para os lançamentos de baixo.
+        if (cheias.length === 1 && cheias[0].i === 0 && Util.lerData(cheias[0].v)) { data = Util.lerData(cheias[0].v); continue; }
+        if (/total\s*de\s*debitos/i.test(Util.semAcento(textoDaLinha(linha)))) {
+          const nums = cheias.map((c) => (typeof c.v === 'string' && /[a-z]/i.test(c.v) ? null : numeroDe(c.v))).filter((n) => n !== null);
+          if (conta && nums.length >= 2) { conta.totalDebitoDeclarado = nums[0]; conta.totalCreditoDeclarado = nums[1]; }
+          linhasIgnoradas++;
+          continue;
+        }
+        const deb = numeroDe(linha[mapa.debito]), cred = numeroDe(linha[mapa.credito]);
+        if (!conta || !data || (deb === null && cred === null)) { linhasIgnoradas++; continue; }
+        const historico = texto(linha, mapa.historico).replace(/^"+/, '');
+        const lanc = {
+          data: data.texto, dia: data.dia, mes: data.mes, ano: data.ano,
+          numero: texto(linha, mapa.chave), historico, contrapartida: texto(linha, mapa.contra),
+          documento: texto(linha, mapa.documento), participante: texto(linha, mapa.participante),
+          debito: deb || 0, credito: cred || 0, saldo: mapa.saldo !== undefined ? numeroDe(linha[mapa.saldo]) : null,
+        };
+        conta.lancamentos.push(lanc);
+        lidos.push({ lanc, lido: lancamentoH(historico), cnpj: cnpjDoTextoH(historico) });
+      }
+    }
+
+    // O fornecedor de cada lançamento: o do PARTICIPANTE quando o código é de um fornecedor só (todas as linhas
+    // dele com a mesma primeira palavra no nome; o nome das notas vale mais que o dos pagamentos, que vem cortado);
+    // senão, o do histórico.
+    const porPart = new Map();
+    lidos.forEach(({ lanc, lido, cnpj }) => {
+      if (!lanc.participante) return;
+      if (!porPart.has(lanc.participante)) porPart.set(lanc.participante, { primeiras: new Set(), nomes: new Map(), cnpjs: new Set() });
+      const p = porPart.get(lanc.participante);
+      if (cnpj) p.cnpjs.add(cnpj);
+      if (!lido.fornecedor) return;
+      const pp = primeiraPalavraH(lido.fornecedor);
+      if (pp) p.primeiras.add(pp);
+      const peso = (lido.nota ? 1000 : 1) + (p.nomes.get(lido.fornecedor) || 0);
+      p.nomes.set(lido.fornecedor, peso);
+    });
+    const doParticipante = new Map();
+    let genericos = 0;
+    porPart.forEach((p, codigo) => {
+      if (p.primeiras.size !== 1) { if (p.primeiras.size > 1) genericos++; return; }
+      let nome = '', maior = -1;
+      p.nomes.forEach((v, n) => { if (v > maior) { maior = v; nome = n; } });
+      doParticipante.set(codigo, { nome, cnpj: p.cnpjs.size === 1 ? p.cnpjs.values().next().value : '' });
+    });
+    lidos.forEach(({ lanc, lido, cnpj }) => {
+      const dp = doParticipante.get(lanc.participante);
+      lanc.fornecedor = (dp && dp.nome) || lido.fornecedor || '';
+      const doc = cnpj || (dp && dp.cnpj) || '';
+      if (doc) lanc.cnpj = doc;
+      if (lanc.fornecedor || doc) lanc.fornecedorDeclarado = doc ? { nome: lanc.fornecedor, cnpj: doc } : { nome: lanc.fornecedor };
+      const nota = lanc.documento || lido.nota;
+      if (nota) lanc.nota = nota;
+    });
+    if (genericos) avisos.push(genericos + ' código(s) de participante aparecem com fornecedores diferentes (o genérico): nessas linhas o fornecedor saiu do histórico.');
+
+    let periodo = null, periodoOrigem = null;
+    const pn = periodoPeloNome(nomeArquivo);
+    if (pn) { periodo = pn; periodoOrigem = 'nome-do-arquivo'; }
+    if (!periodo) {
+      const numeros = [];
+      contas.forEach((c) => c.lancamentos.forEach((l) => numeros.push(Util.montarData(l.dia, l.mes, l.ano).numero)));
+      if (numeros.length) {
+        periodo = { de: Util.dataDeNumero(Math.min.apply(null, numeros)).texto, ate: Util.dataDeNumero(Math.max.apply(null, numeros)).texto };
+        periodoOrigem = 'datas-dos-lancamentos';
+        avisos.push('O arquivo não diz o período: usei a primeira e a última data dos lançamentos. Confirme a competência.');
+      }
+    }
+    for (const c of contas) conferirConta(c);
+    if (!contas.length) avisos.push('Não achei nenhuma conta neste razão.');
+    return { tipo: 'razao', desenho: 'H', empresa: '', cnpj: '', titulo: 'Razão e livro caixa', periodo, periodoOrigem, contas, avisos, linhasIgnoradas };
+  }
+
   /**
    * Diz se as abas são um razão, um balancete ou outra coisa.
    * @returns { tipo: 'razao' | 'balancete' | null, motivo }
    */
   function reconhecer(abas) {
+    if (ehLivroCaixa(abas)) {
+      return { tipo: 'razao', livroCaixa: true, motivo: 'Razão e livro caixa: a conta ("código - classificação - nome") com o saldo anterior, a data numa linha só dela e Histórico, Documento, Contra, Participante, Débito, Crédito e Saldo.' };
+    }
     if (ehLancamentosDetalhados(abas)) {
       return { tipo: 'razao', detalhado: true, motivo: 'Razão em lançamentos detalhados: uma linha por lançamento, com Período, Conta, Contrapartida, Histórico ("Forn: … , Doc: …"), Débito e Crédito.' };
     }
@@ -880,8 +1053,9 @@
    */
   function ler(abas, opcoes) {
     const nomeArquivo = (opcoes && opcoes.nomeArquivo) || '';
-    // Lançamentos detalhados (desenho G), razão por contrapartida (desenho E) e razão analítico (desenho F)
-    // têm leitores próprios.
+    // Razão e livro caixa (desenho H), lançamentos detalhados (desenho G), razão por contrapartida (desenho E) e
+    // razão analítico (desenho F) têm leitores próprios.
+    if (ehLivroCaixa(abas)) return lerLivroCaixa(abas, opcoes);
     if (ehLancamentosDetalhados(abas)) return lerLancamentosDetalhados(abas);
     if (ehRazaoPorContrapartida(abas)) return lerPorContrapartida(abas);
     if (ehRazaoAnalitico(abas)) return lerAnalitico(abas, opcoes);
@@ -1096,5 +1270,5 @@
     delete c.totalCreditoDeclarado;
   }
 
-  return { reconhecer, ler, mapearCabecalho, ehCabecalho, lerLinhaDeConta, periodoPeloNome, lerFaixaDeDatas, notaEFornecedorE, lancamentoF, lancamentoG, periodoDoMes };
+  return { reconhecer, ler, mapearCabecalho, ehCabecalho, lerLinhaDeConta, periodoPeloNome, lerFaixaDeDatas, notaEFornecedorE, lancamentoF, lancamentoG, lancamentoH, periodoDoMes };
 });

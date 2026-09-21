@@ -64,7 +64,7 @@
   // débitos das contas de 1º nível que não são 1 e 2) vai na ficha para aparecer no lugar.
   function guardarBalancete(codigo, r, comp, extra) {
     const b = r.balancete;
-    const resultado = b.contas.filter((c) => c.nivel === 1 && !/^[12]$/.test(c.conta)).reduce((s, c) => s + c.creditos - c.debitos, 0);
+    const resultado = b.contas.filter((c) => c.nivel === 1 && !/^0*[12]$/.test(c.conta)).reduce((s, c) => s + c.creditos - c.debitos, 0);
     const meta = Object.assign({ tipo: 'balancete', arquivo: r.nomeArquivo, competencia: comp, periodo: b.periodo, contas: b.contas.length, resultado,
       confere: b.confere, empresaNoArquivo: b.empresa, cnpjNoArquivo: b.cnpj, hashDoConteudo: r.hash }, extra || {});
     return app().armazenamento.guardarArquivo(codigo, meta, { tipo: 'balancete', empresa: b.empresa, cnpj: b.cnpj, periodo: b.periodo, contas: b.contas, total: b.total }, r.bytes);
