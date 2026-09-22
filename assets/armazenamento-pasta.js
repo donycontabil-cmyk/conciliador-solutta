@@ -375,6 +375,26 @@
       return limpo;
     }
 
+    // As conciliações livres da empresa: só o que o programa entende (a definição, nunca dado de lançamento).
+    function limparConciliacoesLivres(valor) {
+      if (!Array.isArray(valor)) return [];
+      const conta = (c) => (c && /^[0-9A-Za-z._-]{1,30}$/.test(String(c.codigo || ''))
+        ? { codigo: String(c.codigo), classificacao: String(c.classificacao || '').slice(0, 40), titulo: String(c.titulo || '').slice(0, 120) } : null);
+      const vistos = new Set();
+      const limpo = [];
+      for (const d of valor) {
+        if (!d || !/^[A-Za-z0-9_-]{1,20}$/.test(String(d.id || '')) || vistos.has(String(d.id))) continue;
+        const a = conta(d.contaA), b = conta(d.contaB);
+        if (!a || !b) continue;
+        vistos.add(String(d.id));
+        limpo.push({ id: String(d.id), nome: String(d.nome || '').slice(0, 120), contaA: a, contaB: b,
+          regra: d.regra === 'mesmo-valor' ? 'mesmo-valor' : 'contrapartida',
+          criadoEm: Util.paraMs(d.criadoEm) ? String(d.criadoEm) : Util.agoraISO(), criadoPor: String(d.criadoPor || '').slice(0, 60) });
+        if (limpo.length >= 60) break;
+      }
+      return limpo;
+    }
+
     function limparPapeisDeConta(valor) {
       const limpo = {};
       if (!valor || typeof valor !== 'object') return limpo;
@@ -483,6 +503,11 @@
       // { fornecedores_principal: ['500', '510'], fornecedores_adiantamento: ['400'] }. Mesma regra dos outros campos.
       const contasDoDiario = limparMapaDeListas(empresa.contasDoDiario !== undefined ? empresa.contasDoDiario : (anterior && anterior.contasDoDiario));
       if (Object.keys(contasDoDiario).length) registro.contasDoDiario = contasDoDiario;
+      // Conciliações livres (Dony, 22/09/2026: "poder criar a conciliação que eu quero dentro de cada empresa"):
+      // [{ id, nome, contaA: { codigo, classificacao, titulo }, contaB: {...}, regra, criadoEm, criadoPor }]. Só o
+      // que o programa entende entra; sem o campo na chamada, fica o que já estava.
+      const livres = limparConciliacoesLivres(empresa.conciliacoesLivres !== undefined ? empresa.conciliacoesLivres : (anterior && anterior.conciliacoesLivres));
+      if (livres.length) registro.conciliacoesLivres = livres;
       // Logo e cor do relatório para o cliente (Dony, 18/09/2026: "um lugar em que eu coloque o logo da
       // empresa para sair no relatório"): imagem já reduzida pela tela (data URL de até ~400 KB) e cor
       // #rrggbb. Mesma regra: sem o campo na chamada, fica o que já estava; vazio tira.

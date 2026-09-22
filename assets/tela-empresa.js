@@ -59,10 +59,18 @@
         ' · ' + (ultimoDiario.lancamentos || 0).toLocaleString('pt-BR') + ' lançamentos' : 'nenhum diário ainda') + '</span>' +
       '<span class="botao primario pequeno">Abrir →</span></div></a>';
 
+    // Conciliações livres (Dony, 22/09/2026): as que ele mesmo cria, de qualquer conta.
+    const livres = Array.isArray(emp.conciliacoesLivres) ? emp.conciliacoesLivres : [];
+    const cartaoLivres = '<a class="cartao familia livres" href="#/empresa/' + encodeURIComponent(codigo) + '/livres">' +
+      '<div class="icone">🧩</div><h2>Minhas conciliações</h2><p class="suave" style="line-height:1.5">Crie a conciliação que você quiser: escolha a conta, com qual outra conta ela cruza e ' +
+      'a regra do cruzamento (impostos a recuperar × impostos a pagar, adiantamentos, contas transitórias). Vale todo mês, com os mesmos botões dos passos.</p>' +
+      '<div class="rodape"><span class="suave pequeno">' + (livres.length ? livres.length + ' conciliação(ões) criada(s)' : 'nenhuma ainda · crie a primeira') + '</span>' +
+      '<span class="botao primario pequeno">Abrir →</span></div></a>';
+
     el.innerHTML = '<a class="voltar" href="#/">← Empresas</a>' +
       '<div class="cabecalho"><div class="titulos"><h1>' + T.esc(emp.nome) + '</h1><p class="suave">Código ' + T.esc(emp.codigo) + (detalhes.length ? ' · ' + T.esc(detalhes.join(' · ')) : '') + '</p></div>' +
       '<button class="botao" id="bt-editar">Editar cadastro</button></div>' +
-      '<div class="grade-3">' + cartaoApresentacao + cartaoDiario + cartoes + '</div>';
+      '<div class="grade-3">' + cartaoApresentacao + cartaoDiario + cartoes + cartaoLivres + '</div>';
     el.querySelector('#bt-editar').addEventListener('click', () => raiz.TelaCarteira.formulario(emp));
   }
 
