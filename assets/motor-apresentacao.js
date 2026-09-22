@@ -502,6 +502,16 @@
     const colAcumulado = meses.length ? [{ id: 'acumulado', rotulo: 'Acumulado ' + rotuloAcumulado(meses), acumulado: true }] : [];
     const dreMensal = dre(colMeses.concat(colAcumulado), (conta, col) => (col.acumulado ? somaDe(meses.map((m) => valor(conta, m))) : valor(conta, col)));
     const dreTrimestral = dre(trimestres, (conta, t) => valorTrimestre(conta, t));
+    // LUCRO ACUMULADO NO ANO (Dony, 22/09/2026: "depois do lucro ou prejuízo líquido no período, um lucro ou prejuízo
+    // líquido acumulado: janeiro só janeiro, fevereiro janeiro e fevereiro, março março mais o acumulado de janeiro e
+    // fevereiro, abril abril mais o acumulado de janeiro a março [...] importante para as empresas de lucro real, para
+    // ver quando vai dar lucro"): a soma do lucro líquido desde JANEIRO, na última linha. Sem o balancete de janeiro, ou
+    // com um mês faltando no meio, o acumulado não dá para saber: fica vazio dali em diante. AV %: o lucro acumulado
+    // sobre a receita líquida acumulada (a margem do ano até ali). No trimestral: o acumulado no fim de cada trimestre.
+    const acumulado = acumuladoNoAno(meses.map((m) => m.tem), dreMensal.totais.get('lucroLiquido'), dreMensal.totais.get('receitaLiquida'), meses.length ? meses[0].mes : 0);
+    dreMensal.linhas.push(linhaAcumulada(acumulado.valores.concat(colAcumulado.map(() => null)), acumulado.receitas.concat(colAcumulado.map(() => null))));
+    const fimDoTrimestre = (t) => meses.indexOf(t.meses[t.meses.length - 1]);
+    dreTrimestral.linhas.push(linhaAcumulada(trimestres.map((t) => acumulado.valores[fimDoTrimestre(t)]), trimestres.map((t) => acumulado.receitas[fimDoTrimestre(t)])));
     // Conferência: lucro da DRE × resultado do balancete (débitos − créditos das contas de 1º nível que não são 1 e 2).
     const conferencia = meses.filter((m) => m.tem).map((m) => {
       const mapa = porMes.get(m.comp);
@@ -535,7 +545,8 @@
 
     const avisos = [];
     const faltando = meses.filter((m) => !m.tem).map((m) => m.rotulo);
-    if (faltando.length) avisos.push('Falta o balancete de ' + faltando.join(', ') + ': esses meses ficam vazios e os trimestres deles ficam parciais.');
+    if (faltando.length) avisos.push('Falta o balancete de ' + faltando.join(', ') + ': esses meses ficam vazios e os trimestres deles ficam parciais' +
+      (acumulado.paraEm !== null ? '; o lucro acumulado no ano fica vazio a partir de ' + meses[acumulado.paraEm].rotulo : '') + '.');
     if (situacaoDre === 'sugestao') avisos.push('As linhas da DRE desta empresa ainda não foram conferidas: o plano de contas dela é diferente do modelo da planilha. ' +
       'Abra a DRE e confira em que linha entra cada grupo de contas (fica guardado para a empresa). Até lá, a DRE, os indicadores e o relatório do cliente ficam fechados.');
     else if (naoMapeadas.length) avisos.push(naoMapeadas.length + ' conta(s) de resultado sem linha na DRE entraram em "Outras contas de resultado" (' +
@@ -551,9 +562,31 @@
     conferencia.filter((c) => c.diferenca).forEach((c) => avisos.push('Em ' + c.mes + ' o lucro da DRE difere do resultado do balancete em ' + Util.formatarCentavos(c.diferenca) + ' (contas fora da DRE).'));
 
     return { ano, meses, trimestres, contas, base, mensal, trimestral,
-      dre: { mensal: dreMensal, trimestral: dreTrimestral, foraDaDre, naoMapeadas, conferencia, situacao: situacaoDre, mapa: mapaUsado, rotulos: rotulosDre, avaliacao },
+      dre: { mensal: dreMensal, trimestral: dreTrimestral, foraDaDre, naoMapeadas, conferencia, situacao: situacaoDre, mapa: mapaUsado, rotulos: rotulosDre, avaliacao,
+        acumulado: { semJaneiro: acumulado.semJaneiro, paraEm: acumulado.paraEm === null ? null : meses[acumulado.paraEm].rotulo } },
       lalur, resumo, balanco, avisos, faltando };
   }
+
+  // O lucro acumulado no ano, mês a mês. tem: o mês tem valor (balancete real ou simulado); lucro e receita: os valores
+  // do mês; primeiroMes: o número do mês da primeira posição (tem que ser janeiro). paraEm: a posição do primeiro mês
+  // sem valor depois de janeiro (dali em diante, vazio).
+  function acumuladoNoAno(tem, lucro, receita, primeiroMes) {
+    const valores = [], receitas = [];
+    const semJaneiro = !tem.length || primeiroMes !== 1 || !tem[0];
+    let segue = !semJaneiro, somaL = 0, somaR = 0, paraEm = null;
+    tem.forEach((t, k) => {
+      if (segue && !t) { segue = false; paraEm = k; }
+      if (!segue) { valores.push(null); receitas.push(null); return; }
+      somaL += lucro[k] || 0; somaR += receita[k] || 0;
+      valores.push(somaL); receitas.push(somaR);
+    });
+    // Os meses vazios só no fim (ainda não chegaram) não interrompem nada: o acumulado só acaba ali.
+    if (paraEm !== null && !tem.slice(paraEm + 1).some(Boolean)) paraEm = null;
+    return { valores, receitas, semJaneiro, paraEm };
+  }
+  const linhaAcumulada = (valores, receitas) => ({ id: 'lucroAcumulado', categoria: 'Resultado', tipo: 'total', rotulo: 'Lucro ou prejuízo líquido acumulado no ano',
+    acumuladoAno: true, destaque: true, valores, av: valores.map((v, i) => div(v, receitas[i])), ah: valores.map(() => null) });
+  const semAcumulado = (l) => !l.acumuladoAno;
 
   function rotuloAcumulado(meses) {
     if (!meses.length) return 'Acumulado';
@@ -945,7 +978,8 @@
 
     const rlA = somaNos((atual.dre.mensal.linhas.find((l) => l.id === 'receitaLiquida') || {}).valores, kA);
     const rlB = somaNos((anterior.dre.mensal.linhas.find((l) => l.id === 'receitaLiquida') || {}).valores, kB);
-    const dre = mesclar(atual.dre.mensal.linhas, anterior.dre.mensal.linhas, (l) => l.id).map(({ a, b }) => {
+    // (sem a linha do lucro acumulado no ano: no comparativo cada coluna já é a soma dos meses)
+    const dre = mesclar(atual.dre.mensal.linhas.filter(semAcumulado), anterior.dre.mensal.linhas.filter(semAcumulado), (l) => l.id).map(({ a, b }) => {
       const base = a || b;
       const va = doAno(a, kA), vb = doAno(b, kB);
       return Object.assign({ id: base.id, tipo: base.tipo, grupo: base.grupo, conta: base.conta, rotulo: base.rotulo, categoria: base.categoria, destaque: !!base.destaque,
@@ -991,11 +1025,19 @@
   //    despesas, tudo (−5 = 5% a menos). Cada conta é arredondada no centavo e os subtotais são refeitos com as
   //    contas, como na DRE: a DRE simulada fecha no centavo;
   //  - mês sem balancete nos dois anos: vazio.
-  // No fim: o realizado, o simulado, o ano (os dois juntos) e o ano anterior (os meses que ele tem), com a variação.
+  // AJUSTES (Dony, 22/09/2026: "eu quero poder incluir ajustes — por exemplo um lançamento de estoque ou custo — e que
+  // ele vá para o lugar que eu defina: escolho adicionar ajuste, escolho o grupo, ponho o número e ele modifica a DRE"):
+  // cada ajuste é um lançamento num MÊS e numa LINHA DA DRE, a débito (reduz o resultado: aumenta custo ou despesa,
+  // diminui receita) ou a crédito (aumenta o resultado). Ele entra no subtotal da linha, aparece embaixo dela como uma
+  // linha própria e refaz os totais daquele mês.
+  // No fim: o realizado e o simulado (sem os ajustes), os ajustes, o ano (tudo junto) e o ano anterior (os meses que
+  // ele tem), com a variação; e, na última linha, o lucro acumulado no ano mês a mês.
   // Conta que só existe num dos anos entra no lugar dela, com zero no outro (como no comparativo): conta nova no
   // ano fica zerada nos meses simulados, porque o ano anterior não tem valor dela.
-  // opcoes: { percentual } em % (10 = 10% a mais).
+  // opcoes: { percentual } em % (10 = 10% a mais); ajustes: [{ id, mes (1 a 12), linha (id da linha da DRE), lado ('D'
+  // ou 'C'), valor (centavos, positivo), descricao }].
   // ------------------------------------------------------------------
+  const LINHAS_DE_AJUSTE = new Set(LINHAS_DO_MAPA.map((l) => l.id));
   function simulacao(atual, anterior, opcoes) {
     const percentual = Number((opcoes && opcoes.percentual) || 0) || 0;
     const fator = 1 + percentual / 100;
@@ -1013,50 +1055,90 @@
     const vazia = () => meses.map((m) => (m.origem === 'vazio' ? null : 0));
 
     // Contas analíticas: o valor real, o do ano anterior com o percentual ou nada; os grupos somam as contas deles.
-    const juntas = mesclar(atual.dre.mensal.linhas, anterior.dre.mensal.linhas, (l) => l.id);
-    const valores = new Map(); // id da linha -> 12 valores
+    const juntas = mesclar(atual.dre.mensal.linhas.filter(semAcumulado), anterior.dre.mensal.linhas.filter(semAcumulado), (l) => l.id);
+    const contas = new Map(); // id da conta -> 12 valores
     const doGrupo = new Map();
     juntas.forEach(({ a, b }) => {
       const l = a || b;
       if (l.tipo !== 'analitica') return;
       const vs = meses.map((m) => (m.origem === 'real' ? (a ? a.valores[m.kA] || 0 : 0)
         : m.origem === 'simulado' ? (b ? Math.round((b.valores[m.kB] || 0) * fator) || 0 : 0) : null));
-      valores.set(l.id, vs);
+      contas.set(l.id, vs);
       const g = doGrupo.get(l.grupo) || vazia();
       doGrupo.set(l.grupo, g.map((x, i) => (x === null ? null : x + vs[i])));
     });
-    // Subtotais e totais: as contas do modelo da DRE, na mesma ordem.
-    for (const g of MODELO_DRE) {
-      if (g.prefixos) { valores.set(g.id, doGrupo.get(g.id) || vazia()); continue; }
-      valores.set(g.id, meses.map((m, i) => {
-        if (m.origem === 'vazio') return null;
-        let s = 0;
-        (g.soma || []).forEach((id) => { s += valores.get(id)[i] || 0; });
-        (g.menos || []).forEach((id) => { s -= valores.get(id)[i] || 0; });
-        return s;
-      }));
-    }
 
-    // As colunas do fim: realizado, simulado, o ano e o ano anterior (todos os meses com balancete dele).
+    // Os ajustes: o mês tem que ter valor (real ou simulado) e a linha tem que ser uma linha da DRE.
+    const lidos = ((opcoes && opcoes.ajustes) || []).map((a) => {
+      const m = meses[(Number(a && a.mes) || 0) - 1];
+      const valor = Math.round(Number(a && a.valor) || 0);
+      const motivo = !m ? 'mês que não existe' : m.origem === 'vazio' ? m.rotulo + ' não tem balancete em nenhum dos dois anos'
+        : !LINHAS_DE_AJUSTE.has(a.linha) ? 'linha da DRE que não existe' : !(valor > 0) ? 'valor zerado' : null;
+      return { a, m, valor, efeito: (a && a.lado === 'C' ? 1 : -1) * valor, motivo };
+    });
+    const usados = lidos.filter((x) => !x.motivo).sort((x, y) => x.m.mes - y.m.mes);
+    const doGrupoComAjuste = new Map(Array.from(doGrupo.entries()).map(([k, v]) => [k, v.slice()]));
+    usados.forEach((x) => {
+      const g = doGrupoComAjuste.get(x.a.linha) || vazia();
+      g[x.m.mes - 1] += x.efeito;
+      doGrupoComAjuste.set(x.a.linha, g);
+    });
+    // Subtotais e totais pelo modelo da DRE, sem e com os ajustes.
+    function totaisPeloModelo(grupos) {
+      const v = new Map();
+      for (const g of MODELO_DRE) {
+        if (g.prefixos) { v.set(g.id, grupos.get(g.id) || vazia()); continue; }
+        v.set(g.id, meses.map((m, i) => {
+          if (m.origem === 'vazio') return null;
+          let s = 0;
+          (g.soma || []).forEach((id) => { s += v.get(id)[i] || 0; });
+          (g.menos || []).forEach((id) => { s -= v.get(id)[i] || 0; });
+          return s;
+        }));
+      }
+      return v;
+    }
+    const sem = totaisPeloModelo(doGrupo), com = totaisPeloModelo(doGrupoComAjuste);
+
+    // As colunas do fim: realizado e simulado (sem os ajustes), os ajustes, o ano e o ano anterior (os meses dele).
     const posicoes = (lista) => lista.map((m) => m.mes - 1);
     const iReais = posicoes(reais), iSimulados = posicoes(simulados), iAno = posicoes(reais.concat(simulados));
     const kAnt = anterior.meses.map((m, j) => (m.tem ? j : -1)).filter((j) => j >= 0);
     const rlAnterior = (anterior.dre.mensal.linhas.find((l) => l.id === 'receitaLiquida') || {}).valores;
-    const rlAno = somaNos(valores.get('receitaLiquida'), iAno), rlAnt = somaNos(rlAnterior, kAnt);
+    const rlAno = somaNos(com.get('receitaLiquida'), iAno), rlAnt = somaNos(rlAnterior, kAnt);
+    const porGrupo = new Map(); // linha da DRE -> ajustes dela
+    usados.forEach((x) => { if (!porGrupo.has(x.a.linha)) porGrupo.set(x.a.linha, []); porGrupo.get(x.a.linha).push(x); });
     const linhas = juntas.map(({ a, b }) => {
       const base = a || b;
-      const vs = valores.get(base.id);
+      const analitica = base.tipo === 'analitica';
+      const semAj = analitica ? contas.get(base.id) : sem.get(base.id);
+      const vs = analitica ? semAj : com.get(base.id);
       const noAno = somaNos(vs, iAno);
       const noAnterior = b ? somaNos(b.valores, kAnt) : kAnt.length ? 0 : null;
       return Object.assign({ id: base.id, tipo: base.tipo, grupo: base.grupo, conta: base.conta, rotulo: base.rotulo, categoria: base.categoria, destaque: !!base.destaque,
-        semLinha: !!base.semLinha, soNoAnterior: !a, soNoAtual: !b, valores: vs, realizado: somaNos(vs, iReais), simulado: somaNos(vs, iSimulados),
+        semLinha: !!base.semLinha, soNoAnterior: !a, soNoAtual: !b, valores: vs, realizado: somaNos(semAj, iReais), simulado: somaNos(semAj, iSimulados),
+        ajustes: usados.length ? (noAno || 0) - (somaNos(semAj, iAno) || 0) : null, nAjustes: base.tipo === 'grupo' ? (porGrupo.get(base.id) || []).length : 0,
         ano: noAno, anterior: noAnterior, avAno: div(noAno, rlAno), avAnterior: div(noAnterior, rlAnt) }, variacao(noAno, noAnterior));
     });
     linhas.forEach((l) => { if (l.tipo === 'grupo') l.filhas = linhas.filter((x) => x.tipo === 'analitica' && x.grupo === l.id).length; });
+    // Cada ajuste é uma linha embaixo da linha da DRE dele, depois das contas.
+    porGrupo.forEach((lista, g) => {
+      let fim = -1;
+      linhas.forEach((l, i) => { if (l.id === g || (l.tipo === 'analitica' && l.grupo === g)) fim = i; });
+      const categoria = (MODELO_DRE.find((x) => x.id === g) || {}).categoria;
+      linhas.splice(fim + 1, 0, ...lista.map((x) => ({ id: 'ajuste:' + x.a.id, tipo: 'ajuste', grupo: g, categoria, rotulo: x.a.descricao || 'Ajuste', mes: x.m.mes,
+        ajuste: { id: x.a.id, mes: x.m.mes, linha: g, lado: x.a.lado === 'C' ? 'C' : 'D', valor: x.valor, descricao: x.a.descricao || '' },
+        valores: meses.map((m, i) => (i === x.m.mes - 1 ? x.efeito : null)), realizado: null, simulado: null, ajustes: x.efeito, ano: x.efeito, anterior: null,
+        avAno: div(x.efeito, rlAno), avAnterior: null, varR: null, varP: null })));
+    });
+    // O lucro acumulado no ano, mês a mês (com os ajustes), na última linha.
+    const acumulado = acumuladoNoAno(meses.map((m) => m.origem !== 'vazio'), com.get('lucroLiquido'), com.get('receitaLiquida'), 1);
+    linhas.push(Object.assign(linhaAcumulada(acumulado.valores, acumulado.receitas), { realizado: null, simulado: null, ajustes: null, ano: null, anterior: null,
+      avAno: null, avAnterior: null, varR: null, varP: null }));
 
-    // Conferência: nos meses reais, cada linha é a da DRE mensal do ano; nos simulados, a receita líquida é a do ano
-    // anterior com o percentual (a diferença, se houver, é o arredondamento de cada conta no centavo).
-    const reaisConferem = juntas.every(({ a }) => !a || reais.every((m) => (valores.get(a.id)[m.mes - 1] || 0) === (a.valores[m.kA] || 0)));
+    // Conferência: nos meses reais, cada linha é a da DRE mensal do ano (fora os ajustes); nos simulados, a receita
+    // líquida é a do ano anterior com o percentual (a diferença, se houver, é o arredondamento de cada conta no centavo).
+    const reaisConferem = juntas.every(({ a }) => !a || reais.every((m) => ((a.tipo === 'analitica' ? contas.get(a.id) : sem.get(a.id))[m.mes - 1] || 0) === (a.valores[m.kA] || 0)));
     return {
       percentual, fator, ano, anoAnterior: anterior.ano, meses, linhas,
       reais: reais.map((m) => m.mes), simulados: simulados.map((m) => m.mes), vazios: vazios.map((m) => m.mes),
@@ -1067,7 +1149,12 @@
       mesesAnterior: kAnt.map((j) => anterior.meses[j].mes),
       // Contas novas no ano (com valor nos meses reais): zeradas nos meses simulados.
       novas: linhas.filter((l) => l.tipo === 'analitica' && l.soNoAtual && l.realizado).map((l) => ({ conta: l.conta, rotulo: l.rotulo })),
-      conferencia: { reais: reaisConferem, receitaBase: somaNos(rlAnterior, simulados.map((m) => m.kB)), receitaSimulada: somaNos(valores.get('receitaLiquida'), iSimulados) },
+      // Os ajustes que entraram (com o efeito no lucro: + crédito, − débito) e os que não entraram (e por quê).
+      ajustes: usados.map((x) => Object.assign({}, x.a, { valor: x.valor, efeito: x.efeito, rotuloMes: x.m.rotulo, origem: x.m.origem })),
+      ajustesFora: lidos.filter((x) => x.motivo).map((x) => ({ ajuste: x.a, motivo: x.motivo })),
+      efeitoAjustes: usados.reduce((s, x) => s + x.efeito, 0),
+      acumulado: { semJaneiro: acumulado.semJaneiro, paraEm: acumulado.paraEm === null ? null : meses[acumulado.paraEm].rotulo },
+      conferencia: { reais: reaisConferem, receitaBase: somaNos(rlAnterior, simulados.map((m) => m.kB)), receitaSimulada: somaNos(sem.get('receitaLiquida'), iSimulados) },
     };
   }
 

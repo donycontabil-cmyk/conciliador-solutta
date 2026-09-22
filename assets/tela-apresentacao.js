@@ -38,17 +38,21 @@
     { id: 'lalur', titulo: 'LALUR trimestral' },
     { id: 'cliente', titulo: '📄 Relatório do cliente' },
   ];
+  // As DREs num botão só (Dony, 22/09/2026: "como a gente já tem mais de 3 DREs, eu quero poder clicar em DRE e escolher:
+  // DRE mensal, trimestral ou simulação"): na barra fica "DRE" e, com uma delas aberta, a escolha aparece embaixo.
+  const GRUPO_DRE = ['dre-mensal', 'dre-trimestral', 'simulacao'];
   const REGRAS = { movimento: 'Movimento do mês (conta de resultado)', 'aumento-credor': 'Aumento do saldo credor (conta patrimonial)' };
   const CHAVE_PREF = 'conciliador-solutta.apresentacao';
 
   // Estado da tela (continua entre redesenhos).
   const E = { codigo: null, ano: null, emp: null, rel: null, registro: null, config: {}, lugares: [], metas: [],
     aba: 'dre-mensal', avah: true, nivel: 5, semZeradas: false, abertos: new Set(), selecao: null, marcarLalur: false, balancetes: [], fila: null, clienteMes: null, cacheCliente: null, ultimoCliente: null, casas: 2, milhar: false,
-    dreEdicao: null, balancetesAnt: [], relAnt: null };
+    dreEdicao: null, balancetesAnt: [], relAnt: null, ultimaDre: 'dre-mensal' };
   (function lerPreferencias() {
     try {
       const p = JSON.parse((raiz.localStorage && raiz.localStorage.getItem(CHAVE_PREF)) || '{}') || {};
       if (ABAS.some((a) => a.id === p.aba)) E.aba = p.aba;
+      if (GRUPO_DRE.indexOf(p.ultimaDre) >= 0) E.ultimaDre = p.ultimaDre;
       if (typeof p.avah === 'boolean') E.avah = p.avah;
       if (p.nivel >= 1 && p.nivel <= 9) E.nivel = p.nivel;
       if (typeof p.semZeradas === 'boolean') E.semZeradas = p.semZeradas;
@@ -57,7 +61,7 @@
     } catch (e) { /* sem preferências guardadas */ }
   })();
   function guardarPreferencias() {
-    try { raiz.localStorage.setItem(CHAVE_PREF, JSON.stringify({ aba: E.aba, avah: E.avah, nivel: E.nivel, semZeradas: E.semZeradas, casas: E.casas, milhar: E.milhar })); } catch (e) { /* navegador sem armazenamento */ }
+    try { raiz.localStorage.setItem(CHAVE_PREF, JSON.stringify({ aba: E.aba, ultimaDre: E.ultimaDre, avah: E.avah, nivel: E.nivel, semZeradas: E.semZeradas, casas: E.casas, milhar: E.milhar })); } catch (e) { /* navegador sem armazenamento */ }
   }
 
   // ------------------------------------------------------------------
@@ -232,10 +236,28 @@
 
   function conteudo() {
     return '<div id="apres-avisos">' + avisos() + '</div>' +
-      '<div class="abas nao-imprimir" role="tablist">' + ABAS.map((a) => '<button type="button" role="tab" data-aba="' + a.id + '" class="' + (E.aba === a.id ? 'ativa' : '') + '">' + a.titulo + '</button>').join('') + '</div>' +
+      '<div id="apres-abas">' + barraDeAbas() + '</div>' +
       '<div id="apres-meses">' + seletorMeses() + '</div>' +
       '<div class="apres-opcoes nao-imprimir">' + opcoesDaAba() + '</div>' +
       '<div class="apres-folha" id="apres-folha">' + secao(E.aba, {}) + '</div>';
+  }
+
+  // A barra de abas: as DREs viram um botão "DRE"; com uma DRE aberta, a escolha entre as três aparece embaixo.
+  function barraDeAbas() {
+    const naDre = GRUPO_DRE.indexOf(E.aba) >= 0;
+    const principais = ABAS.filter((a) => GRUPO_DRE.indexOf(a.id) < 0 || a.id === GRUPO_DRE[0]).map((a) => (a.id === GRUPO_DRE[0]
+      ? '<button type="button" role="tab" data-aba-dre="1" class="' + (naDre ? 'ativa' : '') + '" aria-expanded="' + naDre + '" title="DRE mensal, trimestral ou simulação">DRE <span class="aba-seta">▾</span></button>'
+      : '<button type="button" role="tab" data-aba="' + a.id + '" class="' + (E.aba === a.id ? 'ativa' : '') + '">' + a.titulo + '</button>')).join('');
+    const sub = !naDre ? '' : '<div class="subabas nao-imprimir" role="tablist" aria-label="Qual DRE">' +
+      GRUPO_DRE.map((id) => '<button type="button" role="tab" data-aba="' + id + '" class="' + (E.aba === id ? 'ativa' : '') + '">' + ABAS.find((a) => a.id === id).titulo + '</button>').join('') + '</div>';
+    return '<div class="abas nao-imprimir" role="tablist">' + principais + '</div>' + sub;
+  }
+  // Troca de aba (lembra a última DRE, para o botão DRE voltar nela).
+  function irParaAba(el, id) {
+    E.aba = id;
+    if (GRUPO_DRE.indexOf(id) >= 0) E.ultimaDre = id;
+    guardarPreferencias();
+    redesenharConteudo(el);
   }
 
   function opcoesDaAba() { return opcoesNumeros() + (ABAS_COM_CONTAS[E.aba] ? opcoesContas() : '') + opcoesDaAbaSo(); }
@@ -281,6 +303,7 @@
       return '<span class="sim-campo" title="Os meses sem balancete de ' + E.ano + ' pegam o mesmo mês de ' + (E.ano - 1) + ' com este percentual, em todas as linhas da DRE">' +
         'Evolução sobre ' + (E.ano - 1) + ' <input type="text" inputmode="decimal" id="sim-percentual" class="apres-campo sim-pct" value="' + T.esc(textoPercentual(percentualSimulacao())) +
         '" aria-label="Percentual de evolução sobre ' + (E.ano - 1) + '"> %<button type="button" class="botao pequeno primario" data-opcao="sim-aplicar">Aplicar</button></span>' +
+        '<button type="button" class="botao pequeno sim-ajuste" data-opcao="sim-ajuste" title="Um lançamento (ex.: estoque, custo) numa linha da DRE, num mês">＋ Adicionar ajuste</button>' +
         '<button type="button" class="botao pequeno" data-opcao="abrir-tudo">＋ Abrir todas as contas</button>' +
         '<button type="button" class="botao pequeno" data-opcao="fechar-tudo">－ Fechar todas</button>' +
         '<label class="caixa-opcao"><input type="checkbox" data-opcao="avah"' + (E.avah ? ' checked' : '') + '> AV %</label>' +
@@ -329,7 +352,7 @@
     return {
       colunas: ks.map((k) => dre.colunas[k]).concat([{ id: 'acumulado', rotulo: 'Acumulado ' + rotuloSelecao(ks.map((k) => E.rel.meses[k])), acumulado: true }]),
       linhas: dre.linhas.map((l) => {
-        const ac = somaNos(l.valores, ks);
+        const ac = l.acumuladoAno ? null : somaNos(l.valores, ks);
         return Object.assign({}, l, { valores: ks.map((k) => l.valores[k]).concat([ac]), av: ks.map((k) => l.av[k]).concat([ac === null || !rlAc ? null : ac / rlAc]), ah: ks.map((k) => l.ah[k]).concat([null]) });
       }),
     };
@@ -522,7 +545,7 @@
           '<td class="fixa"><span class="abre nao-imprimir">' + (aberto ? '▾' : '▸') + '</span>' + T.esc(l.rotulo) + (l.semLinha ? ' ⚠️' : '') + ' <small>' + l.filhas + '</small>' +
           (noLalur[l.id] ? '<small class="lalur-conta nao-imprimir" title="Contas deste subtotal marcadas no LALUR">· ' + noLalur[l.id] + ' no LALUR</small>' : '') + '</td>' + celulasPeriodos(l, avah, dre.colunas) + '</tr>';
       }
-      return faixa + '<tr class="total' + (l.destaque ? ' destaque' : '') + '"><td class="fixa">' + T.esc(l.rotulo) + '</td>' + celulasPeriodos(l, avah, dre.colunas) + '</tr>';
+      return faixa + '<tr class="total' + (l.destaque ? ' destaque' : '') + (l.acumuladoAno ? ' acumulado-ano' : '') + '"><td class="fixa">' + T.esc(l.rotulo) + '</td>' + celulasPeriodos(l, avah, dre.colunas) + '</tr>';
     }).join('');
     const colunas = dre.colunas.map((c) => Object.assign({}, c, { cls: c.acumulado ? 'acum' : '' }));
     const d = E.rel.dre;
@@ -537,8 +560,16 @@
       : 'linhas da DRE pelo modelo da planilha (os nomes das contas batem com ele)';
     return tituloSecao(titulo, T.esc(E.ano) + ' · ' + valoresEm() + ' · receitas positivas, custos e despesas entre parênteses' + semZeradasTexto() + ' · <span class="nao-imprimir">' + origem + '</span>') +
       '<div class="apres-caixa"><table class="apres dre' + (avah ? ' com-avah' : '') + (E.marcarLalur ? ' marcando' : '') + '">' + cabecalhoPeriodos([{ titulo: 'Linha / Conta analítica' }], colunas, avah) +
-      '<tbody>' + corpo + '</tbody></table></div>' + nota + fora;
+      '<tbody>' + corpo + '</tbody></table></div>' + nota + fora + notaAcumuladoDre();
   }
+
+  // Quando o lucro acumulado no ano fica vazio (sem janeiro, ou um mês faltando no meio), a nota diz por quê.
+  function textoAcumuladoDre() {
+    const a = E.rel.dre.acumulado || {};
+    return a.semJaneiro ? 'O lucro acumulado no ano soma desde janeiro: sem o balancete de janeiro de ' + E.ano + ', a última linha fica vazia.'
+      : a.paraEm ? 'O lucro acumulado no ano fica vazio a partir de ' + a.paraEm + ', que não tem balancete.' : '';
+  }
+  function notaAcumuladoDre() { const t = textoAcumuladoDre(); return t ? '<p class="apres-nota suave">' + T.esc(t) + '</p>' : ''; }
 
   // ---------- LINHAS DA DRE da empresa (Dony, 18/09/2026: a DRE de um plano de contas diferente do da
   // planilha saiu com despesa no custo). Em que linha da DRE entra cada conta de resultado: a linha de uma
@@ -808,7 +839,8 @@
     if (bi) bi.addEventListener('click', imprimir);
     el.addEventListener('click', async (ev) => {
       const aba = ev.target.closest('[data-aba]');
-      if (aba) { E.aba = aba.getAttribute('data-aba'); guardarPreferencias(); redesenharConteudo(el); return; }
+      if (aba) { irParaAba(el, aba.getAttribute('data-aba')); return; }
+      if (ev.target.closest('[data-aba-dre]')) { irParaAba(el, GRUPO_DRE.indexOf(E.ultimaDre) >= 0 ? E.ultimaDre : GRUPO_DRE[0]); return; }
       const nivel = ev.target.closest('[data-nivel]');
       if (nivel) { E.nivel = Number(nivel.getAttribute('data-nivel')); guardarPreferencias(); redesenharConteudo(el); return; }
       // Painel dos meses: um mês aparece ou some; os atalhos escolhem vários de uma vez.
@@ -838,6 +870,10 @@
       if (lb) { marcarConta(el, lb.getAttribute('data-conta'), lb.getAttribute('data-lalur')); return; }
       const lt = ev.target.closest('button[data-lalur-tirar]');
       if (lt) { marcarConta(el, lt.getAttribute('data-lalur-tirar'), null); return; }
+      const ajEditar = ev.target.closest('button[data-sim-aj-editar]');
+      if (ajEditar) { await abrirAjuste(el, ajEditar.getAttribute('data-sim-aj-editar')); return; }
+      const ajTirar = ev.target.closest('button[data-sim-aj-tirar]');
+      if (ajTirar) { await tirarAjuste(el, ajTirar.getAttribute('data-sim-aj-tirar')); return; }
       const g = ev.target.closest('tr.grupo[data-grupo]');
       if (g) { const id = g.getAttribute('data-grupo'); if (E.abertos.has(id)) E.abertos.delete(id); else E.abertos.add(id); redesenharFolha(el); return; }
       const casas = ev.target.closest('button[data-casas]');
@@ -872,8 +908,9 @@
       else if (qual === 'guardar-parte-b') await guardarParteB(el);
       else if (qual === 'editar-ajustes') await editarAjustes();
       else if (qual === 'linhas-dre') { iniciarEdicaoDre(); redesenharConteudo(el); }
-      else if (qual === 'ir-linhas-dre') { E.aba = /^dre-/.test(E.aba) ? E.aba : 'dre-mensal'; guardarPreferencias(); redesenharConteudo(el); }
+      else if (qual === 'ir-linhas-dre') irParaAba(el, /^dre-/.test(E.aba) ? E.aba : 'dre-mensal');
       else if (qual === 'sim-aplicar') { const campo = el.querySelector('#sim-percentual'); if (campo) aplicarPercentual(el, campo.value); }
+      else if (qual === 'sim-ajuste') await abrirAjuste(el, null);
     });
     // Relatório do cliente: texto reescrito na prévia (guarda ao sair do texto), mês, cor e logo.
     el.addEventListener('focusout', (ev) => {
@@ -920,7 +957,8 @@
   function redesenharConteudo(el) {
     const av = el.querySelector('#apres-avisos');
     if (av) av.innerHTML = avisos();
-    el.querySelectorAll('.abas [data-aba]').forEach((b) => b.classList.toggle('ativa', b.getAttribute('data-aba') === E.aba));
+    const abas = el.querySelector('#apres-abas');
+    if (abas) abas.innerHTML = barraDeAbas();
     const meses = el.querySelector('#apres-meses');
     if (meses) meses.innerHTML = seletorMeses();
     const op = el.querySelector('.apres-opcoes');
@@ -1155,16 +1193,19 @@
 
   // ------------------------------------------------------------------
   // DRE SIMULAÇÃO (Dony, 21/09/2026: "vai pegar o ano real de 26 e, os meses seguintes, os mesmos valores do ano
-  // anterior; e eu quero digitar um percentual de evolução — 10% a mais para tudo"). O percentual fica guardado no
-  // registro do ano (config.simulacao.percentual) e vale na tela, na impressão e no Excel.
+  // anterior; e eu quero digitar um percentual de evolução — 10% a mais para tudo"). O percentual e os AJUSTES (Dony,
+  // 22/09/2026: "incluir um lançamento de estoque ou custo no lugar que eu defina: escolho adicionar ajuste, escolho o
+  // grupo, ponho o número e ele modifica a DRE") ficam no registro do ano (config.simulacao = { percentual, ajustes })
+  // e valem na tela, na impressão e no Excel.
   // ------------------------------------------------------------------
   function percentualSimulacao() { const p = Number(E.config.simulacao && E.config.simulacao.percentual); return isFinite(p) ? p : 0; }
+  function ajustesSimulacao() { const a = E.config.simulacao && E.config.simulacao.ajustes; return Array.isArray(a) ? a : []; }
   // 10 → "10" e 10,5 → "10,5" (no campo); "+10%", "+0%" e "−5%" (nos textos).
   const textoPercentual = (p) => p.toLocaleString('pt-BR', { maximumFractionDigits: 2 });
   const sinalPercentual = (p) => (p < 0 ? '−' : '+') + textoPercentual(Math.abs(p)) + '%';
   function simulacaoVisivel() {
     const ant = relAnterior();
-    return ant ? { ant, s: motor().simulacao(E.rel, ant, { percentual: percentualSimulacao() }) } : null;
+    return ant ? { ant, s: motor().simulacao(E.rel, ant, { percentual: percentualSimulacao(), ajustes: ajustesSimulacao() }) } : null;
   }
   // Os meses (1 a 12) com o ano: "Ago–Dez/26", "Mar/26", "Mar, Ago/26" (doAnterior: com o ano anterior).
   function periodoDosMeses(s, ns, doAnterior) {
@@ -1172,15 +1213,26 @@
     const r = rotuloSelecao(ns.map((n) => ({ mes: n, rotulo: doAnterior ? s.meses[n - 1].rotuloAnterior : s.meses[n - 1].rotulo })));
     return /\/\d{2}$|meses$/.test(r) ? r : r + '/' + String(doAnterior ? s.ano - 1 : s.ano).slice(2);
   }
-  const notaDoMes = (s, m) => (m.origem === 'simulado' ? m.rotuloAnterior + ' ' + sinalPercentual(s.percentual) : m.origem === 'vazio' ? 'sem balancete' : 'real');
+  const notaDoMes = (s, m) => (m.origem === 'simulado' ? m.rotuloAnterior + ' ' + sinalPercentual(s.percentual) : m.origem === 'vazio' ? 'sem balancete' : 'real') +
+    (s.ajustes.some((a) => a.mes === m.mes) ? ' · ajuste' : '');
   // Os meses da tabela: o mês sem balancete nos dois anos não entra (só empurraria os totais; o aviso diz quais são).
   const mesesNaTabela = (s) => s.meses.map((m, i) => (m.origem === 'vazio' ? -1 : i)).filter((i) => i >= 0);
+  // O nome da linha da DRE (o da empresa, se ela deu outro nome nas linhas da DRE), sem o "(-)" da frente.
+  function nomeDaLinhaDre(id) {
+    const l = motor().LINHAS_DO_MAPA.find((x) => x.id === id);
+    return ((E.rel.dre.rotulos || {})[id] || (l ? l.rotulo : id)).replace(/^\(-\)\s*/, '');
+  }
+  // Linhas de natureza credora: o ajuste novo começa a crédito nelas (aumenta a receita); nas outras, a débito.
+  const LINHA_CREDORA = { receitaBruta: true, outrasReceitas: true, investimentos: true, receitasFinanceiras: true };
+  const rotuloDoMesDoAno = (n) => motor().rotuloMes(E.ano + '-' + String(n).padStart(2, '0') + '-01');
+  const textoDoAjuste = (a) => rotuloDoMesDoAno(a.mes) + ' · ' + nomeDaLinhaDre(a.linha) + ' · ' + (a.lado === 'C' ? 'crédito ' : 'débito ') + U.formatarCentavos(a.valor) +
+    (a.descricao ? ' · ' + a.descricao : '');
   // Os avisos da simulação (texto simples: vão para a tela, a impressão e o Excel).
   function avisosSimulacao(s, ant) {
     const anoAnt = E.ano - 1;
     const plural = (ns, um, varios) => (ns.length > 1 ? varios : um);
     const lista = [];
-    if (!s.simulados.length) lista.push(E.ano + ' já tem balancete de todos os meses que ' + anoAnt + ' tem: não há mês para simular (a tabela é a DRE real).');
+    if (!s.simulados.length) lista.push(E.ano + ' já tem balancete de todos os meses que ' + anoAnt + ' tem: não há mês para simular (a tabela é a DRE real' + (s.ajustes.length ? ', com os ajustes' : '') + ').');
     if (s.lacunas.length) {
       lista.push(periodoDosMeses(s, s.lacunas) + plural(s.lacunas, ' não tem balancete e fica', ' não têm balancete e ficam') + ' entre meses reais: entr' + plural(s.lacunas, 'ou', 'aram') +
         ' pela simulação (o mesmo mês de ' + anoAnt + ' ' + sinalPercentual(s.percentual) + '). Carregue o balancete para usar o valor real.');
@@ -1197,6 +1249,7 @@
       lista.push(s.novas.length + plural(s.novas, ' conta nova', ' contas novas') + ' em ' + E.ano + ' (' + s.novas.slice(0, 3).map((n) => n.conta + ' ' + n.rotulo).join('; ') +
         (s.novas.length > 3 ? '; …' : '') + ')' + plural(s.novas, ' não tem', ' não têm') + ' valor em ' + anoAnt + ':' + plural(s.novas, ' fica zerada', ' ficam zeradas') + ' nos meses simulados.');
     }
+    s.ajustesFora.forEach((f) => lista.push('O ajuste "' + (f.ajuste.descricao || 'Ajuste') + '" (' + nomeDaLinhaDre(f.ajuste.linha) + ') não entrou na simulação: ' + f.motivo + '.'));
     if (ant.dre.naoMapeadas.length) lista.push(ant.dre.naoMapeadas.length + ' conta(s) de ' + anoAnt + ' sem linha na DRE entraram em "Outras contas de resultado": indique a linha delas em "Linhas da DRE".');
     if (!s.conferencia.reais) lista.push('Os meses reais não conferem com a DRE mensal: não use esta simulação.');
     return lista;
@@ -1209,28 +1262,42 @@
     const { s, ant } = x;
     const avah = E.avah;
     const abrirTudo = !!(op && op.abrirTudo);
-    const comSimulado = s.simulados.length > 0;
+    const comSimulado = s.simulados.length > 0, temAjustes = s.ajustes.length > 0, partes = comSimulado || temAjustes;
     const per = (ns, doAnt) => periodoDosMeses(s, ns, doAnt);
     const avisos = avisosSimulacao(s, ant);
-    // Os cartões: o ano (real + simulado) de cada resultado, ao lado do ano anterior.
+    // Os cartões: o ano (real + simulado + ajustes) de cada resultado, ao lado do ano anterior.
     const linha = (id) => s.linhas.find((l) => l.id === id);
     const fichas = ['receitaLiquida', 'lucroBruto', 'ebitda', 'lucroOperacional', 'lucroLiquido'].map((id) => {
       const l = linha(id);
       const v = l.varP === null || !Math.round(l.varP * 1000) ? '' : ' · ' + variacaoCor(l.varP, (l.varP > 0 ? '▲ ' : '▼ ') + pct(Math.abs(l.varP)));
-      return '<div class="apres-ficha sim-ficha"><span>' + T.esc(l.rotulo) + ' · ' + E.ano + (comSimulado ? ' simulado' : '') + '</span><b>' + dinheiro(l.ano) + '</b>' +
+      return '<div class="apres-ficha sim-ficha"><span>' + T.esc(l.rotulo) + ' · ' + E.ano + (partes ? ' simulado' : '') + '</span><b>' + dinheiro(l.ano) + '</b>' +
         '<small>' + anoAnt + ': ' + dinheiro(l.anterior) + v + '</small>' + (id !== 'receitaLiquida' && l.avAno !== null ? '<small>' + pct(l.avAno) + ' da receita líquida</small>' : '') + '</div>';
     }).join('');
-    // A tabela: os 12 meses (o simulado em lilás), o realizado, o simulado, o ano, o ano anterior e a variação.
+    // Os ajustes: a lista (com mudar e tirar) antes da DRE.
+    const listaAjustes = temAjustes
+      ? '<h3 class="apres-sub">Ajustes da simulação <small>' + s.ajustes.length + ' lançamento' + (s.ajustes.length > 1 ? 's' : '') + ' · efeito no lucro do ano: ' + dinheiro(s.efeitoAjustes) + '</small></h3>' +
+        '<div class="apres-caixa"><table class="apres simples ajustes-sim"><thead><tr><th class="fixa">Linha da DRE</th><th>Mês</th><th>Descrição</th><th class="num">Débito</th><th class="num">Crédito</th>' +
+        '<th class="num">Efeito no lucro</th><th class="nao-imprimir"></th></tr></thead><tbody>' +
+        s.ajustes.map((a) => '<tr><td class="fixa">' + T.esc(nomeDaLinhaDre(a.linha)) + '</td><td class="txt">' + T.esc(a.rotuloMes) + (a.origem === 'real' ? ' <small class="suave">(real)</small>' : '') + '</td>' +
+          '<td class="txt">' + T.esc(a.descricao || '—') + '</td><td class="num">' + (a.lado === 'C' ? '' : dinheiro(a.valor)) + '</td><td class="num">' + (a.lado === 'C' ? dinheiro(a.valor) : '') + '</td>' +
+          '<td class="num">' + variacaoCor(a.efeito, dinheiro(a.efeito)) + '</td><td class="nao-imprimir"><button type="button" class="botao pequeno" data-sim-aj-editar="' + T.esc(a.id) + '">✎ Mudar</button> ' +
+          '<button type="button" class="botao pequeno perigo" data-sim-aj-tirar="' + T.esc(a.id) + '">✕ Tirar</button></td></tr>').join('') + '</tbody></table></div>' +
+        '<h3 class="apres-sub">DRE simulada</h3>'
+      : '<p class="suave pequeno nao-imprimir" style="margin:0 0 10px">Nenhum ajuste. Para incluir um lançamento (estoque, custo, receita…) numa linha da DRE, num mês, use <b>＋ Adicionar ajuste</b>, lá em cima.</p>';
+    // A tabela: os meses (o simulado em lilás), o realizado, o simulado, os ajustes, o ano, o ano anterior e a variação.
     const idx = mesesNaTabela(s);
     const cab = '<thead><tr><th class="fixa">Linha / Conta analítica</th>' +
       idx.map((i) => { const m = s.meses[i]; return '<th class="num per ' + (m.origem === 'simulado' ? 'sim' : 'real') + '">' + T.esc(m.rotulo) + '<small>' + T.esc(notaDoMes(s, m)) + '</small></th>'; }).join('') +
-      (comSimulado ? '<th class="num per tri corte">Realizado<small>' + T.esc(per(s.reais)) + '</small></th><th class="num per sim">Simulado<small>' + T.esc(per(s.simulados)) + '</small></th>' : '') +
-      '<th class="num per acum">' + E.ano + '<small>' + (comSimulado ? 'real + simulado' : 'real') + '</small></th>' + (avah ? '<th class="num pct acum">AV %</th>' : '') +
+      (partes ? '<th class="num per tri corte">Realizado<small>' + T.esc(per(s.reais) || '—') + '</small></th>' : '') +
+      (comSimulado ? '<th class="num per sim">Simulado<small>' + T.esc(per(s.simulados)) + '</small></th>' : '') +
+      (temAjustes ? '<th class="num per aj">Ajustes<small>' + s.ajustes.length + ' lançamento' + (s.ajustes.length > 1 ? 's' : '') + '</small></th>' : '') +
+      '<th class="num per acum">' + E.ano + '<small>' + ['real'].concat(comSimulado ? ['simulado'] : [], temAjustes ? ['ajustes'] : []).join(' + ') + '</small></th>' + (avah ? '<th class="num pct acum">AV %</th>' : '') +
       '<th class="num per tri">' + anoAnt + '<small>' + T.esc(per(s.mesesAnterior, true) || 'sem balancete') + '</small></th>' + (avah ? '<th class="num pct tri">AV %</th>' : '') +
       '<th class="num per acum">Variação R$</th><th class="num pct acum">Variação %</th></tr></thead>';
-    const nCols = 1 + idx.length + (comSimulado ? 2 : 0) + 4 + (avah ? 2 : 0);
+    const nCols = 1 + idx.length + (partes ? 1 : 0) + (comSimulado ? 1 : 0) + (temAjustes ? 1 : 0) + 4 + (avah ? 2 : 0);
     const celulas = (l) => idx.map((i) => '<td class="num' + (s.meses[i].origem === 'simulado' ? ' sim' : '') + '">' + dinheiro(l.valores[i]) + '</td>').join('') +
-      (comSimulado ? '<td class="num tri corte">' + dinheiro(l.realizado) + '</td><td class="num tri sim">' + dinheiro(l.simulado) + '</td>' : '') +
+      (partes ? '<td class="num tri corte">' + dinheiro(l.realizado) + '</td>' : '') + (comSimulado ? '<td class="num tri sim">' + dinheiro(l.simulado) + '</td>' : '') +
+      (temAjustes ? '<td class="num tri aj">' + dinheiro(l.ajustes) + '</td>' : '') +
       '<td class="num acum">' + dinheiro(l.ano) + '</td>' + (avah ? '<td class="num pct acum">' + pct(l.avAno) + '</td>' : '') +
       '<td class="num tri">' + dinheiro(l.anterior) + '</td>' + (avah ? '<td class="num pct tri">' + pct(l.avAnterior) + '</td>' : '') +
       '<td class="num acum">' + variacaoCor(l.varR, dinheiro(l.varR)) + '</td><td class="num pct acum">' + variacaoCor(l.varP, pct(l.varP)) + '</td>';
@@ -1249,23 +1316,35 @@
         const so = l.soNoAnterior ? ' <small class="suave">(só em ' + anoAnt + ')</small>' : l.soNoAtual ? ' <small class="suave">(nova em ' + E.ano + ')</small>' : '';
         return faixa + '<tr class="analitica" data-de="' + T.esc(l.grupo) + '"><td class="fixa"><span class="cod">' + T.esc(l.conta) + '</span> ' + T.esc(l.rotulo) + so + '</td>' + celulas(l) + '</tr>';
       }
+      if (l.tipo === 'ajuste') {
+        if (!aberto) return faixa;
+        const a = l.ajuste;
+        return faixa + '<tr class="ajuste-sim" data-de="' + T.esc(l.grupo) + '"><td class="fixa"><span class="aj-selo">Ajuste</span> ' + T.esc(l.rotulo) +
+          ' <small class="suave">' + (a.lado === 'C' ? 'C ' : 'D ') + U.formatarCentavos(a.valor) + ' · ' + T.esc(s.meses[a.mes - 1].rotulo) + '</small>' +
+          '<button type="button" class="aj-editar nao-imprimir" data-sim-aj-editar="' + T.esc(a.id) + '" title="Mudar ou tirar este ajuste">✎</button></td>' + celulas(l) + '</tr>';
+      }
       if (l.tipo === 'grupo') {
         return faixa + '<tr class="grupo' + (l.semLinha ? ' sem-linha' : '') + '" data-grupo="' + T.esc(l.id) + '" title="' + (aberto ? 'Fechar' : 'Abrir') + ' as ' + l.filhas + ' conta(s)"><td class="fixa"><span class="abre nao-imprimir">' +
-          (aberto ? '▾' : '▸') + '</span>' + T.esc(l.rotulo) + ' <small>' + l.filhas + '</small></td>' + celulas(l) + '</tr>';
+          (aberto ? '▾' : '▸') + '</span>' + T.esc(l.rotulo) + ' <small>' + l.filhas + '</small>' + (l.nAjustes ? '<small class="aj-conta">· ' + l.nAjustes + ' ajuste' + (l.nAjustes > 1 ? 's' : '') + '</small>' : '') +
+          '</td>' + celulas(l) + '</tr>';
       }
-      return faixa + '<tr class="total' + (l.destaque ? ' destaque' : '') + '"><td class="fixa">' + T.esc(l.rotulo) + '</td>' + celulas(l) + '</tr>';
+      return faixa + '<tr class="total' + (l.destaque ? ' destaque' : '') + (l.acumuladoAno ? ' acumulado-ano' : '') + '"><td class="fixa">' + T.esc(l.rotulo) + '</td>' + celulas(l) + '</tr>';
     }).join('');
     const c = s.conferencia;
-    const conf = c.reais && comSimulado
-      ? '<p class="apres-nota suave">✓ Conferência: os meses reais são os da DRE mensal, no centavo. Nos simulados, a receita líquida de ' + T.esc(per(s.simulados, true)) + ' (' + dinheiro(c.receitaBase) + ') ' +
-        sinalPercentual(s.percentual) + ' deu ' + dinheiro(c.receitaSimulada) + ' (cada conta é arredondada no centavo e os subtotais são a soma delas).</p>'
+    const conf = c.reais && partes
+      ? '<p class="apres-nota suave">✓ Conferência: os meses reais são os da DRE mensal, no centavo' + (temAjustes ? ' (fora os ajustes)' : '') + '.' +
+        (comSimulado ? ' Nos simulados, a receita líquida de ' + T.esc(per(s.simulados, true)) + ' (' + dinheiro(c.receitaBase) + ') ' + sinalPercentual(s.percentual) + ' deu ' + dinheiro(c.receitaSimulada) +
+          (temAjustes ? ', antes dos ajustes' : '') + ' (cada conta é arredondada no centavo e os subtotais são a soma delas).' : '') +
+        (temAjustes ? ' ' + E.ano + ' = realizado' + (comSimulado ? ' + simulado' : '') + ' + ajustes.' : '') + '</p>'
       : '';
+    const notaAcumulado = s.acumulado.semJaneiro ? '<p class="apres-nota suave">O lucro acumulado no ano soma desde janeiro: sem janeiro (nem em ' + E.ano + ' nem em ' + anoAnt + '), a última linha fica vazia.</p>'
+      : s.acumulado.paraEm ? '<p class="apres-nota suave">O lucro acumulado no ano fica vazio a partir de ' + T.esc(s.acumulado.paraEm) + ', que não tem balancete em nenhum dos dois anos.</p>' : '';
     const sub = E.ano + ' · real: ' + T.esc(per(s.reais) || '—') + (comSimulado ? ' · simulado: ' + T.esc(per(s.simulados)) + ' = o mesmo mês de ' + anoAnt + ' ' + sinalPercentual(s.percentual) + ' em todas as linhas' : '') +
-      ' · ' + valoresEm() + ' · receitas positivas, custos e despesas entre parênteses' + semZeradasTexto();
+      (temAjustes ? ' · ' + s.ajustes.length + ' ajuste' + (s.ajustes.length > 1 ? 's' : '') : '') + ' · ' + valoresEm() + ' · receitas positivas, custos e despesas entre parênteses' + semZeradasTexto();
     return tituloSecao('DRE simulação', sub) +
       (avisos.length ? '<div class="aviso ambar" style="margin:0 0 10px"><span class="icone-aviso">⚠️</span><div>' + avisos.map((a) => T.esc(a)).join('<br>') + '</div></div>' : '') +
-      '<div class="apres-fichas">' + fichas + '</div>' +
-      '<div class="apres-caixa"><table class="apres dre simulacao">' + cab + '<tbody>' + corpo + '</tbody></table></div>' + conf;
+      '<div class="apres-fichas">' + fichas + '</div>' + listaAjustes +
+      '<div class="apres-caixa"><table class="apres dre simulacao">' + cab + '<tbody>' + corpo + '</tbody></table></div>' + conf + notaAcumulado;
   }
 
   // O percentual digitado: guarda no registro do ano e refaz a simulação na hora ("10", "10,5", "-5", "10%").
@@ -1289,6 +1368,81 @@
       .then(() => guardarConfig(config, 'apresentacao-simulacao', texto2))
       .then(() => T.avisoRapido(texto2 + ' · guardado.', 'ok', 2500))
       .catch((e) => { T.avisoRapido('Não foi possível guardar o percentual: ' + T.mensagemDeErro(e), 'erro'); app().mostrarRota(); });
+  }
+
+  // ＋ Adicionar ajuste e ✎ Mudar: o mês, a linha da DRE, débito ou crédito, o valor (sem sinal) e a descrição.
+  async function abrirAjuste(el, id) {
+    const x = simulacaoVisivel();
+    if (!x) return;
+    const s = x.s;
+    const meses = s.meses.filter((m) => m.origem !== 'vazio');
+    if (!meses.length) { T.avisoRapido('Não há mês com valor para ajustar.', 'erro'); return; }
+    const existente = id ? ajustesSimulacao().find((a) => a.id === id) || null : null;
+    const aj = existente || { mes: s.simulados.length ? s.simulados[0] : meses[meses.length - 1].mes, linha: 'cmv', lado: 'D', valor: 0, descricao: '' };
+    let cat = null;
+    const opcoesLinha = motor().LINHAS_DO_MAPA.map((l) => {
+      const grupo = l.categoria !== cat ? (cat === null ? '' : '</optgroup>') + '<optgroup label="' + T.esc(l.categoria) + '">' : '';
+      cat = l.categoria;
+      return grupo + '<option value="' + l.id + '"' + (l.id === aj.linha ? ' selected' : '') + '>' + T.esc(nomeDaLinhaDre(l.id)) + '</option>';
+    }).join('') + '</optgroup>';
+    const corpo = '<div class="aj-form">' +
+      '<label>Mês<select class="apres-campo" id="aj-mes">' + meses.map((m) => '<option value="' + m.mes + '"' + (m.mes === aj.mes ? ' selected' : '') + '>' + T.esc(m.rotulo) +
+        (m.origem === 'simulado' ? ' · simulado' : ' · real') + '</option>').join('') + '</select></label>' +
+      '<label>Linha da DRE<select class="apres-campo" id="aj-linha">' + opcoesLinha + '</select></label>' +
+      '<div class="aj-lado" role="radiogroup" aria-label="Lado do lançamento">' +
+      '<label><input type="radio" name="aj-lado" value="D"' + (aj.lado !== 'C' ? ' checked' : '') + '> <b>Débito</b> <small>aumenta custo ou despesa, ou diminui receita: o lucro cai</small></label>' +
+      '<label><input type="radio" name="aj-lado" value="C"' + (aj.lado === 'C' ? ' checked' : '') + '> <b>Crédito</b> <small>aumenta receita, ou diminui custo ou despesa: o lucro sobe</small></label></div>' +
+      '<label>Valor (R$)<input class="apres-campo aj-valor" id="aj-valor" inputmode="decimal" autocomplete="off" value="' + (aj.valor ? U.formatarCentavos(aj.valor) : '') + '" placeholder="0,00" autofocus></label>' +
+      '<label>Descrição <small class="suave">(aparece na DRE)</small><input class="apres-campo" id="aj-descricao" maxlength="80" value="' + T.esc(aj.descricao || '') + '" placeholder="ex.: ajuste de estoque"></label>' +
+      '<p class="aj-efeito" id="aj-efeito"></p></div>';
+    const lerValor = (j) => { const t = j.querySelector('#aj-valor').value.trim(); const n = t ? U.paraNumero(t) : null; return n === null || !isFinite(n) ? null : U.centavos(n); };
+    const res = await T.janela({
+      titulo: (existente ? 'Mudar o ajuste' : 'Adicionar ajuste') + ' · DRE simulação ' + E.ano, corpo, naoFecharFora: true,
+      aoAbrir: (j) => {
+        const efeito = () => {
+          const v = lerValor(j), credito = (j.querySelector('input[name="aj-lado"]:checked') || {}).value === 'C';
+          const m = s.meses[Number(j.querySelector('#aj-mes').value) - 1];
+          j.querySelector('#aj-efeito').innerHTML = v > 0
+            ? 'Efeito no lucro de ' + T.esc(m.rotulo) + ': <b class="' + (credito ? 'var-bom' : 'var-ruim') + '">' + (credito ? '+ ' : '− ') + U.formatarCentavos(v) + '</b>'
+            : 'Digite o valor sem sinal: o lado (débito ou crédito) diz se o lucro cai ou sobe.';
+        };
+        // Ajuste novo: a linha escolhida sugere o lado (receita a crédito; custo e despesa a débito).
+        if (!existente) j.querySelector('#aj-linha').addEventListener('change', (ev) => { j.querySelector('input[name="aj-lado"][value="' + (LINHA_CREDORA[ev.target.value] ? 'C' : 'D') + '"]').checked = true; });
+        j.addEventListener('input', efeito);
+        j.addEventListener('change', efeito);
+        efeito();
+      },
+      botoes: (existente ? [{ texto: '✕ Tirar', tipo: 'perigo', valor: 'tirar' }] : []).concat([{ texto: 'Cancelar', valor: null }, { texto: existente ? 'Guardar' : 'Adicionar', tipo: 'primario', antes: (j) => {
+        const valor = lerValor(j);
+        if (!(valor > 0)) { T.avisoRapido('Digite um valor maior que zero, sem sinal: o lado (débito ou crédito) diz se o lucro cai ou sobe.', 'erro', 5000); j.querySelector('#aj-valor').focus(); return false; }
+        return { id: existente ? existente.id : 'aj' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), mes: Number(j.querySelector('#aj-mes').value),
+          linha: j.querySelector('#aj-linha').value, lado: (j.querySelector('input[name="aj-lado"]:checked') || {}).value === 'C' ? 'C' : 'D', valor,
+          descricao: j.querySelector('#aj-descricao').value.replace(/\s+/g, ' ').trim() };
+      } }]),
+    });
+    if (res === 'tirar') { await tirarAjuste(el, existente.id); return; }
+    if (!res) return;
+    const lista = existente ? ajustesSimulacao().map((a) => (a.id === res.id ? res : a)) : ajustesSimulacao().concat([res]);
+    E.abertos.add(res.linha);
+    guardarAjustesSimulacao(el, lista, (existente ? 'Ajuste mudado: ' : 'Ajuste incluído: ') + textoDoAjuste(res));
+  }
+  async function tirarAjuste(el, id) {
+    const a = ajustesSimulacao().find((x) => x.id === id);
+    if (!a) return;
+    const sim = await T.janela({ titulo: 'Tirar o ajuste?', corpo: '<p style="margin:0">' + T.esc(textoDoAjuste(a)) + '</p><p class="suave pequeno" style="margin:8px 0 0">A DRE simulação fica sem ele.</p>',
+      botoes: [{ texto: 'Cancelar', valor: null }, { texto: 'Tirar', tipo: 'perigo', valor: true }] });
+    if (!sim) return;
+    guardarAjustesSimulacao(el, ajustesSimulacao().filter((x) => x.id !== id), 'Ajuste tirado: ' + textoDoAjuste(a));
+  }
+  // Refaz a simulação na hora e guarda em fila (no registro do ano), como o percentual e as marcações do LALUR.
+  function guardarAjustesSimulacao(el, ajustes, texto) {
+    E.config = Object.assign({}, E.config, { simulacao: Object.assign({}, E.config.simulacao || {}, { ajustes }) });
+    redesenharFolha(el);
+    const config = E.config;
+    E.fila = (E.fila || Promise.resolve())
+      .then(() => guardarConfig(config, 'apresentacao-simulacao-ajuste', texto))
+      .then(() => T.avisoRapido(texto + ' · guardado.', 'ok', 3000))
+      .catch((e) => { T.avisoRapido('Não foi possível guardar o ajuste: ' + T.mensagemDeErro(e), 'erro'); app().mostrarRota(); });
   }
 
   // ------------------------------------------------------------------
@@ -1655,11 +1809,11 @@
     };
     // Tipos de linha (as mesmas cores da tela) × tipo de célula; ".acum" = coluna do acumulado.
     const LINHAS = { ana: {}, grp: { fundo: 'FFE7E6E6', negrito: true }, tot: { fundo: 'FFDDEBF7', negrito: true },
-      des: { fundo: 'FFC9DCEF', negrito: true, cor: 'FF0F2C46', cima: true }, n1: { fundo: 'FFE7E6E6', negrito: true }, sin: { negrito: true },
+      des: { fundo: 'FFC9DCEF', negrito: true, cor: 'FF0F2C46', cima: true }, acu: { fundo: 'FFFBF3DD', negrito: true, cor: 'FF5A4300', cima: true }, n1: { fundo: 'FFE7E6E6', negrito: true }, sin: { negrito: true },
       inp: { fundo: 'FFEAF2FB', negrito: true, cor: 'FF0B3D91' } };
-    const ACUM = { ana: 'FFEEF3F8', grp: 'FFDCE1E7', tot: 'FFCFE0F1', des: 'FFBBD2EA', n1: 'FFDCE1E7', sin: 'FFEEF3F8', inp: 'FFEAF2FB' };
+    const ACUM = { ana: 'FFEEF3F8', grp: 'FFDCE1E7', tot: 'FFCFE0F1', des: 'FFBBD2EA', acu: 'FFF3E8C8', n1: 'FFDCE1E7', sin: 'FFEEF3F8', inp: 'FFEAF2FB' };
     // Mês simulado (DRE simulação): lilás por cima da cor da linha, em itálico.
-    const SIM = { ana: 'FFF5F2FB', grp: 'FFE2DDEB', tot: 'FFD8DDF2', des: 'FFC6CCEA', n1: 'FFE2DDEB', sin: 'FFF5F2FB', inp: 'FFEAF2FB' };
+    const SIM = { ana: 'FFF5F2FB', grp: 'FFE2DDEB', tot: 'FFD8DDF2', des: 'FFC6CCEA', acu: 'FFEFE5DA', n1: 'FFE2DDEB', sin: 'FFF5F2FB', inp: 'FFEAF2FB' };
     Object.keys(LINHAS).forEach((t) => {
       const b = LINHAS[t];
       const borda = (extra) => Object.assign({ baixo: { cor: COR.linha } }, b.cima ? { cima: { cor: 'FF8FB0D0' } } : {}, extra || {});
@@ -1836,29 +1990,34 @@
     return f;
   }
 
-  // DRE simulação: os 12 meses (o simulado em lilás e itálico), o realizado, o simulado, o ano, o ano anterior e a variação.
+  // DRE simulação: os meses (o simulado em lilás e itálico), o realizado, o simulado, os ajustes, o ano, o ano anterior e a
+  // variação; cada ajuste numa linha embaixo da linha da DRE dele; o lucro acumulado no ano na última linha; e a lista
+  // dos ajustes no fim.
   function folhaSimulacao() {
     const { s, ant } = simulacaoVisivel();
     const avah = E.avah;
     const anoAnt = E.ano - 1;
-    const comSimulado = s.simulados.length > 0;
+    const comSimulado = s.simulados.length > 0, temAjustes = s.ajustes.length > 0, partes = comSimulado || temAjustes;
     const per = (ns, doAnt) => periodoDosMeses(s, ns, doAnt);
-    const larg = larguraValor([].concat(...s.linhas.map((l) => [l.valores, [l.realizado, l.simulado, l.ano, l.anterior, l.varR]])), 15);
+    const larg = larguraValor([].concat(...s.linhas.map((l) => [l.valores, [l.realizado, l.simulado, l.ajustes, l.ano, l.anterior, l.varR]])), 15);
     const lpct = Math.max(9, larguraPct([s.linhas.map((l) => l.varP)]));
     const idx = mesesNaTabela(s);
-    const f = novaFolha('DRE simulação', [52, 18].concat(idx.map(() => larg), comSimulado ? [larg, larg] : [], [larg], avah ? [9] : [], [larg], avah ? [9] : [], [larg, lpct]), { resumoAcima: true });
+    const f = novaFolha('DRE simulação', [52, 18].concat(idx.map(() => larg), partes ? [larg] : [], comSimulado ? [larg] : [], temAjustes ? [larg] : [], [larg], avah ? [9] : [], [larg],
+      avah ? [9] : [], [larg, lpct]), { resumoAcima: true });
     f.titulo('DRE simulação', E.ano + ' · real: ' + (per(s.reais) || '—') + (comSimulado ? ' · simulado: ' + per(s.simulados) + ' = o mesmo mês de ' + anoAnt + ' ' + sinalPercentual(s.percentual) +
-      ' em todas as linhas (cada conta arredondada no centavo; os subtotais são a soma delas)' : '') + ' · receitas positivas, custos e despesas entre parênteses' + semZeradasTexto());
+      ' em todas as linhas (cada conta arredondada no centavo; os subtotais são a soma delas)' : '') + (temAjustes ? ' · ' + s.ajustes.length + ' ajuste(s), na coluna Ajustes e embaixo da linha da DRE de cada um' : '') +
+      ' · receitas positivas, custos e despesas entre parênteses' + semZeradasTexto());
     avisosSimulacao(s, ant).forEach((a) => f.add([{ v: a, e: 'subtitulo' }]));
     const cab = [{ v: 'Linha / Conta analítica', e: 'cabEsq' }, { v: 'Conta', e: 'cab' }]
       .concat(idx.map((i) => { const m = s.meses[i]; return { v: m.rotulo + '\n' + notaDoMes(s, m), e: m.origem === 'simulado' ? 'cabSim' : 'cab' }; }),
-        comSimulado ? [{ v: 'Realizado\n' + per(s.reais), e: 'cabTri' }, { v: 'Simulado\n' + per(s.simulados), e: 'cabSim' }] : [],
-        [{ v: E.ano + '\n' + (comSimulado ? 'real + simulado' : 'real'), e: 'cabAcum' }], avah ? [{ v: 'AV %', e: 'cabAcum' }] : [],
+        partes ? [{ v: 'Realizado\n' + (per(s.reais) || '—'), e: 'cabTri' }] : [], comSimulado ? [{ v: 'Simulado\n' + per(s.simulados), e: 'cabSim' }] : [],
+        temAjustes ? [{ v: 'Ajustes\n' + s.ajustes.length + ' lançamento(s)', e: 'cabTri' }] : [],
+        [{ v: E.ano + '\n' + ['real'].concat(comSimulado ? ['simulado'] : [], temAjustes ? ['ajustes'] : []).join(' + '), e: 'cabAcum' }], avah ? [{ v: 'AV %', e: 'cabAcum' }] : [],
         [{ v: anoAnt + '\n' + (per(s.mesesAnterior, true) || 'sem balancete'), e: 'cabTri' }], avah ? [{ v: 'AV %', e: 'cabTri' }] : [],
         [{ v: 'Variação R$', e: 'cabAcum' }, { v: 'Variação %', e: 'cabAcum' }]);
-    const r1 = f.add(cab, { altura: 32 });
+    const r1 = f.add(cab, { altura: temAjustes ? 44 : 32 }); // com ajuste, o cabeçalho do mês e do ano pode ter 3 linhas
     const valores = (t, l) => idx.map((i) => ({ v: R(l.valores[i]), e: t + '.val' + (s.meses[i].origem === 'simulado' ? '.sim' : '') }))
-      .concat(comSimulado ? [{ v: R(l.realizado), e: t + '.val' }, { v: R(l.simulado), e: t + '.val.sim' }] : [],
+      .concat(partes ? [{ v: R(l.realizado), e: t + '.val' }] : [], comSimulado ? [{ v: R(l.simulado), e: t + '.val.sim' }] : [], temAjustes ? [{ v: R(l.ajustes), e: t + '.val' }] : [],
         [{ v: R(l.ano), e: t + '.val.acum' }], avah ? [{ v: P(l.avAno), e: t + '.pct.acum' }] : [], [{ v: R(l.anterior), e: t + '.val' }], avah ? [{ v: P(l.avAnterior), e: t + '.pct' }] : [],
         [{ v: R(l.varR), e: t + '.val.acum' }, { v: P(l.varP), e: t + '.pct.acum' }]);
     const SEM_FAIXA = { 'Subtotal CPC 51': true, Subtotal: true, Resultado: true };
@@ -1873,13 +2032,29 @@
       if (l.tipo === 'analitica') {
         if (E.semZeradas && zerada(l)) return;
         f.add([{ v: l.rotulo, e: 'ana.rot2' }, { v: l.conta, e: 'ana.cod' }].concat(valores('ana', l)), { nivel: 1, escondida: !aberto });
+      } else if (l.tipo === 'ajuste') {
+        f.add([{ v: 'Ajuste: ' + l.rotulo, e: 'inp.rot2' }, { v: (l.ajuste.lado === 'C' ? 'C ' : 'D ') + U.formatarCentavos(l.ajuste.valor), e: 'inp.cod' }].concat(valores('inp', l)),
+          { nivel: 1, escondida: !aberto });
       } else if (l.tipo === 'grupo') {
-        f.add([{ v: l.rotulo, e: 'grp.rot0' }, { v: '', e: 'grp.cod' }].concat(valores('grp', l)), { recolhida: !aberto && l.filhas > 0 });
+        f.add([{ v: l.rotulo + (l.nAjustes ? ' · ' + l.nAjustes + ' ajuste(s)' : ''), e: 'grp.rot0' }, { v: '', e: 'grp.cod' }].concat(valores('grp', l)), { recolhida: !aberto && l.filhas + l.nAjustes > 0 });
       } else {
-        const t = l.destaque ? 'des' : 'tot';
+        const t = l.acumuladoAno ? 'acu' : l.destaque ? 'des' : 'tot';
         f.add([{ v: l.rotulo, e: t + '.rot0' }, { v: '', e: t + '.cod' }].concat(valores(t, l)));
       }
     });
+    if (s.acumulado.semJaneiro || s.acumulado.paraEm) {
+      f.vazia();
+      f.add([{ v: s.acumulado.semJaneiro ? 'O lucro acumulado no ano soma desde janeiro: sem janeiro (nem em ' + E.ano + ' nem em ' + anoAnt + '), a última linha fica vazia.'
+        : 'O lucro acumulado no ano fica vazio a partir de ' + s.acumulado.paraEm + ', que não tem balancete em nenhum dos dois anos.', e: 'subtitulo' }]);
+    }
+    // A lista dos ajustes (a linha da DRE e a descrição; o mês; débito ou crédito; o efeito no lucro).
+    if (temAjustes) {
+      f.vazia();
+      f.add([{ v: 'Ajustes da simulação (efeito no lucro do ano: ' + U.formatarCentavos(s.efeitoAjustes) + ')', e: 'cabEsq' }, { v: 'Mês', e: 'cab' }, { v: 'Débito', e: 'cab' }, { v: 'Crédito', e: 'cab' },
+        { v: 'Efeito no lucro', e: 'cabAcum' }], { altura: 20 });
+      s.ajustes.forEach((a) => f.add([{ v: nomeDaLinhaDre(a.linha) + (a.descricao ? ' — ' + a.descricao : ''), e: 'ana.rot0' }, { v: a.rotuloMes + (a.origem === 'real' ? ' (real)' : ''), e: 'ana.cod' },
+        { v: a.lado === 'C' ? null : R(a.valor), e: 'ana.val' }, { v: a.lado === 'C' ? R(a.valor) : null, e: 'ana.val' }, { v: R(a.efeito), e: 'ana.val.acum' }]));
+    }
     f.congelar = { linhas: r1, colunas: 2 };
     f.repetir = [r1, r1];
     return f;
@@ -1962,10 +2137,11 @@
       } else if (l.tipo === 'grupo') {
         f.add([{ v: l.rotulo, e: 'grp.rot0' }, { v: '', e: 'grp.cod' }].concat(celulasDePeriodos('grp', l, dre.colunas, avah)), { recolhida: !aberto && l.filhas > 0 });
       } else {
-        const t = l.destaque ? 'des' : 'tot';
+        const t = l.acumuladoAno ? 'acu' : l.destaque ? 'des' : 'tot';
         f.add([{ v: l.rotulo, e: t + '.rot0' }, { v: '', e: t + '.cod' }].concat(celulasDePeriodos(t, l, dre.colunas, avah)));
       }
     });
+    if (textoAcumuladoDre()) { f.vazia(); f.add([{ v: textoAcumuladoDre(), e: 'subtitulo' }]); }
     f.congelar = { linhas: cab.ultima, colunas: 2 };
     f.repetir = [cab.primeira, cab.ultima];
     return f;
