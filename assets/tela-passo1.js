@@ -491,7 +491,7 @@
   // regra e o passo recalcula na hora: ⚡ documento e fornecedor e 👤 fornecedor e valor vêm ligados (é o que o
   // ① sempre fez); ± com margem e ≈ só pelo valor só entram quando ele aperta, como no ③.
   // ------------------------------------------------------------------
-  const CLASSE_REGRA = { documento: 'documento', 'fornecedor-valor': 'fornecedor', margem: 'margem', valor: 'valor', 'mesmo-dia': 'opcional' };
+  const CLASSE_REGRA = { documento: 'documento', 'fornecedor-valor': 'fornecedor', margem: 'margem', 'fornecedor-proximo': 'proximo', valor: 'valor', 'mesmo-dia': 'opcional' };
   function regrasLigadas() { return M.regrasDe(E.decisoes.regras); }
   function seloRegra(id) {
     const g = M.REGRA_DE[id] || { icone: '', nome: id, texto: '' };
@@ -529,7 +529,7 @@
     const linhasTodas = r.totais.F.linhas + r.totais.A.linhas;
     return '<div class="acoes-ab" style="margin:14px 0 0"><div class="rotulo-regras pequeno">Conciliação dentro do razão · total: <b>' +
       r.batidas.length.toLocaleString('pt-BR') + '</b> conciliações · <b>' + conciliadas.toLocaleString('pt-BR') + '</b> de ' + linhasTodas.toLocaleString('pt-BR') + ' linhas</div>' +
-      '<div class="acoes-conciliar quatro">' + M.REGRAS.map(botao).join('') + '</div>' +
+      '<div class="acoes-conciliar cinco">' + M.REGRAS.map(botao).join('') + '</div>' +
       '<p class="pequeno suave" style="margin:0">Cada botão mostra quantas conciliações saíram pela <b>regra dele</b> (a soma dá o total aí em cima) e liga ou desliga a regra, recalculando na hora; a lista fica em <b>1 · Bateu no razão</b>, com o filtro <b>Conciliado por</b>. ' +
       (md ? '📅 <b>' + md + '</b> bateram no mesmo dia, sem ' + TX().pessoa + '. ' : '') + avisos + '</p></div>';
   }

@@ -111,7 +111,7 @@
   // As REGRAS (as mesmas do ①, Dony 22/09/2026: "esses botões em todas as conciliações"): cada botão liga
   // ou desliga a regra e a leitura do razão é refeita na hora. Fica guardado no mês.
   // ------------------------------------------------------------------
-  const CLASSE_REGRA = { documento: 'documento', 'fornecedor-valor': 'fornecedor', margem: 'margem', valor: 'valor', 'mesmo-dia': 'opcional' };
+  const CLASSE_REGRA = { documento: 'documento', 'fornecedor-valor': 'fornecedor', margem: 'margem', 'fornecedor-proximo': 'proximo', valor: 'valor', 'mesmo-dia': 'opcional' };
   function seloRegra(id) {
     const g = M().REGRA_DE[id] || { icone: '', curto: id, texto: '' };
     return '<span class="selo ' + (CLASSE_REGRA[id] || 'opcional') + '" title="' + T.esc(g.texto) + '">' + g.icone + ' ' + T.esc(g.curto) + '</span>';
@@ -138,7 +138,7 @@
     ].filter(Boolean).join(' ');
     return '<div class="acoes-ab" style="margin:14px 0 0"><div class="rotulo-regras pequeno">Conciliação dentro do razão · total: <b>' +
       t.batidas.toLocaleString('pt-BR') + '</b> conciliações · <b>' + t.bateram.toLocaleString('pt-BR') + '</b> de ' + t.linhas.toLocaleString('pt-BR') + ' linhas</div>' +
-      '<div class="acoes-conciliar quatro">' + M().REGRAS.map(botao).join('') + '</div>' +
+      '<div class="acoes-conciliar cinco">' + M().REGRAS.map(botao).join('') + '</div>' +
       '<p class="pequeno suave" style="margin:0">Cada botão mostra quantas conciliações saíram pela <b>regra dele</b> (a soma dá o total aí em cima) e liga ou desliga a regra, refazendo a leitura na hora. ' +
       (md ? '📅 <b>' + md + '</b> bateram no mesmo dia, sem ' + T.esc(rotulos().pessoa) + '. ' : '') + avisos + '</p></div>';
   }

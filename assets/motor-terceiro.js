@@ -120,6 +120,9 @@
     // Fornecedor e valor (botão próprio, ver conciliarPorFornecedor): mesmo fornecedor, SEM olhar o documento.
     'fornecedor-valor-par': 'fornecedor e valor: dentro da Parte A, a baixa (ou compensação) mata a nota (ou adiantamento) de mesmo valor do MESMO fornecedor, sem olhar o documento',
     'fornecedor-valor': 'fornecedor e valor: um item da Parte A e um título da Parte B do mesmo fornecedor e de mesmo valor, sem olhar o documento',
+    // Fornecedor próximo (botão próprio): o mesmo fornecedor escrito de jeitos diferentes.
+    'proximo-valor-par': 'fornecedor próximo e valor: dentro da Parte A, nomes parecidos (a mesma primeira palavra, uma escrita cabe na outra) e mesmo valor',
+    'proximo-valor': 'fornecedor próximo e valor: um item da Parte A e um título da Parte B com nomes parecidos e mesmo valor',
     // Com margem (botão próprio, ver MARGEM_AB): mesmo documento e fornecedor, diferença de até R$ 1,00.
     'margem-fornecedor-par': 'com margem: mesmo documento e fornecedor, a baixa (ou compensação) mata a nota (ou adiantamento) com diferença de centavos',
     'margem-fornecedor': 'com margem: mesmo documento e fornecedor, a soma dos dois lados difere só nos centavos',
@@ -134,6 +137,7 @@
   };
   function ehPorValor(g) { return !!g && (g.regra === 'valor' || g.regra === 'valor-par'); }
   function ehPorFornecedor(g) { return !!g && (g.regra === 'fornecedor-valor' || g.regra === 'fornecedor-valor-par'); }
+  function ehPorProximo(g) { return !!g && (g.regra === 'proximo-valor' || g.regra === 'proximo-valor-par'); }
   function ehComMargem(g) { return !!g && /^margem-/.test(String(g.regra || '')); }
   // Rótulo curto de cada regra na tela e no relatório.
   const COMO_AB = {
@@ -141,6 +145,7 @@
     'doc-nome-par': 'doc + nome · par', 'doc-nome': 'doc + nome', 'doc-nome-valor': 'doc + nome · valor',
     'doc-par': 'só doc · par', 'doc': 'só doc', 'valor-par': 'só valor · par', 'valor': 'só valor',
     'fornecedor-valor-par': 'fornecedor + valor · par', 'fornecedor-valor': 'fornecedor + valor',
+    'proximo-valor-par': 'nome parecido + valor · par', 'proximo-valor': 'nome parecido + valor',
     'margem-fornecedor-par': '± doc + fornecedor · par', 'margem-fornecedor': '± doc + fornecedor', 'margem-fornecedor-valor': '± doc + fornecedor · valor',
     'margem-nome-par': '± doc + nome · par', 'margem-nome': '± doc + nome', 'margem-nome-valor': '± doc + nome · valor',
     'margem-palavra-par': '± doc + 1ª palavra · par', 'margem-palavra': '± doc + 1ª palavra', 'margem-palavra-valor': '± doc + 1ª palavra · valor',
@@ -493,7 +498,8 @@
   //   2. fornecedor-valor — Parte A com Parte B: o lançamento e o título do mesmo fornecedor, mesmo valor.
   // Aqui o valor redondo ENTRA (diferente do ≈ só pelo valor): o nome do fornecedor já é a garantia.
   // ------------------------------------------------------------------
-  function conciliarPorFornecedor(itens, existentes, quem, quando) {
+  function conciliarPorFornecedor(itens, existentes, quem, quando, opcoes) {
+    const porNomeParecido = !!(opcoes && opcoes.proximo);
     const usados = new Set();
     (existentes || []).forEach((g) => (g.a || []).concat(g.b || []).forEach((id) => usados.add(id)));
     let proximo = proximoIdAB(existentes);
@@ -512,12 +518,15 @@
     }
     // Um item só entra se der para dizer de quem ele é: a chave da régua ou o nome comparável.
     const grupoDe = (x) => (x.chave && x.chave !== SEM ? 'c:' + x.chave : (nomeComparavel(x) ? 'n:' + nomeComparavel(x) : ''));
-    // Os dois jeitos de juntar: pela chave e pelo nome (o aging às vezes vem sem CNPJ).
-    for (const por of ['chave', 'nome']) {
+    // Os dois jeitos de juntar: pela chave e pelo nome (o aging às vezes vem sem CNPJ). No modo "próximo"
+    // (botão 👥), junta pela PRIMEIRA palavra do nome e só casa quem passa na régua de nome parecido.
+    for (const por of (porNomeParecido ? ['proximo'] : ['chave', 'nome'])) {
       const grupos = new Map();
       for (const x of itens.A.concat(itens.B)) {
         if (!livre(x) || x.valor === 0) continue;
-        const k = por === 'chave' ? grupoDe(x) : (nomeComparavel(x) ? 'n:' + nomeComparavel(x) : '');
+        const k = por === 'chave' ? grupoDe(x)
+          : por === 'proximo' ? ((MotorNomes.palavrasProprias(nomeComparavel(x))[0] || '') && 'p:' + MotorNomes.palavrasProprias(nomeComparavel(x))[0])
+          : (nomeComparavel(x) ? 'n:' + nomeComparavel(x) : '');
         if (!k) continue;
         if (!grupos.has(k)) grupos.set(k, []);
         grupos.get(k).push(x);
@@ -526,22 +535,23 @@
         // 1. Dentro da Parte A.
         const notas = xs.filter((x) => x.lado === 'A' && x.valor > 0 && livre(x)).sort((p2, q) => p2.ordem - q.ordem);
         const baixas = xs.filter((x) => x.lado === 'A' && x.valor < 0 && livre(x)).sort((p2, q) => p2.ordem - q.ordem);
+        const casa = (p2, q) => !porNomeParecido || MotorNomes.nomesProximos(p2.nome, q.nome);
         for (const bx of baixas) {
           if (!livre(bx)) continue;
           let k = -1;
           notas.forEach((n, j) => {
-            if (!livre(n) || n.valor !== -bx.valor) return;
+            if (!livre(n) || n.valor !== -bx.valor || !casa(n, bx)) return;
             if (k < 0 || Math.abs(n.ordem - bx.ordem) < Math.abs(notas[k].ordem - bx.ordem)) k = j;
           });
-          if (k >= 0) { registrar([notas[k], bx], [], 'fornecedor-valor-par'); notas.splice(k, 1); }
+          if (k >= 0) { registrar([notas[k], bx], [], porNomeParecido ? 'proximo-valor-par' : 'fornecedor-valor-par'); notas.splice(k, 1); }
         }
         // 2. Parte A com Parte B.
         const ladoA = xs.filter((x) => x.lado === 'A' && livre(x)).sort((p2, q) => p2.ordem - q.ordem);
         const ladoB = xs.filter((x) => x.lado === 'B' && livre(x)).sort(porData);
         for (const a of ladoA) {
           if (!livre(a)) continue;
-          const j = ladoB.findIndex((b) => livre(b) && b.valor === a.valor);
-          if (j >= 0) { registrar([a], [ladoB[j]], 'fornecedor-valor'); ladoB.splice(j, 1); }
+          const j = ladoB.findIndex((b) => livre(b) && b.valor === a.valor && casa(a, b));
+          if (j >= 0) { registrar([a], [ladoB[j]], porNomeParecido ? 'proximo-valor' : 'fornecedor-valor'); ladoB.splice(j, 1); }
         }
       }
     }
@@ -1094,6 +1104,6 @@
     normalizarDocumento, documentoDaLinha, itensAB, conciliarAutomatico, emAbertoAB, tipoAB, proximoIdAB, REGRAS_AB,
     compararPorDocumento, arrumarGruposAB, relatorioAB, pendenciasAB, saldoInicialAB, idsDeTitulos, COMO_AB, nomeComparavel, ladosDoRazao,
     conciliarPorValor, valorRedondo, ehPorValor, ladoDC,
-    ehComMargem, ehPorFornecedor, conciliarPorFornecedor, MARGEM_AB, atualizarAB, faltandoNoGrupo, resumoDoItem, compararVersoes, resumoDaComparacao,
+    ehComMargem, ehPorFornecedor, ehPorProximo, conciliarPorFornecedor, MARGEM_AB, atualizarAB, faltandoNoGrupo, resumoDoItem, compararVersoes, resumoDaComparacao,
   };
 });

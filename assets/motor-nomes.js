@@ -95,6 +95,17 @@
     return saida;
   }
 
+  // O nome da empresa acaba no SUFIXO SOCIETÁRIO: o que vem depois é descrição do que foi comprado
+  // (Dony, 22/09/2026: "WPS CONSTRUCOES LTDA montagem de estruturas" e "WPS CONSTRUCOES LTDA" são o MESMO
+  // fornecedor, e o programa não conciliava porque via dois). Só corta se houver palavra antes e depois dele.
+  const SUFIXOS_SOCIETARIOS = ['LTDA', 'LIMITADA', 'EIRELI', 'EPP', 'MEI', 'ME'];
+  function cortarNoSufixo(palavras) {
+    for (let i = 1; i < palavras.length - 1; i++) {
+      if (SUFIXOS_SOCIETARIOS.indexOf(palavras[i]) >= 0) return palavras.slice(0, i + 1);
+    }
+    return palavras;
+  }
+
   function limparNome(texto) {
     if (!texto) return '';
     let s = Util.semAcento(texto).toUpperCase();
@@ -102,8 +113,21 @@
     for (const re of RUIDOS) s = s.replace(re, ' ');
     for (const meio of MEIOS) s = s.split(meio).join(' ');
     s = Util.normalizarNome(s);
-    const palavras = tirarRepeticao(s.split(' ').filter(Boolean));
+    const palavras = cortarNoSufixo(tirarRepeticao(s.split(' ').filter(Boolean)));
     return palavras.join(' ');
+  }
+
+  // Dois nomes PRÓXIMOS (Dony, 22/09/2026: "você pode ter WPS Construções, WPS Limitada, WPS Const Limitada"):
+  // o nome COMEÇA PELA MESMA PALAVRA própria (ou uma é o começo da outra, de 4 letras para cima). É de
+  // propósito mais solto do que a régua de nomes, que já junta sozinha quem tem as mesmas palavras: aqui
+  // "WPS CONSTRUCOES" e "WPS MONTAGENS" ficam próximos. Por isso só vale no botão 👥 (nunca sozinho) e o
+  // que ele casar aparece numa lista à parte, para conferir uma a uma.
+  function nomesProximos(nomeA, nomeB) {
+    const a = palavrasProprias(limparNome(nomeA || ''));
+    const b = palavrasProprias(limparNome(nomeB || ''));
+    if (!a.length || !b.length) return false;
+    const x = a[0], y = b[0];
+    return x === y || (x.length >= 4 && y.indexOf(x) === 0) || (y.length >= 4 && x.indexOf(y) === 0);
   }
 
   // ------------------------------------------------------------------
@@ -748,7 +772,7 @@
 
   return {
     SEM_FORNECEDOR, REGRAS, GENERICAS, SO_INTEIRAS, MEIOS_SUSPEITOS,
-    ehGenerica, palavrasProprias, limparNome, tirarRepeticao, cnpjsDoTexto, lerHistorico,
+    ehGenerica, palavrasProprias, limparNome, tirarRepeticao, cnpjsDoTexto, lerHistorico, nomesProximos, cortarNoSufixo,
     comparar, resolver, sugerirDono, pareceMeioDePagamento,
   };
 });

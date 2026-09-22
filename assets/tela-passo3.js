@@ -968,6 +968,7 @@
       : mostrar === 'conciliados' ? !!grupoDe(x)
       : mostrar === 'documento' ? ehPeloDocumento(grupoDe(x))
       : mostrar === 'fornecedor' ? M.ehPorFornecedor(grupoDe(x))
+      : mostrar === 'proximo' ? M.ehPorProximo(grupoDe(x))
       : mostrar === 'valor' ? M.ehPorValor(grupoDe(x))
       : mostrar === 'margem' ? M.ehComMargem(grupoDe(x))
       : mostrar === 'faltando' ? !!grupoDe(x) && E.comFalta.has(grupoDe(x).id)
@@ -989,7 +990,7 @@
 
     const opcoes = [['', 'Em aberto'], ['conciliados', 'Conciliados'],
       ['documento', '⚡ Conciliados por documento e ' + pessoa()], ['fornecedor', '👤 Conciliados por ' + pessoa() + ' e valor'],
-      ['valor', '≈ Conciliados só pelo valor'], ['margem', '± Conciliados com margem']]
+      ['proximo', '👥 Conciliados por ' + pessoa() + ' próximo e valor'], ['valor', '≈ Conciliados só pelo valor'], ['margem', '± Conciliados com margem']]
       .concat(E.comFalta.size ? [['faltando', '⚠ Conciliados com item faltando (' + E.comFalta.size + ')']] : [])
       .concat(ultima ? [['atualizacao', 'Da última atualização de arquivo']] : [])
       .concat([['todos', 'Todos']]);
@@ -1000,6 +1001,7 @@
       '<span class="suave pequeno">(desmarque para <b>só o razão</b>)</span>';
 
     const ROTULOS = { todos: 'item(ns)', conciliados: 'conciliado(s)', documento: 'conciliado(s) pelo documento', fornecedor: 'conciliado(s) por ' + pessoa() + ' e valor',
+      proximo: 'conciliado(s) por ' + pessoa() + ' próximo e valor',
       valor: 'conciliado(s) só pelo valor', margem: 'conciliado(s) com margem',
       faltando: 'nas conciliações com item faltando', atualizacao: 'da última atualização de arquivo' };
     const rot = ROTULOS[mostrar] || 'em aberto';
@@ -1191,8 +1193,8 @@
   }
 
   // As conciliações do ⚡ são todas as automáticas que não vieram dos outros botões.
-  function ehPeloDocumento(g) { return !!g && g.regra !== 'manual' && !M.ehPorValor(g) && !M.ehComMargem(g) && !M.ehPorFornecedor(g); }
-  function seloDaRegra(g) { return g.regra === 'manual' ? 'mao' : M.ehPorValor(g) ? 'valor' : M.ehComMargem(g) ? 'margem' : M.ehPorFornecedor(g) ? 'fornecedor' : 'opcional'; }
+  function ehPeloDocumento(g) { return !!g && g.regra !== 'manual' && !M.ehPorValor(g) && !M.ehComMargem(g) && !M.ehPorFornecedor(g) && !M.ehPorProximo(g); }
+  function seloDaRegra(g) { return g.regra === 'manual' ? 'mao' : M.ehPorValor(g) ? 'valor' : M.ehComMargem(g) ? 'margem' : M.ehPorFornecedor(g) ? 'fornecedor' : M.ehPorProximo(g) ? 'proximo' : 'opcional'; }
 
   function resumoAB(ab, grupos) {
     const conta = (tipo) => grupos.filter((g) => g.tipo === tipo).length;
@@ -1200,7 +1202,8 @@
     const porValor = grupos.filter(M.ehPorValor).length;
     const comMargem = grupos.filter(M.ehComMargem).length;
     const porFornecedor = grupos.filter(M.ehPorFornecedor).length;
-    const auto = grupos.length - aMao - porValor - comMargem - porFornecedor;
+    const porProximo = grupos.filter(M.ehPorProximo).length;
+    const auto = grupos.length - aMao - porValor - comMargem - porFornecedor - porProximo;
     const dif = ab.valorA - ab.valorB;
     // Conciliações que tiram valores diferentes dos dois lados: à mão "assim mesmo", com margem, ou com item
     // faltando (o item que saiu não está mais nas partes). Com isso, em aberto A − B + estas = diferença da ponte.
@@ -1217,6 +1220,7 @@
     const lotes = [
       auto ? lote('desfazer-automaticas', 'documento', 'Automáticas', auto, 'Desfaz as conciliações feitas pelo ⚡ Conciliar (pelo documento)') : '',
       porFornecedor ? lote('desfazer-fornecedor', 'fornecedor', 'Por ' + pessoa() + ' e valor', porFornecedor, 'Desfaz as conciliações feitas pelo 👤 Conciliar por ' + pessoa() + ' e valor') : '',
+      porProximo ? lote('desfazer-proximo', 'proximo', 'Por ' + pessoa() + ' próximo', porProximo, 'Desfaz as conciliações feitas pelo 👥 Conciliar por ' + pessoa() + ' próximo') : '',
       porValor ? lote('desfazer-valor', 'valor', 'Só pelo valor', porValor, 'Desfaz as conciliações feitas pelo ≈ Conciliar só pelo valor') : '',
       comMargem ? lote('desfazer-margem', 'margem', 'Com margem', comMargem, 'Desfaz as conciliações feitas pelo ± Conciliar com margem') : '',
       aMao ? lote('desfazer-manuais', 'manual', 'À mão', aMao, 'Desfaz as conciliações feitas à mão') : '',
@@ -1230,17 +1234,21 @@
       ' <b>=</b> ' + pedaco('Diferença a investigar', dif, 'o que sobra em aberto', 'forte') +
       '</div>' +
       '<div class="acoes-ab">' +
-      '<div class="acoes-conciliar quatro">' +
-      acao('conciliar-tudo', 'documento', '⚡', 'Conciliar', 'pelo documento e ' + pessoa(),
+      '<div class="rotulo-regras pequeno">Conciliar automaticamente · escolha a regra (o que ela achar ganha ID e entra na lista)</div>' +
+      '<div class="acoes-conciliar cinco">' +
+      acao('conciliar-tudo', 'documento', '⚡', 'Documento e ' + pessoa(), 'o mesmo documento nos dois lados',
         'Acha tudo o que casa pelo documento — primeiro com o mesmo fornecedor, depois com o mesmo nome, depois só pelo documento — e dá um ID para cada conciliação (1, 2, 3…)') +
       // Dony, 22/09/2026: "se eu tenho um fornecedor que tem o débito e o crédito e bate o valor, concilia".
-      acao('conciliar-fornecedor', 'fornecedor', '👤', 'Conciliar por ' + pessoa() + ' e valor', 'sem olhar o documento',
+      acao('conciliar-fornecedor', 'fornecedor', '👤', primeiraMaiuscula(pessoa()) + ' e valor', 'sem olhar o documento',
         'Depois do ⚡ pelo documento, casa o que sobrou pelo MESMO ' + pessoa() + ' e mesmo valor, sem olhar o documento. Só roda quando você aperta.') +
       // Dony, 16/09/2026: só roda quando ele aperta (valores quebrados, sem documento e sem fornecedor).
-      acao('conciliar-valor', 'valor', '≈', 'Conciliar só pelo valor', 'sem documento e sem fornecedor',
+      // Dony, 22/09/2026: "você pode ter WPS Construções, WPS Limitada, WPS Const Limitada — eu queria um botão específico".
+      acao('conciliar-proximo', 'proximo', '👥', primeiraMaiuscula(pessoa()) + ' próximo', 'nome parecido, mesmo valor',
+        'Depois do ⚡ e do 👤, casa o que sobrou quando o nome é o MESMO escrito de jeitos diferentes (a primeira palavra igual e uma escrita cabendo na outra) com o mesmo valor. Só roda quando você aperta.') +
+      acao('conciliar-valor', 'valor', '≈', 'Só pelo valor', 'sem doc e sem ' + pessoa(),
         'Depois do ⚡ pelo documento, casa o que sobrou por VALOR igual, sem olhar documento e fornecedor. Só valor quebrado: inteiro terminado em zero (10, 100, 200…) fica de fora. Só roda quando você aperta.') +
       // Dony, 16/09/2026: "fechar documento + fornecedor com margem de diferença, até um real; só quando eu apertar".
-      acao('conciliar-margem', 'margem', '±', 'Conciliar com margem', 'doc + fornecedor · até ' + T.moeda(M.MARGEM_AB),
+      acao('conciliar-margem', 'margem', '±', 'Com margem', 'doc + ' + pessoa() + ' · até ' + T.moeda(M.MARGEM_AB),
         'Depois do ⚡ pelo documento, casa o que sobrou pelo MESMO documento e MESMO fornecedor aceitando diferença de até ' + T.moeda(M.MARGEM_AB) + ' (centavos de arredondamento). Só roda quando você aperta.') +
       '</div>' +
       (lotes ? '<div class="desfazer-lote"><span class="rotulo-lote">↺ Desfazer em lote</span>' + lotes + '</div>' : '') +
@@ -1250,6 +1258,7 @@
           pilula('cinza', n(conta('AxA')) + ' A×A') + pilula('azul', n(conta('AxB')) + ' A×B') + (conta('BxB') ? pilula('cinza', n(conta('BxB')) + ' B×B') : '') +
           (aMao ? pilula('cinza', n(aMao) + ' à mão') : '') +
           (porFornecedor ? '<span class="selo fornecedor">' + n(porFornecedor) + ' por ' + pessoa() + ' e valor</span>' : '') +
+          (porProximo ? '<span class="selo proximo">' + n(porProximo) + ' por ' + pessoa() + ' próximo</span>' : '') +
           (porValor ? '<span class="selo valor">' + n(porValor) + ' só pelo valor</span>' : '') +
           (comMargem ? '<span class="selo margem">' + n(comMargem) + ' com margem</span>' : '') +
           (E.comFalta.size ? '<span class="selo perigo">⚠ ' + n(E.comFalta.size) + ' com item faltando</span>' : '') +
@@ -1337,6 +1346,8 @@
   const MODOS_LISTA = {
     documento: { titulo: 'Conciliações pelo documento', de: ehPeloDocumento,
       aviso: '<div class="aviso info" style="margin:0 0 10px"><span class="icone-aviso">⚡</span><div>Casadas pelo <b>documento</b> (com o mesmo fornecedor, com o mesmo nome ou só pelo documento). É o que o ⚡ Conciliar acha.</div></div>' },
+    proximo: { titulo: 'Conciliações por fornecedor próximo e valor', de: M.ehPorProximo,
+      aviso: '<div class="aviso ambar" style="margin:0 0 10px"><span class="icone-aviso">👥</span><div>Casadas quando o <b>nome parece ser o mesmo fornecedor escrito de outro jeito</b> (WPS Construções × WPS Ltda) e o valor é igual. Confira uma a uma: abra no ▸ e, se não for, clique em <b>Desfazer</b>.</div></div>' },
     fornecedor: { titulo: 'Conciliações por fornecedor e valor', de: M.ehPorFornecedor,
       aviso: '<div class="aviso ambar" style="margin:0 0 10px"><span class="icone-aviso">👤</span><div>Casadas pelo <b>mesmo fornecedor e mesmo valor</b>, sem olhar o documento. Confira cada uma: abra no ▸ e, se não for, clique em <b>Desfazer</b>.</div></div>' },
     valor: { titulo: 'Conciliações só pelo valor', de: M.ehPorValor,
@@ -1523,6 +1534,48 @@
     gravar('terceiro-ab-fornecedor', texto);
   }
 
+  // 👥 Conciliar por fornecedor PRÓXIMO e valor (Dony, 22/09/2026): o mesmo fornecedor escrito de jeitos
+  // diferentes. Roda depois do ⚡ e do 👤 — o que casa com o nome igual não passa por aqui.
+  async function conciliarPorProximo() {
+    const quem = app().usuario.nome, quando = U.agoraISO();
+    const pelosDocs = M.conciliarAutomatico(E.itens, E.decisoes.conciliacoesAB, quem, quando);
+    const iguais = M.conciliarPorFornecedor(E.itens, E.decisoes.conciliacoesAB.concat(pelosDocs), quem, quando);
+    const porProx = M.conciliarPorFornecedor(E.itens, E.decisoes.conciliacoesAB.concat(pelosDocs, iguais), quem, quando, { proximo: true });
+    if (!porProx.length) {
+      T.avisoRapido('Nada casa por ' + pessoa() + ' de nome parecido e mesmo valor no que ficou em aberto' +
+        (pelosDocs.length || iguais.length ? '. Antes dele, o ⚡ acha ' + pelosDocs.length + ' e o 👤 acha ' + iguais.length + ' — e elas NÃO foram gravadas.' : '.'), 'ok', 8000);
+      return;
+    }
+    const n = (regra) => porProx.filter((g) => g.regra === regra).length;
+    const exemplos = porProx.slice(0, 3).map((g) => {
+      const a = (g.a || []).map((id) => E.itens.porId.get(id)).filter(Boolean)[0];
+      const b = (g.b || []).map((id) => E.itens.porId.get(id)).filter(Boolean)[0];
+      const outro = (g.a || []).map((id) => E.itens.porId.get(id)).filter(Boolean)[1];
+      const x = a ? a.nome : '', y = (b || outro || {}).nome || '';
+      return x && y && x !== y ? '<li>' + T.esc(x) + ' × ' + T.esc(y) + '</li>' : '';
+    }).filter(Boolean).join('');
+    const ok = await T.confirmar({
+      titulo: 'Conciliar por ' + pessoa() + ' próximo e valor?',
+      texto: (pelosDocs.length || iguais.length ? 'Antes, o <b>⚡ pelo documento</b> acha <b>' + pelosDocs.length + '</b> e o <b>👤 por ' + pessoa() + ' e valor</b> acha <b>' + iguais.length + '</b>.<br>' : '') +
+        'Com o nome parecido (a primeira palavra igual e uma escrita cabendo na outra) e o mesmo valor: <b>' + porProx.length + '</b> conciliação(ões) — ' +
+        n('proximo-valor-par') + ' dentro da Parte A e ' + n('proximo-valor') + ' da Parte A com a Parte B.' +
+        (exemplos ? '<br>Por exemplo:<ul class="pequeno" style="margin:6px 0 0">' + exemplos + '</ul>' : '') +
+        '<br>Depois, confira em <b>Mostrar → 👥 Conciliados por ' + pessoa() + ' próximo e valor</b>; o que não for, é só desfazer.',
+      botao: '👥 Conciliar por ' + pessoa() + ' próximo',
+    });
+    if (!ok) return;
+    E.decisoes.conciliacoesAB = E.decisoes.conciliacoesAB.concat(pelosDocs, iguais, porProx);
+    const faixa = (xs) => xs.length === 1 ? 'ID #' + xs[0].id : 'IDs #' + xs[0].id + ' a #' + xs[xs.length - 1].id;
+    const texto = (pelosDocs.length ? pelosDocs.length + ' pelo documento e ' : '') + (iguais.length ? iguais.length + ' por ' + pessoa() + ' e valor e ' : '') +
+      porProx.length + ' por ' + pessoa() + ' próximo (' + faixa(porProx) + ')';
+    historico('👥 Conciliar por ' + pessoa() + ' próximo e valor: ' + texto);
+    E.filtros[E.aba + '.mostrar'] = 'proximo';
+    redesenharAB();
+    const ab = M.emAbertoAB(E.itens, E.decisoes.conciliacoesAB);
+    T.avisoRapido('👥 ' + texto + '. Em aberto: ' + ab.abertosA.length + ' na A e ' + ab.abertosB.length + ' na B.', 'ok', 9000);
+    gravar('terceiro-ab-proximo', texto);
+  }
+
   // ± Conciliar com margem (Dony, 16/09/2026: "um botão chamado fechar documento + fornecedor com margem de
   // diferença; até um real de margem; só concilia se eu apertar esse botão"). Antes, o que casa exato pelo
   // documento (o ⚡) — a margem é só para o que sobrou.
@@ -1619,10 +1672,12 @@
   const LOTES = {
     manuais: { de: (g) => g.regra === 'manual', nome: 'manuais', titulo: 'Desfazer as conciliações manuais',
       texto: (n) => 'As <b>' + n + '</b> conciliações feitas à mão voltam para <b>em aberto</b> (as observações delas também saem). As outras continuam.' },
-    automaticas: { de: ehPeloDocumento, nome: 'automáticas', titulo: 'Desfazer as conciliações automáticas',
+    automaticas: { de: (g) => ehPeloDocumento(g), nome: 'automáticas', titulo: 'Desfazer as conciliações automáticas',
       texto: (n) => 'As <b>' + n + '</b> conciliações feitas pelo ⚡ Conciliar (pelo documento) voltam para <b>em aberto</b>. As feitas à mão, as por fornecedor e valor, as só pelo valor e as com margem continuam.' },
     fornecedor: { de: M.ehPorFornecedor, nome: 'por fornecedor e valor', titulo: 'Desfazer as conciliações por fornecedor e valor',
       texto: (n) => 'As <b>' + n + '</b> conciliações feitas pelo 👤 Conciliar por fornecedor e valor voltam para <b>em aberto</b>. As outras continuam.' },
+    proximo: { de: M.ehPorProximo, nome: 'por fornecedor próximo', titulo: 'Desfazer as conciliações por fornecedor próximo',
+      texto: (n) => 'As <b>' + n + '</b> conciliações feitas pelo 👥 Conciliar por fornecedor próximo voltam para <b>em aberto</b>. As outras continuam.' },
     valor: { de: M.ehPorValor, nome: 'só pelo valor', titulo: 'Desfazer as conciliações só pelo valor',
       texto: (n) => 'As <b>' + n + '</b> conciliações feitas pelo ≈ Conciliar só pelo valor voltam para <b>em aberto</b>. As outras continuam.' },
     margem: { de: M.ehComMargem, nome: 'com margem', titulo: 'Desfazer as conciliações com margem',
@@ -1836,10 +1891,12 @@
       else if (a === 'limpar-conciliacao') await limparConciliacao();
       else if (a === 'conciliar-tudo') conciliarTudo();
       else if (a === 'conciliar-fornecedor') await conciliarPorFornecedor();
+      else if (a === 'conciliar-proximo') await conciliarPorProximo();
       else if (a === 'conciliar-valor') await conciliarSoPeloValor();
       else if (a === 'conciliar-margem') await conciliarComMargem();
       else if (a === 'desfazer-automaticas') await desfazerEmLote('automaticas');
       else if (a === 'desfazer-fornecedor') await desfazerEmLote('fornecedor');
+      else if (a === 'desfazer-proximo') await desfazerEmLote('proximo');
       else if (a === 'desfazer-valor') await desfazerEmLote('valor');
       else if (a === 'desfazer-margem') await desfazerEmLote('margem');
       else if (a === 'desfazer-faltando') await desfazerEmLote('faltando');

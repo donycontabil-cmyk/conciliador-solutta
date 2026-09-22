@@ -34,10 +34,12 @@
       texto: 'Mesmo fornecedor, sem olhar o documento: o débito mata o crédito de mesmo valor (1x1), uma baixa mata várias notas (1xN), várias baixas matam uma nota (Nx1) e o que sobra do fornecedor zerando entre si.' },
     { id: 'margem', icone: '±', nome: 'Com margem', curto: 'com margem', sub: 'doc + fornecedor · até ' + Util.formatarCentavos(MARGEM), padrao: false,
       texto: 'Mesmo fornecedor e mesmo documento aceitando diferença de até R$ 1,00 (centavos de arredondamento). A diferença continua em aberto e aparece na conferência.' },
+    { id: 'fornecedor-proximo', icone: '👥', nome: 'Fornecedor próximo', curto: 'fornecedor próximo e valor', sub: 'nome parecido, mesmo valor', padrao: false,
+      texto: 'O mesmo fornecedor escrito de jeitos diferentes (WPS Construções, WPS Limitada, WPS Const Ltda): o nome COMEÇA PELA MESMA PALAVRA e o valor é igual. É de propósito mais solto — confira uma a uma no filtro Conciliado por.' },
     { id: 'valor', icone: '≈', nome: 'Só pelo valor', curto: 'só pelo valor', sub: 'sem doc e sem fornecedor', padrao: false,
       texto: 'O que sobrou, casado só por VALOR igual dentro da mesma conta, sem olhar documento e fornecedor. Só valor quebrado: inteiro terminado em zero (10, 100, 200…) fica de fora, para não casar coisa à toa.' },
   ];
-  const REGRAS_PADRAO = { documento: true, 'fornecedor-valor': true, margem: false, valor: false };
+  const REGRAS_PADRAO = { documento: true, 'fornecedor-valor': true, margem: false, 'fornecedor-proximo': false, valor: false };
   const REGRA_DE = {};
   for (const r of REGRAS) REGRA_DE[r.id] = r;
   REGRA_DE['mesmo-dia'] = { id: 'mesmo-dia', icone: '📅', nome: 'Mesmo dia, sem fornecedor', curto: 'mesmo dia', sub: 'sem fornecedor, mesma conta e mesmo dia', padrao: true,
@@ -182,7 +184,7 @@
         valor: grupo.filter((l) => l.valor > 0).reduce((s, l) => s + l.valor, 0), diferenca: soma, linhas: grupo.map((l) => l.i) };
       batidas.push(b);
       for (const l of grupo) batidaDe.set(l.digital, b);
-      if (b.regra === 'margem' || b.regra === 'valor') {
+      if (b.regra === 'margem' || b.regra === 'valor' || b.regra === 'fornecedor-proximo') {
         for (const l of grupo) {
           const k = l.dono.chave + '|' + l.lado;
           residuos.set(k, (residuos.get(k) || 0) + l.valor);
@@ -320,6 +322,46 @@
         usados.add(a.digital);
         usados.add(b.digital);
         registrar('mesmo-dia', a.lado, SEM, [a, b], 'mesmo-dia');
+      }
+    }
+
+    // 👥 FORNECEDOR PRÓXIMO E VALOR (só quando ele aperta o botão) — o mesmo fornecedor escrito de outro jeito:
+    // a primeira palavra do nome é a mesma e uma escrita cabe dentro da outra, com o mesmo valor e sinais opostos.
+    if (regras['fornecedor-proximo']) {
+      const palavrasDe = new Map();
+      const daChave = (l) => {
+        if (!palavrasDe.has(l.dono.chave)) palavrasDe.set(l.dono.chave, MotorNomes.palavrasProprias(MotorNomes.limparNome(l.dono.nome || '')));
+        return palavrasDe.get(l.dono.chave);
+      };
+      const proximos = (x, y) => {
+        if (x.dono.chave === y.dono.chave) return false;
+        const a = daChave(x), b = daChave(y);
+        return a.length && b.length && MotorNomes.nomesProximos(x.dono.nome, y.dono.nome);
+      };
+      for (const lado of ['F', 'A']) {
+        const abertas = linhas.filter((l) => l.lado === lado && l.valor !== 0 && !bloqueadas.has(l.digital) &&
+          !batidaDe.has(l.digital) && l.dono.chave !== SEM && daChave(l).length);
+        // Só quem tem a mesma primeira palavra pode ser o mesmo fornecedor escrito diferente.
+        const porPrimeira = new Map();
+        for (const l of abertas) {
+          const k = daChave(l)[0];
+          if (!porPrimeira.has(k)) porPrimeira.set(k, []);
+          porPrimeira.get(k).push(l);
+        }
+        for (const grupo of porPrimeira.values()) {
+          const positivos = grupo.filter((l) => l.valor > 0).sort((x, y) => x.dia - y.dia || x.i - y.i);
+          const negativos = grupo.filter((l) => l.valor < 0).sort((x, y) => x.dia - y.dia || x.i - y.i);
+          if (!positivos.length || !negativos.length) continue;
+          for (const f of positivos) {
+            if (batidaDe.has(f.digital)) continue;
+            let melhor = null;
+            for (const b of negativos) {
+              if (batidaDe.has(b.digital) || b.valor !== -f.valor || !proximos(f, b)) continue;
+              if (!melhor || Math.abs(b.dia - f.dia) < Math.abs(melhor.dia - f.dia)) melhor = b;
+            }
+            if (melhor) registrar('1x1', lado, f.dono.chave, [f, melhor], 'fornecedor-proximo');
+          }
+        }
       }
     }
 
@@ -714,7 +756,7 @@
       let residuo = 0;
       e1.residuos.forEach((v, k) => { if (k.endsWith('|' + lado)) residuo += v; });
       const comMargem = e1.batidas.filter((b) => b.lado === lado && b.regra === 'margem');
-      const soPeloValor = e1.batidas.filter((b) => b.lado === lado && b.regra === 'valor');
+      const soPeloValor = e1.batidas.filter((b) => b.lado === lado && (b.regra === 'valor' || b.regra === 'fornecedor-proximo'));
       const naoBateu = sobras.filter((l) => l.situacao !== 'auto' && l.situacao !== 'manual');
       totais[lado] = {
         titulo: textos[lado],
@@ -862,7 +904,7 @@
     // O resto das conciliações opcionais (± com margem e ≈ só pelo valor): o que saiu do fornecedor além do
     // que era dele continua compondo o saldo dele, com o número da conciliação no histórico.
     for (const b of r.batidas || []) {
-      if (b.regra !== 'margem' && b.regra !== 'valor') continue;
+      if (b.regra !== 'margem' && b.regra !== 'valor' && b.regra !== 'fornecedor-proximo') continue;
       const porChave = new Map();
       for (const i of b.linhas) {
         const l = r.linhas[i];
@@ -968,7 +1010,7 @@
     // Só a regra ± com margem pode não somar zero; o que ela deixa de diferença continua em aberto (residuo).
     for (const b of e1.batidas) if (b.regra !== 'margem' && b.linhas.reduce((t, i) => t + linhas[i].valor, 0) !== 0) falhas.push('Batida ' + b.id + ' não soma zero.');
     const comMargem = e1.batidas.filter((b) => b.regra === 'margem');
-    const soPeloValor = e1.batidas.filter((b) => b.regra === 'valor');
+    const soPeloValor = e1.batidas.filter((b) => b.regra === 'valor' || b.regra === 'fornecedor-proximo');
     const residuo = comMargem.reduce((t, b) => t + b.diferenca, 0);
     if (somaCredito - somaDebito + residuo !== movimento) falhas.push('O que ficou em aberto (' + Util.formatarCentavos(somaCredito - somaDebito) + ') mais a diferença das conciliações com margem (' + Util.formatarCentavos(residuo) + ') não é o movimento do razão (' + Util.formatarCentavos(movimento) + ').');
     const porFornecedorSoma = porFornecedor.reduce((t, g) => t + g.saldo, 0);
