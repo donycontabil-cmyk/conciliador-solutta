@@ -117,6 +117,9 @@
     // Só pelo valor (botão próprio, ver conciliarPorValor): sem olhar documento nem fornecedor.
     'valor-par': 'só pelo valor, sem documento e sem fornecedor: dentro da Parte A, quem aumenta com quem diminui o saldo, de mesmo valor quebrado',
     'valor': 'só pelo valor, sem documento e sem fornecedor: um item da Parte A e um da Parte B de mesmo valor quebrado',
+    // Fornecedor e valor (botão próprio, ver conciliarPorFornecedor): mesmo fornecedor, SEM olhar o documento.
+    'fornecedor-valor-par': 'fornecedor e valor: dentro da Parte A, a baixa (ou compensação) mata a nota (ou adiantamento) de mesmo valor do MESMO fornecedor, sem olhar o documento',
+    'fornecedor-valor': 'fornecedor e valor: um item da Parte A e um título da Parte B do mesmo fornecedor e de mesmo valor, sem olhar o documento',
     // Com margem (botão próprio, ver MARGEM_AB): mesmo documento e fornecedor, diferença de até R$ 1,00.
     'margem-fornecedor-par': 'com margem: mesmo documento e fornecedor, a baixa (ou compensação) mata a nota (ou adiantamento) com diferença de centavos',
     'margem-fornecedor': 'com margem: mesmo documento e fornecedor, a soma dos dois lados difere só nos centavos',
@@ -130,12 +133,14 @@
     'manual': 'marcado à mão',
   };
   function ehPorValor(g) { return !!g && (g.regra === 'valor' || g.regra === 'valor-par'); }
+  function ehPorFornecedor(g) { return !!g && (g.regra === 'fornecedor-valor' || g.regra === 'fornecedor-valor-par'); }
   function ehComMargem(g) { return !!g && /^margem-/.test(String(g.regra || '')); }
   // Rótulo curto de cada regra na tela e no relatório.
   const COMO_AB = {
     'doc-fornecedor-par': 'doc + fornecedor · par', 'doc-fornecedor': 'doc + fornecedor', 'doc-fornecedor-valor': 'doc + fornecedor · valor',
     'doc-nome-par': 'doc + nome · par', 'doc-nome': 'doc + nome', 'doc-nome-valor': 'doc + nome · valor',
     'doc-par': 'só doc · par', 'doc': 'só doc', 'valor-par': 'só valor · par', 'valor': 'só valor',
+    'fornecedor-valor-par': 'fornecedor + valor · par', 'fornecedor-valor': 'fornecedor + valor',
     'margem-fornecedor-par': '± doc + fornecedor · par', 'margem-fornecedor': '± doc + fornecedor', 'margem-fornecedor-valor': '± doc + fornecedor · valor',
     'margem-nome-par': '± doc + nome · par', 'margem-nome': '± doc + nome', 'margem-nome-valor': '± doc + nome · valor',
     'margem-palavra-par': '± doc + 1ª palavra · par', 'margem-palavra': '± doc + 1ª palavra', 'margem-palavra-valor': '± doc + 1ª palavra · valor',
@@ -473,6 +478,72 @@
     for (const a of ladoA) {
       const j = ladoB.findIndex((b) => b.valor === a.valor);
       if (j >= 0) { registrar([a], [ladoB[j]], 'valor'); ladoB.splice(j, 1); }
+    }
+    return novos;
+  }
+
+  // ------------------------------------------------------------------
+  // Conciliar por FORNECEDOR E VALOR (Dony, 22/09/2026: "se eu tenho um fornecedor que tem o débito e o
+  // crédito e bate o valor, eu quero que ele concilie"). Botão próprio, só roda quando ele aperta, DEPOIS
+  // do ⚡ pelo documento. Casa o que ficou em aberto pelo MESMO fornecedor e mesmo valor, sem olhar o
+  // documento — o fornecedor é a chave da régua (quase sempre o CNPJ) e, se ela não ligar os dois lados,
+  // o nome escrito igual:
+  //   1. fornecedor-valor-par — dentro da Parte A: a baixa mata a nota de mesmo valor do mesmo fornecedor
+  //      (a mais perto na data; baixa antes da nota concilia, mas fica marcada para conferir);
+  //   2. fornecedor-valor — Parte A com Parte B: o lançamento e o título do mesmo fornecedor, mesmo valor.
+  // Aqui o valor redondo ENTRA (diferente do ≈ só pelo valor): o nome do fornecedor já é a garantia.
+  // ------------------------------------------------------------------
+  function conciliarPorFornecedor(itens, existentes, quem, quando) {
+    const usados = new Set();
+    (existentes || []).forEach((g) => (g.a || []).concat(g.b || []).forEach((id) => usados.add(id)));
+    let proximo = proximoIdAB(existentes);
+    const novos = [];
+    const soma = (xs) => xs.reduce((s, x) => s + x.valor, 0);
+    const livre = (x) => !usados.has(x.id);
+    function registrar(a, b, regra) {
+      const todos = a.concat(b);
+      const g = { id: proximo++, tipo: tipoAB(a.length, b.length), regra, documento: (todos.find((x) => x.doc) || {}).doc || '',
+        nome: (todos.find((x) => x.chave !== SEM) || todos[0]).nome, a: a.map((x) => x.id), b: b.map((x) => x.id),
+        valorA: soma(a), valorB: soma(b), quem: quem || '', quando: quando || '' };
+      const aumento = a.find((x) => x.valor > 0), reducao = a.find((x) => x.valor < 0);
+      if (aumento && reducao && aumento.fonte !== 'anterior' && aumento.fonte !== 'pendente' && reducao.ordem < aumento.ordem) g.aviso = 'baixa-antes-da-nota';
+      novos.push(g);
+      todos.forEach((x) => usados.add(x.id));
+    }
+    // Um item só entra se der para dizer de quem ele é: a chave da régua ou o nome comparável.
+    const grupoDe = (x) => (x.chave && x.chave !== SEM ? 'c:' + x.chave : (nomeComparavel(x) ? 'n:' + nomeComparavel(x) : ''));
+    // Os dois jeitos de juntar: pela chave e pelo nome (o aging às vezes vem sem CNPJ).
+    for (const por of ['chave', 'nome']) {
+      const grupos = new Map();
+      for (const x of itens.A.concat(itens.B)) {
+        if (!livre(x) || x.valor === 0) continue;
+        const k = por === 'chave' ? grupoDe(x) : (nomeComparavel(x) ? 'n:' + nomeComparavel(x) : '');
+        if (!k) continue;
+        if (!grupos.has(k)) grupos.set(k, []);
+        grupos.get(k).push(x);
+      }
+      for (const xs of grupos.values()) {
+        // 1. Dentro da Parte A.
+        const notas = xs.filter((x) => x.lado === 'A' && x.valor > 0 && livre(x)).sort((p2, q) => p2.ordem - q.ordem);
+        const baixas = xs.filter((x) => x.lado === 'A' && x.valor < 0 && livre(x)).sort((p2, q) => p2.ordem - q.ordem);
+        for (const bx of baixas) {
+          if (!livre(bx)) continue;
+          let k = -1;
+          notas.forEach((n, j) => {
+            if (!livre(n) || n.valor !== -bx.valor) return;
+            if (k < 0 || Math.abs(n.ordem - bx.ordem) < Math.abs(notas[k].ordem - bx.ordem)) k = j;
+          });
+          if (k >= 0) { registrar([notas[k], bx], [], 'fornecedor-valor-par'); notas.splice(k, 1); }
+        }
+        // 2. Parte A com Parte B.
+        const ladoA = xs.filter((x) => x.lado === 'A' && livre(x)).sort((p2, q) => p2.ordem - q.ordem);
+        const ladoB = xs.filter((x) => x.lado === 'B' && livre(x)).sort(porData);
+        for (const a of ladoA) {
+          if (!livre(a)) continue;
+          const j = ladoB.findIndex((b) => livre(b) && b.valor === a.valor);
+          if (j >= 0) { registrar([a], [ladoB[j]], 'fornecedor-valor'); ladoB.splice(j, 1); }
+        }
+      }
     }
     return novos;
   }
@@ -1023,6 +1094,6 @@
     normalizarDocumento, documentoDaLinha, itensAB, conciliarAutomatico, emAbertoAB, tipoAB, proximoIdAB, REGRAS_AB,
     compararPorDocumento, arrumarGruposAB, relatorioAB, pendenciasAB, saldoInicialAB, idsDeTitulos, COMO_AB, nomeComparavel, ladosDoRazao,
     conciliarPorValor, valorRedondo, ehPorValor, ladoDC,
-    ehComMargem, MARGEM_AB, atualizarAB, faltandoNoGrupo, resumoDoItem, compararVersoes, resumoDaComparacao,
+    ehComMargem, ehPorFornecedor, conciliarPorFornecedor, MARGEM_AB, atualizarAB, faltandoNoGrupo, resumoDoItem, compararVersoes, resumoDaComparacao,
   };
 });

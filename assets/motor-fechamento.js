@@ -935,12 +935,13 @@
     const linhas = montadas.linhas;
     const nomes = MotorNomes.resolver(linhas, { donos: (entrada.decisoes && entrada.decisoes.donos) || {}, titulos: entrada.titulos || [] });
     for (const l of linhas) l.dono = nomes.porLinha.get(l.digital);
-    const e1 = etapa1(linhas, new Set());
+    const e1 = etapa1(linhas, new Set(), { regras: (entrada.decisoes || {}).regras });
     for (const l of linhas) {
       const b = e1.batidaDe.get(l.digital);
       l.situacao = b ? 'bateu' : 'aberta';
       l.batida = b ? b.id : null;
       l.como = b ? b.como : null;
+      l.regra = b ? b.regra : null;
     }
     const nomeDe = (chave) => (chave === SEM ? { nome: 'Sem fornecedor', cnpj: '' } : nomes.fornecedores[chave] || { nome: chave, cnpj: '' });
     const abertas = linhas.filter((l) => l.situacao === 'aberta' && l.valor !== 0);
@@ -964,8 +965,12 @@
     const movimento = soma(linhas);
     const somaCredito = soma(credito), somaDebito = -soma(debito);
     const falhas = [];
-    for (const b of e1.batidas) if (b.linhas.reduce((t, i) => t + linhas[i].valor, 0) !== 0) falhas.push('Batida ' + b.id + ' não soma zero.');
-    if (somaCredito - somaDebito !== movimento) falhas.push('O que ficou em aberto (' + Util.formatarCentavos(somaCredito - somaDebito) + ') não é o movimento do razão (' + Util.formatarCentavos(movimento) + ').');
+    // Só a regra ± com margem pode não somar zero; o que ela deixa de diferença continua em aberto (residuo).
+    for (const b of e1.batidas) if (b.regra !== 'margem' && b.linhas.reduce((t, i) => t + linhas[i].valor, 0) !== 0) falhas.push('Batida ' + b.id + ' não soma zero.');
+    const comMargem = e1.batidas.filter((b) => b.regra === 'margem');
+    const soPeloValor = e1.batidas.filter((b) => b.regra === 'valor');
+    const residuo = comMargem.reduce((t, b) => t + b.diferenca, 0);
+    if (somaCredito - somaDebito + residuo !== movimento) falhas.push('O que ficou em aberto (' + Util.formatarCentavos(somaCredito - somaDebito) + ') mais a diferença das conciliações com margem (' + Util.formatarCentavos(residuo) + ') não é o movimento do razão (' + Util.formatarCentavos(movimento) + ').');
     const porFornecedorSoma = porFornecedor.reduce((t, g) => t + g.saldo, 0);
     if (porFornecedorSoma !== somaCredito - somaDebito) falhas.push('A soma por fornecedor não fecha com o que ficou em aberto.');
     if (!montadas.foraDaCompetencia) {
@@ -981,6 +986,9 @@
       batidas: e1.batidas, abertas: { credito, debito }, porFornecedor, fornecedores: nomes.fornecedores,
       totais: {
         linhas: linhas.length, bateram, batidas: e1.batidas.length, zeradas: linhas.filter((l) => l.valor === 0).length,
+        regras: regrasDe((entrada.decisoes || {}).regras),
+        porRegra: REGRAS.concat([REGRA_DE['mesmo-dia']]).map((g) => ({ id: g.id, qtd: e1.batidas.filter((b) => b.regra === g.id).length })),
+        comMargem: { qtd: comMargem.length, valor: residuo }, soPeloValor: { qtd: soPeloValor.length, valor: soPeloValor.reduce((t, b) => t + b.valor, 0) }, residuo,
         credito: { qtd: credito.length, valor: somaCredito }, debito: { qtd: debito.length, valor: somaDebito },
         saldoAnterior, movimento, saldoFinal: saldoAnterior + movimento,
         fornecedoresComOsDoisLados: porFornecedor.filter((g) => g.osDoisLados).length,

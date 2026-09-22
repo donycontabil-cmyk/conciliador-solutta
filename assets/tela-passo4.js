@@ -35,6 +35,9 @@
   // Os lugares do ④: o razão de fornecedores e o contas a pagar (opcional, ajuda a reconhecer os nomes) do ①.
   function lugaresDoPasso4(comp, arqs, familiaId) { return raiz.TelaPasso1.lugaresDoPasso1(comp, arqs, familiaId).filter((l) => l.id !== 'A'); }
   function chaveDoPainel(codigo, comp, familiaId) { return codigo + '|passo4|' + (familiaId || 'fornecedores') + '|' + comp; }
+  // O ④ não decide nada sobre os lançamentos (é uma leitura do razão), mas guarda QUAIS REGRAS estão ligadas:
+  // senão, toda vez que ele abrisse, teria de apertar os botões de novo.
+  function idDoPasso4(codigo, comp, familiaId) { return 'F-' + codigo + '-' + raiz.TelaFamilia.tipoDoPasso(raiz.TelaFamilia.familiaDe(familiaId), 'passo4') + '-' + U.anoMes(comp); }
   // A família aberta: em fornecedores o saldo aumenta no CRÉDITO (a nota); em clientes, no DÉBITO (a venda).
   function fam() { return (P && P.fam) || raiz.Familias.familia('fornecedores'); }
   const cliente = () => fam().id === 'clientes';
@@ -88,14 +91,85 @@
     if (conferir && !conferir()) return;
     const fonte = (x) => ({ arquivoId: x.meta.id, conta: x.conteudo.conta, saldoAnterior: x.conteudo.conta.saldoAnterior,
       saldoFinal: x.conteudo.conta.saldoFinalDeclarado, lancamentos: x.conteudo.conta.lancamentos, periodo: x.conteudo.periodo });
-    const r = M().somenteRazao({ natureza: familia.natureza, competencia: comp, contas: { F: F.map(fonte) }, titulos: pagar ? pagar.conteudo.titulos : [] });
-    P = { codigo, comp, emp, voltar, arqs, F, pagar, r, cabecalho, fam: familia, abertos: new Set(),
-      filtros: { busca: '', mostrar: '', doc: '', forn: '', valor: '', data: '', dc: '' } };
+    // As regras guardadas deste mês (se nunca mexeu, são as duas de sempre).
+    let registro = null;
+    try { registro = (await arm.conciliacoes(codigo, comp)).find((x) => x.id === idDoPasso4(codigo, comp, familia.id)) || null; } catch (e) { registro = null; }
+    if (conferir && !conferir()) return;
+    const regras = M().regrasDe(registro && registro.decisoes ? registro.decisoes.regras : null);
+    const r = M().somenteRazao({ natureza: familia.natureza, competencia: comp, contas: { F: F.map(fonte) }, titulos: pagar ? pagar.conteudo.titulos : [], decisoes: { regras } });
+    P = { codigo, comp, emp, voltar, arqs, F, pagar, r, cabecalho, fam: familia, abertos: new Set(), regras, registro, fonte,
+      titulos: pagar ? pagar.conteudo.titulos : [],
+      filtros: { busca: '', mostrar: '', regra: '', doc: '', forn: '', valor: '', data: '', dc: '' } };
     numerarBatidas();
     el.innerHTML = '<div class="tela-passo4"></div>';
     P.el = el.firstChild;
     ligarUmaVez();
     desenhar();
+  }
+
+  // ------------------------------------------------------------------
+  // As REGRAS (as mesmas do ①, Dony 22/09/2026: "esses botões em todas as conciliações"): cada botão liga
+  // ou desliga a regra e a leitura do razão é refeita na hora. Fica guardado no mês.
+  // ------------------------------------------------------------------
+  const CLASSE_REGRA = { documento: 'documento', 'fornecedor-valor': 'fornecedor', margem: 'margem', valor: 'valor', 'mesmo-dia': 'opcional' };
+  function seloRegra(id) {
+    const g = M().REGRA_DE[id] || { icone: '', curto: id, texto: '' };
+    return '<span class="selo ' + (CLASSE_REGRA[id] || 'opcional') + '" title="' + T.esc(g.texto) + '">' + g.icone + ' ' + T.esc(g.curto) + '</span>';
+  }
+  function opcoesDeRegra() {
+    return [['', 'Conciliado por: tudo']].concat(M().REGRAS.map((g) => [g.id, g.icone + ' ' + g.nome]))
+      .concat([['mesmo-dia', '📅 Mesmo dia, sem ' + rotulos().pessoa]]);
+  }
+  function barraDeRegras() {
+    const t = P.r.totais;
+    const qtd = (id) => P.r.batidas.filter((b) => b.regra === id).length;
+    const botao = (g) => {
+      const ligada = !!P.regras[g.id];
+      return '<button type="button" class="acao ' + CLASSE_REGRA[g.id] + (ligada ? '' : ' apagada') + '" data-regra="' + g.id + '" ' +
+        'title="' + T.esc(g.texto + (ligada ? ' · Clique para DESLIGAR esta regra.' : ' · Clique para LIGAR esta regra.')) + '">' +
+        '<span class="acao-icone" aria-hidden="true">' + g.icone + '</span>' +
+        '<span class="acao-texto"><b>' + T.esc(g.nome) + '</b><small>' + T.esc(g.sub || g.curto) + '</small></span>' +
+        '<span class="estado">' + (ligada ? qtd(g.id).toLocaleString('pt-BR') : 'ligar') + '</span></button>';
+    };
+    const md = qtd('mesmo-dia');
+    const avisos = [
+      t.comMargem.qtd ? '<span class="falta">± <b>' + t.comMargem.qtd + '</b> com margem: a diferença de ' + T.moeda(Math.abs(t.comMargem.valor)) + ' continua em aberto.</span>' : '',
+      t.soPeloValor.qtd ? '<span class="falta">≈ <b>' + t.soPeloValor.qtd + '</b> só pelo valor: são de ' + T.esc(rotulos().pessoas) + ' diferentes — confira uma a uma.</span>' : '',
+    ].filter(Boolean).join(' ');
+    return '<div class="acoes-ab" style="margin:14px 0 0"><div class="rotulo-regras pequeno">Conciliação dentro do razão · o que o programa pode casar sozinho</div>' +
+      '<div class="acoes-conciliar quatro">' + M().REGRAS.map(botao).join('') + '</div>' +
+      '<p class="pequeno suave" style="margin:0">Cada botão liga ou desliga a regra e a leitura do razão é refeita na hora. ' +
+      (md ? '📅 <b>' + md + '</b> bateram no mesmo dia, sem ' + T.esc(rotulos().pessoa) + '. ' : '') + avisos + '</p></div>';
+  }
+  async function alternarRegra(id) {
+    const g = M().REGRA_DE[id];
+    if (!g || !P) return;
+    const ligar = !P.regras[id];
+    const antes = P.r.totais.bateram;
+    const novas = Object.assign({}, P.regras);
+    novas[id] = ligar;
+    P.regras = novas;
+    P.r = M().somenteRazao({ natureza: P.fam.natureza, competencia: P.comp, contas: { F: P.F.map(P.fonte) }, titulos: P.titulos, decisoes: { regras: P.regras } });
+    numerarBatidas();
+    P.abertos = new Set();
+    P.filtros.regra = ligar ? id : (P.filtros.regra === id ? '' : P.filtros.regra);
+    if (ligar) P.filtros.mostrar = 'conciliados';
+    desenhar();
+    const dif = P.r.totais.bateram - antes;
+    const daRegra = P.r.batidas.filter((b) => b.regra === id).length;
+    const texto = (ligar ? 'Ligou' : 'Desligou') + ' a regra ' + g.icone + ' ' + g.nome + ' (' + g.curto + '): ' +
+      (ligar ? daRegra + ' conciliação(ões) por esta regra, ' + (dif >= 0 ? '+' : '') + dif + ' linha(s) a mais conciliadas'
+        : Math.abs(dif) + ' linha(s) voltaram a ficar em aberto');
+    T.avisoRapido(texto + '. Clique de novo no botão para voltar atrás.', P.r.invariantes.ok ? 'ok' : 'erro', 9000);
+    try {
+      const arm = app().armazenamento;
+      const base = P.registro || { id: idDoPasso4(P.codigo, P.comp, P.fam.id), codigo: P.codigo, tipo: raiz.TelaFamilia.tipoDoPasso(P.fam, 'passo4'), competencia: P.comp, arquivos: [] };
+      const decisoes = Object.assign({}, base.decisoes, { regras: P.regras });
+      decisoes.historico = (decisoes.historico || []).concat([{ quando: U.agoraISO(), quem: app().usuario.nome, texto }]).slice(-200);
+      P.registro = await arm.salvarConciliacao(Object.assign({}, base, { situacao: 'andamento', decisoes,
+        resumo: { linhas: P.r.totais.linhas, bateram: P.r.totais.bateram, batidas: P.r.totais.batidas, conferido: P.r.invariantes.ok } }));
+      await arm.registrarNoLog({ codigo: P.codigo, acao: 'passo4-regra-' + (ligar ? 'ligada' : 'desligada'), alvo: P.registro.id, detalhe: texto });
+    } catch (e) { T.avisoRapido('A regra valeu agora, mas não deu para guardar: ' + T.mensagemDeErro(e), 'erro', 8000); }
   }
 
   // Cada batida ganha um número (#1, #2, …), da mais antiga para a mais nova — é o ID que aparece na lista.
@@ -182,6 +256,8 @@
     const b = buscaGeral();
     const cols = filtroDasColunas();
     const doisLados = new Set(r.porFornecedor.filter((g) => g.osDoisLados).map((g) => g.chave));
+    const regra = filtro('regra');
+    const daRegra = (l) => { if (!regra) return true; const b = P.batidaDaLinha.get(l.i); return !!b && b.regra === regra; };
     const noMostrar = (l) => {
       const casou = P.batidaDaLinha.has(l.i);
       if (mostrar === 'todos') return true;
@@ -191,7 +267,7 @@
       if (mostrar === 'dois-lados') return !casou && doisLados.has(l.dono.chave);
       return !casou && l.valor !== 0;
     };
-    return r.linhas.filter((l) => noMostrar(l) && b.linha(l) && cols(l));
+    return r.linhas.filter((l) => daRegra(l) && noMostrar(l) && b.linha(l) && cols(l));
   }
 
   // ------------------------------------------------------------------
@@ -219,11 +295,13 @@
         '<div class="cartao resumo"><div class="rotulo">Saldo do razão</div><div class="grande">' + T.htmlDC(t.saldoFinal, dcDe(t.saldoFinal)) + '</div>' +
           '<div class="detalhe"><span>saldo anterior ' + T.htmlDC(t.saldoAnterior, dcDe(t.saldoAnterior)) + '</span><span>+ crédito − débito em aberto</span></div></div>' +
       '</div>' +
+      '<div id="p4-regras"></div>' +
       '<div class="filtros" id="p4-filtros"></div>' +
       '<div id="p4-parte"></div>' +
       '<div id="p4-lista"></div>' +
       '<div id="p4-fornecedores"></div>';
     desenharAvisos();
+    P.el.querySelector('#p4-regras').innerHTML = barraDeRegras();
     desenharFiltros();
     desenharParte();
     desenharLista();
@@ -236,7 +314,9 @@
     const partes = [];
     if (r.invariantes.ok) {
       partes.push('<div class="aviso verde"><span class="icone-aviso">✓</span><div><b>Conferido no centavo.</b> Cada conciliação soma zero; saldo anterior ' + T.esc(textoDC(t.saldoAnterior)) +
-        ' + ' + T.esc(rotulos().aumento.toLowerCase()) + ' ' + T.esc(U.formatarCentavos(t.credito.valor)) + ' − ' + T.esc(rotulos().reducao.toLowerCase()) + ' ' + T.esc(U.formatarCentavos(t.debito.valor)) + ' = saldo do razão ' + T.esc(textoDC(t.saldoFinal)) + '.</div></div>');
+        ' + ' + T.esc(rotulos().aumento.toLowerCase()) + ' ' + T.esc(U.formatarCentavos(t.credito.valor)) + ' − ' + T.esc(rotulos().reducao.toLowerCase()) + ' ' + T.esc(U.formatarCentavos(t.debito.valor)) + ' = saldo do razão ' + T.esc(textoDC(t.saldoFinal)) + '.' +
+        (t.comMargem.qtd || t.soPeloValor.qtd ? ' <b>' + (t.comMargem.qtd + t.soPeloValor.qtd) + '</b> conciliação(ões) pelas regras opcionais (± com margem e ≈ só pelo valor)' +
+          (t.comMargem.qtd ? ': a diferença de ' + T.esc(U.formatarCentavos(Math.abs(t.residuo))) + ' continua em aberto' : '') + '.' : '') + '</div></div>');
     } else {
       partes.push('<div class="aviso vermelho"><span class="icone-aviso">⚠️</span><div><b>A conferência falhou.</b><ul class="pequeno">' + r.invariantes.falhas.slice(0, 10).map((f) => '<li>' + T.esc(f) + '</li>').join('') + '</ul></div></div>');
     }
@@ -252,6 +332,8 @@
       '<input type="search" class="busca" data-filtro="busca" placeholder="Busca: documento, fornecedor, histórico, valor, data ou #ID" ' +
       'title="Vale para a lista e para as conciliações. A lista tem também os filtros de cada coluna." value="' + T.esc(filtro('busca')) + '">' +
       '<select class="filtro" data-filtro="mostrar">' + mostrarOpcoes().map((o) => '<option value="' + o[0] + '"' + (filtro('mostrar') === o[0] ? ' selected' : '') + '>' + o[1] + '</option>').join('') + '</select>' +
+      '<select class="filtro" data-filtro="regra" title="Por qual regra a conciliação foi feita">' +
+      opcoesDeRegra().map((o) => '<option value="' + o[0] + '"' + (filtro('regra') === o[0] ? ' selected' : '') + '>' + o[1] + '</option>').join('') + '</select>' +
       '<span class="suave pequeno">Conciliado = débito e crédito do mesmo ' + rotulos().pessoa + ' que se anulam, dentro do próprio razão.</span>';
   }
 
@@ -312,7 +394,8 @@
     const b = buscaGeral();
     const cols = filtroDasColunas();
     const mostrar = filtro('mostrar');
-    const lista = r.batidas.filter((x) => b.batida(x) && (mostrar === 'todos' || mostrar === 'conciliados' || !CAMPOS.some((n) => filtro(n)) ? true : x.linhas.some((i) => cols(r.linhas[i]))))
+    const regra = filtro('regra');
+    const lista = r.batidas.filter((x) => (!regra || x.regra === regra) && b.batida(x) && (mostrar === 'todos' || mostrar === 'conciliados' || !CAMPOS.some((n) => filtro(n)) ? true : x.linhas.some((i) => cols(r.linhas[i]))))
       .sort((x, y) => P.numeroDaBatida.get(x.id) - P.numeroDaBatida.get(y.id));
     const el = P.el.querySelector('#p4-lista');
     el.innerHTML = '<h3 style="margin:18px 0 8px">Conciliações com ID (' + lista.length.toLocaleString('pt-BR') +
@@ -321,9 +404,9 @@
       '<div id="p4-tab-lista"></div>';
     T.tabelaPaginada(el.querySelector('#p4-tab-lista'), {
       alta: false, porPagina: 100,
-      ordem: { id: 'p4-batidas', colunas: [null, NUM((x) => P.numeroDaBatida.get(x.id)), TXT((x) => x.como), TXT((x) => docDe(P.primeiraDaBatida(x))), TXT((x) => nomeDe(P.primeiraDaBatida(x))),
+      ordem: { id: 'p4-batidas', colunas: [null, NUM((x) => P.numeroDaBatida.get(x.id)), TXT((x) => x.regra + ' ' + x.como), TXT((x) => docDe(P.primeiraDaBatida(x))), TXT((x) => nomeDe(P.primeiraDaBatida(x))),
         DATA((x) => P.primeiraDaBatida(x).data), VALOR((x) => x.valor), NUM((x) => x.linhas.length)] },
-      cabecalho: '<th style="width:24px"></th><th>ID</th><th>Como</th><th>Documento</th><th>' + (cliente() ? 'Cliente' : 'Fornecedor') + '</th><th title="A data mais antiga dos lançamentos">Data</th><th class="num">Valor</th><th>Lançamentos</th>',
+      cabecalho: '<th style="width:24px"></th><th>ID</th><th>Conciliado por</th><th>Documento</th><th>' + (cliente() ? 'Cliente' : 'Fornecedor') + '</th><th title="A data mais antiga dos lançamentos">Data</th><th class="num">Valor</th><th>Lançamentos</th>',
       linhas: lista, vazio: 'Nenhuma conciliação com este filtro.',
       linha: (x) => {
         const n = P.numeroDaBatida.get(x.id);
@@ -331,7 +414,8 @@
         const ls = x.linhas.map((i) => r.linhas[i]).sort((a, c) => a.dia - c.dia || a.i - c.i);
         let html = '<tr class="' + (aberto ? 'destaque' : '') + '" id="p4-b-' + n + '"><td><button type="button" class="lapis" data-abrir-batida="' + n + '" title="Ver os lançamentos">' + (aberto ? '▾' : '▸') + '</button></td>' +
           '<td class="num"><b>#' + n + '</b></td>' +
-          '<td>' + T.seloComo(x.como) + '<br><span class="suave pequeno">' + T.esc(COMO[x.como] || '') + '</span></td>' +
+          '<td>' + seloRegra(x.regra) + (x.diferenca ? ' <span class="falta pequeno">dif. ' + T.moeda(Math.abs(x.diferenca)) + '</span>' : '') +
+          '<br>' + T.seloComo(x.como) + ' <span class="suave pequeno">' + T.esc(COMO[x.como] || '') + '</span></td>' +
           '<td class="num">' + T.nome(docDe(ls[0])) + '</td>' +
           '<td class="nome">' + (ls[0].dono.chave === SEM() ? '<span class="falta">sem fornecedor</span>' : T.esc(ls[0].dono.nome)) + '</td>' +
           '<td class="num">' + T.esc(ls[0].data + (ls.length > 1 && ls[ls.length - 1].data !== ls[0].data ? ' a ' + ls[ls.length - 1].data : '')) + '</td>' +
@@ -402,6 +486,8 @@
         if (b) { if (P.abertos.has(b.id)) P.abertos.delete(b.id); else P.abertos.add(b.id); desenharListaMantendoRolagem(); }
         return;
       }
+      const rg = ev.target.closest('[data-regra]');
+      if (rg) { await alternarRegra(rg.getAttribute('data-regra')); return; }
       const ff = ev.target.closest('[data-filtrar-forn]');
       if (ff) { P.filtros.forn = ff.getAttribute('data-filtrar-forn'); P.filtros.mostrar = P.filtros.mostrar === 'conciliados' ? '' : P.filtros.mostrar; desenharFiltros(); redesenharListas(); const p = P.el.querySelector('#p4-parte'); if (p && p.scrollIntoView) p.scrollIntoView({ block: 'start', behavior: 'smooth' }); return; }
       if (ev.target.closest('[data-limpar-filtros]')) { CAMPOS.forEach((n) => { P.filtros[n] = ''; }); redesenharListas(); return; }
