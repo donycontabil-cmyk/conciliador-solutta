@@ -95,7 +95,7 @@
           linhas.push({
             i: linhas.length, digital: base + '|' + n, lado, conta: String(conta.codigo), contaNome: conta.nome,
             arquivoId: fonte.arquivoId || '', data: data.texto, dia: data.numero, historico: l.historico || '',
-            contrapartida: l.contrapartida || '', numero: l.numero || '', debito: l.debito, credito: l.credito,
+            contrapartida: l.contrapartida || '', numero: l.numero || '', nota: l.nota || '', debito: l.debito, credito: l.credito,
             dc: l.debito !== 0 ? (l.debito > 0 ? 'D' : 'C') : (l.credito >= 0 ? 'C' : 'D'),
             valor, fornecedorDeclarado: l.fornecedorDeclarado || null, participante: l.participante || '',
           });
