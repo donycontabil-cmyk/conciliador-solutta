@@ -858,6 +858,18 @@ table.apres.ajustes-sim td.txt { white-space: normal; }
 .aj-lado small { color: var(--texto-suave); }
 .aj-form .aj-valor { width: 170px; text-align: right; font-variant-numeric: tabular-nums; font-weight: 700; }
 .aj-efeito { margin: 0; font-size: 13px; min-height: 18px; color: var(--texto-suave); }
+/* ---------- Reclassificar arrastando: a alça ⠿ na conta e o subtotal que recebe (verde) ---------- */
+table.apres tr.analitica .arrastar { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; padding: 0; margin: 0 4px 0 -20px; border: 0; border-radius: 3px; background: transparent; color: #8a94a1; cursor: grab; opacity: 0; vertical-align: -3px; }
+table.apres tr.analitica:hover .arrastar, table.apres tr.analitica .arrastar:focus-visible, table.apres tr.sem-linha-conta .arrastar { opacity: 1; }
+table.apres tr.analitica .arrastar:hover { color: #1f4e78; }
+table.apres tr.analitica[draggable="true"] td.fixa { cursor: grab; }
+table.apres tr.sem-linha-conta td { background: #fff8e1; }
+table.apres tr.sem-linha-conta .arrastar { color: #7a5a16; }
+table.apres tr.analitica.arrastada td { opacity: 0.45; }
+.arrastando-conta table.apres tr.grupo:not(.sem-linha) td.fixa { box-shadow: inset 3px 0 0 #9fbfdf; }
+table.apres tr.grupo.solta-aqui td { background: #d9f2e3 !important; box-shadow: inset 0 2px 0 #2e7d4f, inset 0 -2px 0 #2e7d4f; }
+.dica-arrastar { display: block; margin: 2px 0 0 18px; font-size: 11px; color: #7a5a16; font-weight: 600; }
+table.apres tr.grupo.sem-linha td.fixa { white-space: normal; }
 @media print {
   .apres-impressao .aj-selo { font-size: 6px; padding: 1px 4px; }
   .apres-impressao table.apres tr.ajuste-sim td.fixa { padding-left: 14px; }

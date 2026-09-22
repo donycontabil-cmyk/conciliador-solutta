@@ -238,6 +238,28 @@
     return compactarMapa(contas, (c) => { const s = sug.get(c.conta); return s ? s.linha : null; });
   }
   function mapaDoModelo(contas) { return compactarMapa(contas, (c) => linhaDoModelo(c.conta)); }
+  // Os planos de contas de vários anos num só (a conta é analítica se nenhuma outra é filha dela).
+  function planoJunto(listas) {
+    const porConta = new Map();
+    listas.forEach((l) => (l || []).forEach((c) => { if (!porConta.has(c.conta)) porConta.set(c.conta, Object.assign({}, c)); }));
+    const todas = Array.from(porConta.values()).sort((a, b) => compararContas(a.conta, b.conta));
+    const pais = new Set(todas.map((c) => c.pai).filter(Boolean));
+    todas.forEach((c) => { c.analitica = !pais.has(c.conta); });
+    return todas;
+  }
+  // RECLASSIFICAR UMA CONTA (Dony, 22/09/2026: "a conta que entrou em outras contas de resultado sem linha na DRE, eu
+  // quero poder arrastar para os grupos; não posso ter esse outras contas"): as linhas da DRE da empresa com a conta na
+  // linha nova (ela passa a ter a linha dela, mesmo que a conta de cima tenha outra). Sem linhas guardadas, a empresa que
+  // usava o modelo da planilha parte das linhas do modelo, montadas com o plano de TODOS os anos carregados (senão uma
+  // conta que só existe num ano perderia a linha que o modelo dava a ela). op: { mapa (as linhas guardadas ou null),
+  // situacao (da DRE), planos (os planos de contas dos anos), conta, linha }. null: DRE ainda não conferida.
+  function reclassificarConta(op) {
+    const salvo = op.mapa && op.mapa.contas && Object.keys(op.mapa.contas).length ? op.mapa.contas : null;
+    if (!salvo && op.situacao !== 'modelo') return null;
+    const contas = salvo ? Object.assign({}, salvo) : mapaDoModelo(planoJunto(op.planos || []));
+    contas[op.conta] = op.linha;
+    return contas;
+  }
 
   // Os nomes batem com o modelo? Compara, conta analítica por conta analítica (pesando pelo movimento), a
   // linha do modelo com a que o nome indica. Serve só se discorda em no máximo 0,1% do movimento (quase nada: na dúvida, pergunta). Conta cujo nome
@@ -550,7 +572,7 @@
     if (situacaoDre === 'sugestao') avisos.push('As linhas da DRE desta empresa ainda não foram conferidas: o plano de contas dela é diferente do modelo da planilha. ' +
       'Abra a DRE e confira em que linha entra cada grupo de contas (fica guardado para a empresa). Até lá, a DRE, os indicadores e o relatório do cliente ficam fechados.');
     else if (naoMapeadas.length) avisos.push(naoMapeadas.length + ' conta(s) de resultado sem linha na DRE entraram em "Outras contas de resultado" (' +
-      naoMapeadas.slice(0, 3).map((n) => n.conta + ' ' + n.titulo).join('; ') + (naoMapeadas.length > 3 ? '; …' : '') + '): indique a linha delas em "Linhas da DRE".');
+      naoMapeadas.slice(0, 3).map((n) => n.conta + ' ' + n.titulo).join('; ') + (naoMapeadas.length > 3 ? '; …' : '') + '): na DRE, arraste cada uma para a linha certa (fica guardado para a empresa).');
     balanco.colunas.forEach((c, k) => {
       const d = balanco.conferencia.diferenca[k];
       if (d === null || Math.abs(d) <= 1) return;
@@ -1178,5 +1200,5 @@
   }
 
   return { montar, compararBalancetes, indicadores, comparativo, simulacao, INDICADORES, contasDoBalanco, MODELO_DRE, FORA_DA_DRE, PARAMETROS, AJUSTES_MODELO, CONTA_PAT_MODELO, PREMISSAS, rotuloMes, compararContas, valorUsado,
-    LINHAS_DO_MAPA, sugerirMapaDre, mapaDoModelo, linhaNoMapa, linhaDoModelo, avaliarModelo, linhasSugeridas, nomeNormal };
+    LINHAS_DO_MAPA, sugerirMapaDre, mapaDoModelo, reclassificarConta, planoJunto, linhaNoMapa, linhaDoModelo, avaliarModelo, linhasSugeridas, nomeNormal };
 });

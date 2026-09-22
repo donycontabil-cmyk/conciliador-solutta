@@ -274,7 +274,7 @@
       return '<button type="button" class="botao pequeno" data-opcao="linhas-dre" title="Em que linha da DRE entra cada conta de resultado desta empresa">⚙ Linhas da DRE</button>' +
         '<button type="button" class="botao pequeno" data-opcao="abrir-tudo">＋ Abrir todas as contas</button>' +
         '<button type="button" class="botao pequeno" data-opcao="fechar-tudo">－ Fechar todas</button>' + avah + marcar +
-        (E.marcarLalur ? ajudaMarcar : '<span class="suave pequeno">Clique num subtotal para abrir ou fechar as contas dele. AV % sobre a receita líquida; AH % sobre o ' + (E.aba === 'dre-mensal' ? 'mês' : 'trimestre') + ' anterior.</span>');
+        (E.marcarLalur ? ajudaMarcar : '<span class="suave pequeno">Clique num subtotal para abrir ou fechar as contas dele. Para mudar a linha de uma conta, arraste-a pelos pontinhos à esquerda até outro subtotal. AV % sobre a receita líquida; AH % sobre o ' + (E.aba === 'dre-mensal' ? 'mês' : 'trimestre') + ' anterior.</span>');
     }
     if (E.aba === 'balancete-mensal' || E.aba === 'balancete-trimestral') {
       return '<span class="suave pequeno">Mostrar até o nível</span>' + [1, 2, 3, 4, 5].map((n) => '<button type="button" class="botao pequeno' + (E.nivel === n ? ' primario' : '') + '" data-nivel="' + n + '">' + n + '</button>').join('') +
@@ -519,6 +519,19 @@
   }
 
   // ---------- DRE
+  // RECLASSIFICAR ARRASTANDO (Dony, 22/09/2026: "a conta que entrou em outras contas de resultado sem linha na DRE, eu
+  // quero poder arrastar para os grupos"): na DRE (mensal, trimestral e simulação) e no comparativo, cada conta analítica
+  // tem a alça (os pontinhos à esquerda): arrastar a conta até um subtotal muda a linha dela; clicar na alça abre a lista das
+  // linhas. A alça é um desenho (SVG): o caractere de pontinhos não existe em todas as fontes do Windows.
+  const ICONE_ALCA = '<svg viewBox="0 0 8 12" width="8" height="12" aria-hidden="true"><g fill="currentColor"><circle cx="2" cy="2" r="1.15"/><circle cx="6" cy="2" r="1.15"/>' +
+    '<circle cx="2" cy="6" r="1.15"/><circle cx="6" cy="6" r="1.15"/><circle cx="2" cy="10" r="1.15"/><circle cx="6" cy="10" r="1.15"/></g></svg>';
+  const podeArrastar = (op) => !(op && op.impressao) && !dreFechada();
+  const atributosArrastar = (l, op) => (podeArrastar(op) ? ' draggable="true" data-conta="' + T.esc(l.conta) + '"' : '');
+  const alcaArrastar = (l, op) => (podeArrastar(op) ? '<button type="button" class="arrastar nao-imprimir" data-mover-conta="' + T.esc(l.conta) + '" data-de="' + T.esc(l.grupo) +
+    '" title="Arraste a conta para outro subtotal da DRE, ou clique para escolher a linha" aria-label="Mudar a linha da DRE desta conta">' + ICONE_ALCA + '</button>' : '');
+  const classeDaConta = (l) => 'analitica' + (l.grupo === 'semLinha' ? ' sem-linha-conta' : '');
+  const dicaArrastar = (l, op) => (l.semLinha && l.filhas && podeArrastar(op) ? ' <small class="dica-arrastar nao-imprimir">arraste cada conta pelos pontinhos até a linha certa</small>' : '');
+
   // ficam: as contas analíticas que aparecem com "Sem as zeradas" (null = todas).
   function ficamNaDre(qual) { return qual === 'mensal' ? contasComSaldoOuMovimento(E.rel.mensal.linhas, indicesVisiveis()) : contasComSaldoOuMovimento(E.rel.trimestral.linhas); }
   function secaoDre(dre, titulo, op, ficam) {
@@ -538,11 +551,11 @@
       const aberto = (op && op.abrirTudo) || E.abertos.has(l.grupo || l.id);
       if (l.tipo === 'analitica') {
         if (!aberto || (ficam && !ficam.has(l.conta))) return faixa;
-        return faixa + '<tr class="analitica" data-de="' + T.esc(l.grupo) + '"><td class="fixa">' + marcaLalur(l.conta, false) + '<span class="cod">' + T.esc(l.conta) + '</span> ' + T.esc(l.rotulo) + '</td>' + celulasPeriodos(l, avah, dre.colunas) + '</tr>';
+        return faixa + '<tr class="' + classeDaConta(l) + '" data-de="' + T.esc(l.grupo) + '"' + atributosArrastar(l, op) + '><td class="fixa">' + alcaArrastar(l, op) + marcaLalur(l.conta, false) + '<span class="cod">' + T.esc(l.conta) + '</span> ' + T.esc(l.rotulo) + '</td>' + celulasPeriodos(l, avah, dre.colunas) + '</tr>';
       }
       if (l.tipo === 'grupo') {
         return faixa + '<tr class="grupo' + (l.semLinha ? ' sem-linha' : '') + '" data-grupo="' + T.esc(l.id) + '" title="' + (aberto ? 'Fechar' : 'Abrir') + ' as ' + l.filhas + ' conta(s)">' +
-          '<td class="fixa"><span class="abre nao-imprimir">' + (aberto ? '▾' : '▸') + '</span>' + T.esc(l.rotulo) + (l.semLinha ? ' ⚠️' : '') + ' <small>' + l.filhas + '</small>' +
+          '<td class="fixa"><span class="abre nao-imprimir">' + (aberto ? '▾' : '▸') + '</span>' + T.esc(l.rotulo) + (l.semLinha ? ' ⚠️' : '') + ' <small>' + l.filhas + '</small>' + dicaArrastar(l, op) +
           (noLalur[l.id] ? '<small class="lalur-conta nao-imprimir" title="Contas deste subtotal marcadas no LALUR">· ' + noLalur[l.id] + ' no LALUR</small>' : '') + '</td>' + celulasPeriodos(l, avah, dre.colunas) + '</tr>';
       }
       return faixa + '<tr class="total' + (l.destaque ? ' destaque' : '') + (l.acumuladoAno ? ' acumulado-ano' : '') + '"><td class="fixa">' + T.esc(l.rotulo) + '</td>' + celulasPeriodos(l, avah, dre.colunas) + '</tr>';
@@ -550,7 +563,7 @@
     const colunas = dre.colunas.map((c) => Object.assign({}, c, { cls: c.acumulado ? 'acum' : '' }));
     const d = E.rel.dre;
     const nota = d.naoMapeadas.length ? '<p class="apres-nota">⚠️ "Outras contas de resultado" reúne conta(s) de resultado que nenhuma linha da DRE pega: ' +
-      d.naoMapeadas.map((x) => T.esc(x.conta + ' ' + x.titulo)).join('; ') + '. Indique a linha delas em <b>⚙ Linhas da DRE</b> para ficar certo na apresentação.</p>' : '';
+      d.naoMapeadas.map((x) => T.esc(x.conta + ' ' + x.titulo)).join('; ') + '. Abra o subtotal e arraste cada conta pelos pontinhos à esquerda até a linha certa (ou use <b>⚙ Linhas da DRE</b>): fica guardado para a empresa.</p>' : '';
     const fora = !d.foraDaDre.length ? '' : d.situacao === 'modelo'
       ? '<p class="apres-nota suave">Fora da DRE, como na planilha: ' + d.foraDaDre.length + ' conta(s) de compras e estoque (4.2), que somam zero no mês.</p>'
       : '<p class="apres-nota suave">Fora da DRE (marcadas nas linhas da DRE da empresa): ' + d.foraDaDre.length + ' conta(s) — ' + d.foraDaDre.slice(0, 3).map((x) => T.esc(x.conta + ' ' + x.titulo)).join('; ') + (d.foraDaDre.length > 3 ? '; …' : '') + '.</p>';
@@ -870,6 +883,8 @@
       if (lb) { marcarConta(el, lb.getAttribute('data-conta'), lb.getAttribute('data-lalur')); return; }
       const lt = ev.target.closest('button[data-lalur-tirar]');
       if (lt) { marcarConta(el, lt.getAttribute('data-lalur-tirar'), null); return; }
+      const mover = ev.target.closest('button[data-mover-conta]');
+      if (mover) { await escolherLinhaDaConta(el, mover.getAttribute('data-mover-conta'), mover.getAttribute('data-de')); return; }
       const ajEditar = ev.target.closest('button[data-sim-aj-editar]');
       if (ajEditar) { await abrirAjuste(el, ajEditar.getAttribute('data-sim-aj-editar')); return; }
       const ajTirar = ev.target.closest('button[data-sim-aj-tirar]');
@@ -912,6 +927,36 @@
       else if (qual === 'sim-aplicar') { const campo = el.querySelector('#sim-percentual'); if (campo) aplicarPercentual(el, campo.value); }
       else if (qual === 'sim-ajuste') await abrirAjuste(el, null);
     });
+    // Reclassificar arrastando: a conta analítica solta num subtotal da DRE (que não seja "Outras contas") muda de linha.
+    const soltarEm = (ev) => { const g = ev.target.closest && ev.target.closest('tr.grupo[data-grupo]'); return g && podeReceberConta(g.getAttribute('data-grupo')) ? g : null; };
+    const fimDoArraste = () => { E.arrastando = null; el.classList.remove('arrastando-conta'); el.querySelectorAll('tr.solta-aqui, tr.arrastada').forEach((x) => x.classList.remove('solta-aqui', 'arrastada')); };
+    el.addEventListener('dragstart', (ev) => {
+      const tr = ev.target.closest && ev.target.closest('tr[data-conta][draggable="true"]');
+      if (!tr) return;
+      E.arrastando = { conta: tr.getAttribute('data-conta'), de: tr.getAttribute('data-de') };
+      if (ev.dataTransfer) { ev.dataTransfer.effectAllowed = 'move'; ev.dataTransfer.setData('text/plain', E.arrastando.conta); }
+      tr.classList.add('arrastada');
+      el.classList.add('arrastando-conta');
+    });
+    el.addEventListener('dragover', (ev) => {
+      if (!E.arrastando) return;
+      const g = soltarEm(ev);
+      if (!g) return;
+      ev.preventDefault();
+      if (ev.dataTransfer) ev.dataTransfer.dropEffect = 'move';
+      if (!g.classList.contains('solta-aqui')) { el.querySelectorAll('tr.solta-aqui').forEach((x) => x.classList.remove('solta-aqui')); g.classList.add('solta-aqui'); }
+    });
+    el.addEventListener('dragleave', (ev) => { const g = ev.target.closest && ev.target.closest('tr.solta-aqui'); if (g && !g.contains(ev.relatedTarget)) g.classList.remove('solta-aqui'); });
+    el.addEventListener('drop', (ev) => {
+      const g = E.arrastando ? soltarEm(ev) : null;
+      if (!g) return;
+      ev.preventDefault();
+      const { conta, de } = E.arrastando;
+      const linha = g.getAttribute('data-grupo');
+      fimDoArraste();
+      if (linha !== de) reclassificarContaNaTela(el, conta, linha);
+    });
+    el.addEventListener('dragend', fimDoArraste);
     // Relatório do cliente: texto reescrito na prévia (guarda ao sair do texto), mês, cor e logo.
     el.addEventListener('focusout', (ev) => {
       const alvo = ev.target.closest && ev.target.closest('.rc-previa [data-texto], .rc-previa [data-lista]');
@@ -974,6 +1019,56 @@
     const nova = f.querySelector('.apres-caixa');
     if (nova && rolagem) { nova.scrollLeft = rolagem.x; nova.scrollTop = rolagem.y; }
     conferirEstouro(el);
+  }
+
+  // ------------------------------------------------------------------
+  // Reclassificar uma conta (arrastada para um subtotal, ou escolhida na lista da alça): vai para as LINHAS DA DRE da
+  // empresa (valem para todos os anos). A empresa que ainda usava o modelo da planilha passa a ter as linhas dela (as do
+  // modelo, com a mudança). A DRE, o comparativo, a simulação, os indicadores e o relatório do cliente mudam juntos.
+  // ------------------------------------------------------------------
+  const podeReceberConta = (linha) => motor().LINHAS_DO_MAPA.some((l) => l.id === linha);
+  function tituloDaConta(conta) {
+    const achar = (lista) => (lista || []).find((c) => c.conta === conta);
+    const x = achar(E.rel.contas) || achar((relAnterior() || {}).contas);
+    return x ? x.titulo : '';
+  }
+  async function reclassificarContaNaTela(el, conta, linha) {
+    if (dreFechada() || !conta || !podeReceberConta(linha)) return;
+    const salvo = mapaDaEmpresa();
+    const ant = relAnterior();
+    const contas = motor().reclassificarConta({ mapa: salvo, situacao: E.rel.dre.situacao, planos: [E.rel.contas].concat(ant ? [ant.contas] : []), conta, linha });
+    if (!contas) return;
+    const titulo = tituloDaConta(conta);
+    const ok = await salvarEmpresaCliente({ mapaDre: { contas, rotulos: (salvo && salvo.rotulos) || {}, conferidoEm: U.agoraISO(), conferidoPor: (app().usuario && app().usuario.nome) || '' } });
+    if (!ok) return;
+    app().armazenamento.registrarNoLog({ codigo: E.codigo, acao: 'apresentacao-linhas-dre', alvo: 'apresentacao/' + E.ano, detalhe: 'Conta ' + conta + ' ' + titulo + ' → ' + linha }).catch(() => {});
+    E.cacheCliente = null;
+    E.relAnt = null;
+    E.rel = montarRel();
+    E.abertos.add(linha);
+    redesenharConteudo(el);
+    T.avisoRapido(conta + ' ' + titulo + ' agora entra em "' + nomeDaLinhaDre(linha) + '". Ficou nas linhas da DRE da empresa (vale para todos os anos).', 'ok', 5000);
+  }
+  // A alça clicada: a lista das linhas da DRE (quando arrastar fica difícil, numa DRE comprida).
+  async function escolherLinhaDaConta(el, conta, de) {
+    let cat = null;
+    const opcoes = motor().LINHAS_DO_MAPA.map((l) => {
+      const grupo = l.categoria !== cat ? (cat === null ? '' : '</optgroup>') + '<optgroup label="' + T.esc(l.categoria) + '">' : '';
+      cat = l.categoria;
+      return grupo + '<option value="' + l.id + '"' + (l.id === de ? ' selected' : '') + '>' + T.esc(nomeDaLinhaDre(l.id)) + '</option>';
+    }).join('') + '</optgroup>';
+    const linha = await T.janela({
+      titulo: 'Em que linha da DRE entra esta conta?',
+      corpo: '<p style="margin:0 0 10px"><span class="cod">' + T.esc(conta) + '</span> ' + T.esc(tituloDaConta(conta)) + '</p>' +
+        '<div class="aj-form"><label>Linha da DRE<select class="apres-campo" id="mv-linha" autofocus>' + (podeReceberConta(de) ? '' : '<option value="" selected>— escolha a linha —</option>') + opcoes + '</select></label></div>' +
+        '<p class="suave pequeno" style="margin:10px 0 0">Fica nas linhas da DRE da empresa e vale para todos os anos. Também dá para arrastar a conta pelos pontinhos direto até o subtotal.</p>',
+      botoes: [{ texto: 'Cancelar', valor: null }, { texto: 'Mudar a linha', tipo: 'primario', antes: (j) => {
+        const v = j.querySelector('#mv-linha').value;
+        if (!v) { T.avisoRapido('Escolha a linha da DRE.', 'erro', 3000); return false; }
+        return v;
+      } }],
+    });
+    if (linha && linha !== de) await reclassificarContaNaTela(el, conta, linha);
   }
 
   // ------------------------------------------------------------------
@@ -1155,11 +1250,11 @@
       if (l.tipo === 'analitica') {
         if (!aberto || (E.semZeradas && zeradaNosDois(l))) return faixa;
         const so = l.soNoAnterior ? ' <small class="suave">(só em ' + anoAnt + ')</small>' : l.soNoAtual ? ' <small class="suave">(nova em ' + E.ano + ')</small>' : '';
-        return faixa + '<tr class="analitica" data-de="' + T.esc(l.grupo) + '"><td class="fixa"><span class="cod">' + T.esc(l.conta) + '</span> ' + T.esc(l.rotulo) + so + '</td>' + celulas(l) + '</tr>';
+        return faixa + '<tr class="' + classeDaConta(l) + '" data-de="' + T.esc(l.grupo) + '"' + atributosArrastar(l, op) + '><td class="fixa">' + alcaArrastar(l, op) + '<span class="cod">' + T.esc(l.conta) + '</span> ' + T.esc(l.rotulo) + so + '</td>' + celulas(l) + '</tr>';
       }
       if (l.tipo === 'grupo') {
-        return faixa + '<tr class="grupo" data-grupo="' + T.esc(l.id) + '" title="' + (aberto ? 'Fechar' : 'Abrir') + ' as ' + l.filhas + ' conta(s)"><td class="fixa"><span class="abre nao-imprimir">' +
-          (aberto ? '▾' : '▸') + '</span>' + T.esc(l.rotulo) + ' <small>' + l.filhas + '</small></td>' + celulas(l) + '</tr>';
+        return faixa + '<tr class="grupo' + (l.semLinha ? ' sem-linha' : '') + '" data-grupo="' + T.esc(l.id) + '" title="' + (aberto ? 'Fechar' : 'Abrir') + ' as ' + l.filhas + ' conta(s)"><td class="fixa"><span class="abre nao-imprimir">' +
+          (aberto ? '▾' : '▸') + '</span>' + T.esc(l.rotulo) + ' <small>' + l.filhas + '</small>' + dicaArrastar(l, op) + '</td>' + celulas(l) + '</tr>';
       }
       return faixa + '<tr class="total' + (l.destaque ? ' destaque' : '') + '"><td class="fixa">' + T.esc(l.rotulo) + '</td>' + celulas(l) + '</tr>';
     }).join('');
@@ -1250,7 +1345,7 @@
         (s.novas.length > 3 ? '; …' : '') + ')' + plural(s.novas, ' não tem', ' não têm') + ' valor em ' + anoAnt + ':' + plural(s.novas, ' fica zerada', ' ficam zeradas') + ' nos meses simulados.');
     }
     s.ajustesFora.forEach((f) => lista.push('O ajuste "' + (f.ajuste.descricao || 'Ajuste') + '" (' + nomeDaLinhaDre(f.ajuste.linha) + ') não entrou na simulação: ' + f.motivo + '.'));
-    if (ant.dre.naoMapeadas.length) lista.push(ant.dre.naoMapeadas.length + ' conta(s) de ' + anoAnt + ' sem linha na DRE entraram em "Outras contas de resultado": indique a linha delas em "Linhas da DRE".');
+    if (ant.dre.naoMapeadas.length) lista.push(ant.dre.naoMapeadas.length + ' conta(s) de ' + anoAnt + ' sem linha na DRE entraram em "Outras contas de resultado": arraste cada uma pelos pontinhos até a linha certa.');
     if (!s.conferencia.reais) lista.push('Os meses reais não conferem com a DRE mensal: não use esta simulação.');
     return lista;
   }
@@ -1314,7 +1409,7 @@
       if (l.tipo === 'analitica') {
         if (!aberto || (E.semZeradas && zerada(l))) return faixa;
         const so = l.soNoAnterior ? ' <small class="suave">(só em ' + anoAnt + ')</small>' : l.soNoAtual ? ' <small class="suave">(nova em ' + E.ano + ')</small>' : '';
-        return faixa + '<tr class="analitica" data-de="' + T.esc(l.grupo) + '"><td class="fixa"><span class="cod">' + T.esc(l.conta) + '</span> ' + T.esc(l.rotulo) + so + '</td>' + celulas(l) + '</tr>';
+        return faixa + '<tr class="' + classeDaConta(l) + '" data-de="' + T.esc(l.grupo) + '"' + atributosArrastar(l, op) + '><td class="fixa">' + alcaArrastar(l, op) + '<span class="cod">' + T.esc(l.conta) + '</span> ' + T.esc(l.rotulo) + so + '</td>' + celulas(l) + '</tr>';
       }
       if (l.tipo === 'ajuste') {
         if (!aberto) return faixa;
@@ -1325,7 +1420,7 @@
       }
       if (l.tipo === 'grupo') {
         return faixa + '<tr class="grupo' + (l.semLinha ? ' sem-linha' : '') + '" data-grupo="' + T.esc(l.id) + '" title="' + (aberto ? 'Fechar' : 'Abrir') + ' as ' + l.filhas + ' conta(s)"><td class="fixa"><span class="abre nao-imprimir">' +
-          (aberto ? '▾' : '▸') + '</span>' + T.esc(l.rotulo) + ' <small>' + l.filhas + '</small>' + (l.nAjustes ? '<small class="aj-conta">· ' + l.nAjustes + ' ajuste' + (l.nAjustes > 1 ? 's' : '') + '</small>' : '') +
+          (aberto ? '▾' : '▸') + '</span>' + T.esc(l.rotulo) + ' <small>' + l.filhas + '</small>' + dicaArrastar(l, op) + (l.nAjustes ? '<small class="aj-conta">· ' + l.nAjustes + ' ajuste' + (l.nAjustes > 1 ? 's' : '') + '</small>' : '') +
           '</td>' + celulas(l) + '</tr>';
       }
       return faixa + '<tr class="total' + (l.destaque ? ' destaque' : '') + (l.acumuladoAno ? ' acumulado-ano' : '') + '"><td class="fixa">' + T.esc(l.rotulo) + '</td>' + celulas(l) + '</tr>';
