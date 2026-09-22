@@ -136,9 +136,10 @@
       t.comMargem.qtd ? '<span class="falta">± <b>' + t.comMargem.qtd + '</b> com margem: a diferença de ' + T.moeda(Math.abs(t.comMargem.valor)) + ' continua em aberto.</span>' : '',
       t.soPeloValor.qtd ? '<span class="falta">≈ <b>' + t.soPeloValor.qtd + '</b> só pelo valor: são de ' + T.esc(rotulos().pessoas) + ' diferentes — confira uma a uma.</span>' : '',
     ].filter(Boolean).join(' ');
-    return '<div class="acoes-ab" style="margin:14px 0 0"><div class="rotulo-regras pequeno">Conciliação dentro do razão · o que o programa pode casar sozinho</div>' +
+    return '<div class="acoes-ab" style="margin:14px 0 0"><div class="rotulo-regras pequeno">Conciliação dentro do razão · total: <b>' +
+      t.batidas.toLocaleString('pt-BR') + '</b> conciliações · <b>' + t.bateram.toLocaleString('pt-BR') + '</b> de ' + t.linhas.toLocaleString('pt-BR') + ' linhas</div>' +
       '<div class="acoes-conciliar quatro">' + M().REGRAS.map(botao).join('') + '</div>' +
-      '<p class="pequeno suave" style="margin:0">Cada botão liga ou desliga a regra e a leitura do razão é refeita na hora. ' +
+      '<p class="pequeno suave" style="margin:0">Cada botão mostra quantas conciliações saíram pela <b>regra dele</b> (a soma dá o total aí em cima) e liga ou desliga a regra, refazendo a leitura na hora. ' +
       (md ? '📅 <b>' + md + '</b> bateram no mesmo dia, sem ' + T.esc(rotulos().pessoa) + '. ' : '') + avisos + '</p></div>';
   }
   async function alternarRegra(id) {

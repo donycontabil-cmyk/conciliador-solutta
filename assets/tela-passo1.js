@@ -523,9 +523,14 @@
       t.comMargem.qtd ? '<span class="falta">± <b>' + t.comMargem.qtd + '</b> com margem: a diferença de ' + T.moeda(Math.abs(t.comMargem.valor)) + ' continua em aberto (confira uma a uma).</span>' : '',
       t.soPeloValor.qtd ? '<span class="falta">≈ <b>' + t.soPeloValor.qtd + '</b> só pelo valor: são de ' + TX().pessoas + ' diferentes — confira antes de usar o arquivo de ajustes.</span>' : '',
     ].filter(Boolean).join(' ');
-    return '<div class="acoes-ab" style="margin:14px 0 0"><div class="rotulo-regras pequeno">Conciliação dentro do razão · o que o programa pode casar sozinho</div>' +
+    // O TOTAL vem primeiro (Dony, 22/09/2026: viu 110 no botão do documento e achou que tinha caído de 2.000 para 110 —
+    // o 110 é só a fatia daquela regra; a soma dos botões é o total, que não mudou).
+    const conciliadas = r.totais.F.bateram + r.totais.A.bateram;
+    const linhasTodas = r.totais.F.linhas + r.totais.A.linhas;
+    return '<div class="acoes-ab" style="margin:14px 0 0"><div class="rotulo-regras pequeno">Conciliação dentro do razão · total: <b>' +
+      r.batidas.length.toLocaleString('pt-BR') + '</b> conciliações · <b>' + conciliadas.toLocaleString('pt-BR') + '</b> de ' + linhasTodas.toLocaleString('pt-BR') + ' linhas</div>' +
       '<div class="acoes-conciliar quatro">' + M.REGRAS.map(botao).join('') + '</div>' +
-      '<p class="pequeno suave" style="margin:0">Cada botão liga ou desliga a regra e o passo recalcula na hora; as conciliações aparecem em <b>1 · Bateu no razão</b>, com o filtro <b>Conciliado por</b>. ' +
+      '<p class="pequeno suave" style="margin:0">Cada botão mostra quantas conciliações saíram pela <b>regra dele</b> (a soma dá o total aí em cima) e liga ou desliga a regra, recalculando na hora; a lista fica em <b>1 · Bateu no razão</b>, com o filtro <b>Conciliado por</b>. ' +
       (md ? '📅 <b>' + md + '</b> bateram no mesmo dia, sem ' + TX().pessoa + '. ' : '') + avisos + '</p></div>';
   }
 
