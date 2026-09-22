@@ -243,14 +243,31 @@
   // ------------------------------------------------------------------
   // Abertura
   // ------------------------------------------------------------------
+  // Página velha guardada no navegador (o index.html do cache pede menos arquivos do que a versão nova): o programa
+  // recarrega UMA vez com um endereço diferente, que o cache não tem, e volta inteiro. Só se ainda faltar peça é que
+  // a tela explica o que fazer (Dony, 22/09/2026: "o site não está carregando" — era a página velha no cache).
+  const CHAVE_RECARGA = 'conciliador-solutta.recarga';
+  function jaRecarregou() { try { return raiz.sessionStorage.getItem(CHAVE_RECARGA) === '1'; } catch (e) { return true; } }
+  function marcarRecarga(valor) { try { if (valor) raiz.sessionStorage.setItem(CHAVE_RECARGA, '1'); else raiz.sessionStorage.removeItem(CHAVE_RECARGA); } catch (e) { /* sem sessionStorage: segue */ } }
+
   async function iniciar() {
     const faltam = MODULOS.filter((m) => !raiz[m]);
     if (faltam.length) {
-      document.body.innerHTML = '<div style="max-width:640px;margin:10vh auto;font-family:Segoe UI,Arial;padding:20px">' +
+      if (!jaRecarregou()) {
+        marcarRecarga(true);
+        raiz.location.replace(raiz.location.origin + raiz.location.pathname + '?recarga=' + Date.now() + raiz.location.hash);
+        return;
+      }
+      document.body.innerHTML = '<div style="max-width:640px;margin:10vh auto;font-family:Segoe UI,Arial;padding:20px;line-height:1.5">' +
         '<h1 style="color:#b3261e">O programa não carregou inteiro</h1><p>Faltam as peças: <b>' + faltam.join(', ') + '</b>.</p>' +
-        '<p>Confira se a pasta do programa foi copiada inteira (com a pasta <b>assets</b>) e abra de novo.</p></div>';
+        '<p>Quase sempre é a página antiga guardada no navegador. Aperte <b>Ctrl+F5</b> ou clique aqui:</p>' +
+        '<p><button type="button" id="recarregar" style="font:inherit;padding:8px 14px;border-radius:6px;border:1px solid #2f4a64;background:#2f4a64;color:#fff;cursor:pointer">🔄 Recarregar o programa</button></p>' +
+        '<p>Se continuar faltando, confira se a pasta do programa foi copiada inteira (com a pasta <b>assets</b>).</p></div>';
+      const bt = document.getElementById('recarregar');
+      if (bt) bt.addEventListener('click', () => { marcarRecarga(false); raiz.location.replace(raiz.location.origin + raiz.location.pathname + '?recarga=' + Date.now() + raiz.location.hash); });
       return;
     }
+    marcarRecarga(false);
     App.config = raiz.CONFIG;
     const params = new URLSearchParams(raiz.location.search);
     App.modo = params.get('modo') === 'memoria' ? 'memoria' : (App.config.modo || 'pasta');
