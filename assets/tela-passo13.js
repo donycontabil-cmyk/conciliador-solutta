@@ -31,6 +31,8 @@
     const comp = anoMes + '-01';
     const familia = '#/empresa/' + encodeURIComponent(codigo) + '/fornecedores/' + anoMes;
     T.carregando(el, 'Montando o razão limpo de ' + U.nomeCompetencia(comp) + '…');
+    // O mesmo razão do ①: com o livro diário e as contas escolhidas, ele sai do diário antes (só o que mudou).
+    if (!(await raiz.TelaPasso1.sincronizarComODiario(codigo, comp, conferir))) return;
     const dados = await raiz.TelaPasso1.carregarDados(codigo, anoMes, conferir);
     if (!dados) return;
     if (dados.erro) { el.innerHTML = '<div class="aviso ambar">' + T.esc(dados.erro) + ' <a href="#/">Voltar</a></div>'; return; }

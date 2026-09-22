@@ -49,8 +49,22 @@
 
   function competenciaPadrao(metas) {
     const comps = Array.from(new Set(metas.filter(daFamilia).map((m) => m.competencia))).sort().reverse();
-    if (comps.length) return U.anoMes(comps[0]);
+    // O livro diário (22/09/2026): o último mês que ele cobre também conta (sem ele, a tela abria num mês sem razão).
+    const fimDoDiario = (raiz.TelaSubir ? raiz.TelaSubir.diariosEmUso(metas) : []).map((m) => { const d = U.lerData(m.periodo.ate); return d ? U.competenciaDe(d) : null; })
+      .filter(Boolean).sort().reverse()[0];
+    const maior = [comps[0], fimDoDiario].filter(Boolean).sort().reverse()[0];
+    if (maior) return U.anoMes(maior);
     return U.anoMes(U.somarMeses(U.competenciaDe(U.hoje()), -1));
+  }
+
+  // O livro diário no mês: o diário em uso que cobre a competência e as contas escolhidas para cada papel (os passos
+  // tiram delas o razão sozinhos). null sem diário que cubra o mês.
+  function diarioDoMes(metas, comp, emp) {
+    const S = raiz.TelaSubir;
+    if (!S) return null;
+    const lugar = (papel) => ({ tipo: 'razao', papel, competencia: comp, periodo: { de: null, ate: comp } });
+    const md = S.diarioDoLugar(metas, lugar('principal'));
+    return md ? { md, F: S.contasEscolhidas(emp, lugar('principal')), A: S.contasEscolhidas(emp, lugar('adiantamento')) } : null;
   }
 
   async function mostrar(el, codigo, familiaId, anoMes, conferir) {
@@ -115,7 +129,7 @@
     }
     const inativos = passosInativos(emp, fam);
     desenharChecklist(el.querySelector('#checklist'), codigo, comp, checklist, fam, inativos);
-    desenharPassos(el.querySelector('#passos'), codigo, comp, fam, arqs, completo, passo1, ab, inativos);
+    desenharPassos(el.querySelector('#passos'), codigo, comp, fam, arqs, completo, passo1, ab, inativos, diarioDoMes(metas, comp, emp));
     desenharInativos(el.querySelector('#inativos'), fam, inativos);
     const alternar = (ev) => {
       const b = ev.target.closest('[data-inativar], [data-ativar]');
@@ -221,7 +235,8 @@
     return '<button type="button" class="botao pequeno leve inativar" data-inativar="' + p.id + '" title="Esta empresa não usa este passo: ele sai daqui e fica em Passos inativos, lá embaixo">Inativar</button>';
   }
 
-  function desenharPassos(el, codigo, comp, fam, arqs, completo, passo1, ab, inativos) {
+  // diario: o livro diário do mês (diarioDoMes) — o razão que falta sai dele.
+  function desenharPassos(el, codigo, comp, fam, arqs, completo, passo1, ab, inativos, diario) {
     const base = '#/empresa/' + encodeURIComponent(codigo) + '/fornecedores/' + U.anoMes(comp) + '/';
     // Passo que sai de outro (1.3 sai do ①) some junto quando o outro está inativo.
     const ativos = fam.passos.filter((p) => !inativos.has(p.id) && !(p.dependeDe && inativos.has(p.dependeDe)));
@@ -236,21 +251,26 @@
           '<div class="acoes"><span class="pilula cinza">em construção · Etapa ' + p.etapa + '</span>' + botaoInativar(p) + '</div></div>';
       }
       if (p.id === 'passo13') return cartao13(p, base, completo, arqs, passo1);
+      if (p.id === 'passo4') return cartao4(p, base, arqs, diario);
       if (ab[p.id]) return cartaoAB(p, codigo, comp, base, ab[p.id]);
       const temF = arqs.F.length > 0;
       const temA = arqs.A.length > 0;
+      // Sem o razão, mas com o livro diário: o razão sai dele ao abrir o passo (com as contas escolhidas).
+      const dF = !temF && !!diario, dA = !temA && !!diario;
       const itens = [
-        '<li>' + (temF ? '<span class="ok">✓</span>' : '<span class="falta">✗</span>') + '<span>Razão de fornecedores' +
-          (temF ? ' <span class="suave pequeno">(' + arqs.F.map((m) => T.esc(m.conta.codigo)).join(', ') + ')</span>' : ' <span class="falta pequeno">falta</span>') + '</span></li>',
-        '<li>' + (temA ? '<span class="ok">✓</span>' : '<span class="falta">✗</span>') + '<span>Razão de adiantamento a fornecedores' +
-          (temA ? ' <span class="suave pequeno">(' + arqs.A.map((m) => T.esc(m.conta.codigo)).join(', ') + ')</span>' : ' <span class="falta pequeno">falta</span>') + '</span></li>',
+        '<li>' + (temF || dF ? '<span class="ok">✓</span>' : '<span class="falta">✗</span>') + '<span>Razão de fornecedores' +
+          (temF ? ' <span class="suave pequeno">(' + arqs.F.map((m) => T.esc(m.conta.codigo)).join(', ') + ')</span>' : dF ? ' ' + textoDoDiario(diario.F) : ' <span class="falta pequeno">falta</span>') + '</span></li>',
+        '<li>' + (temA || dA ? '<span class="ok">✓</span>' : '<span class="falta">✗</span>') + '<span>Razão de adiantamento a fornecedores' +
+          (temA ? ' <span class="suave pequeno">(' + arqs.A.map((m) => T.esc(m.conta.codigo)).join(', ') + ')</span>' : dA ? ' ' + textoDoDiario(diario.A) : ' <span class="falta pequeno">falta</span>') + '</span></li>',
         '<li>' + (arqs.pagar ? '<span class="ok">✓</span>' : '<span class="fraco">·</span>') + '<span>Contas a pagar em aberto <span class="selo opcional">opcional</span></span></li>',
       ];
+      const temTudo = (temF || dF) && (temA || dA);
       let estado, pode = false, porque = '';
-      if (!completo) { estado = '<span class="pilula cinza">espera o checklist</span>'; porque = 'Marque os dois itens de "Antes de conciliar"' + (temF && temA ? '.' : ' (os razões já podem subir dentro do passo).'); }
-      else if (!temF || !temA) { estado = '<span class="pilula ambar">falta arquivo</span>'; porque = 'Abra o passo e suba cada razão no lugar dele.'; }
+      if (!completo) { estado = '<span class="pilula cinza">espera o checklist</span>'; porque = 'Marque os dois itens de "Antes de conciliar"' + (temTudo ? '.' : ' (os razões já podem subir dentro do passo).'); }
+      else if (!temTudo) { estado = '<span class="pilula ambar">falta arquivo</span>'; porque = 'Abra o passo e suba cada razão no lugar dele.'; }
       else if (passo1) { estado = '<span class="pilula azul">em andamento</span>'; pode = true; }
       else { estado = '<span class="pilula verde">pronta para conciliar</span>'; pode = true; }
+      if (completo && temTudo && ((dF && !diario.F) || (dA && !diario.A))) porque = 'Abra o passo e escolha as contas que saem do livro diário.';
       const r = passo1 && passo1.resumo;
       const resumo = r && r.arquivo ? '<p class="suave pequeno">Última gravação: ' + T.esc(passo1.atualizadoPor || '') + ' em ' + U.dataHoraLocal(passo1.atualizadoEm) +
         '<br>' + r.aceitas + ' reclassificação(ões) marcadas · arquivo com ' + r.arquivo.lancamentos + ' lançamento(s), ' + T.moeda(r.arquivo.total) + '</p>' : '';
@@ -258,8 +278,28 @@
         '<p class="suave" style="line-height:1.5">' + T.esc(p.texto) + '</p><ul class="precisa">' + itens.join('') + '</ul>' + resumo +
         (porque ? '<p class="pequeno" style="color:var(--ambar)">' + T.esc(porque) + '</p>' : '') +
         // Os razões sobem DENTRO do passo (Dony, 15/09/2026): Abrir fica sempre liberado.
-        '<div class="acoes"><a class="botao primario" href="' + base + 'passo1">' + (temF && temA ? 'Abrir →' : '📁 Abrir e subir arquivos') + '</a>' + botaoInativar(p) + '</div></div>';
+        '<div class="acoes"><a class="botao primario" href="' + base + 'passo1">' + (temTudo ? 'Abrir →' : '📁 Abrir e subir arquivos') + '</a>' + botaoInativar(p) + '</div></div>';
     }).join('');
+  }
+
+  // "📒 sai do livro diário (148, 2001)" ou, sem contas escolhidas, "escolha as contas no passo".
+  function textoDoDiario(contas) {
+    return '<span class="suave pequeno">📒 sai do livro diário' + (contas ? ' (' + T.esc(contas.join(', ')) + ')' : ' — escolha as contas no passo') + '</span>';
+  }
+
+  // ④ · Fornecedores · somente razão (Dony, 22/09/2026): o razão de fornecedores do ① (ou o livro diário) contra ele mesmo.
+  function cartao4(p, base, arqs, diario) {
+    const temF = arqs.F.length > 0;
+    const dF = !temF && !!diario;
+    const pronto = temF || dF;
+    const estado = pronto ? '<span class="pilula verde">pronto</span>' : '<span class="pilula ambar">falta arquivo</span>';
+    const item = '<li>' + (pronto ? '<span class="ok">✓</span>' : '<span class="falta">✗</span>') + '<span>Razão de fornecedores' +
+      (temF ? ' <span class="suave pequeno">(' + arqs.F.map((m) => T.esc(m.conta.codigo)).join(', ') + ')</span>' : dF ? ' ' + textoDoDiario(diario.F) : ' <span class="falta pequeno">falta</span>') + '</span></li>';
+    const porque = !pronto ? 'Abra o passo e suba o razão de fornecedores (o mesmo do ①) — ou guarde o livro diário.' : dF && !diario.F ? 'Abra o passo e escolha as contas que saem do livro diário.' : '';
+    return '<div class="cartao passo"><div class="linha-flex"><span class="numero">' + p.numero + '</span><h3 style="flex:1">' + T.esc(p.titulo) + '</h3>' + estado + '</div>' +
+      '<p class="suave" style="line-height:1.5">' + T.esc(p.texto) + '</p><ul class="precisa">' + item + '</ul>' +
+      (porque ? '<p class="pequeno" style="color:var(--ambar)">' + T.esc(porque) + '</p>' : '') +
+      '<div class="acoes"><a class="botao primario" href="' + base + 'passo4">' + (pronto ? 'Abrir →' : '📁 Abrir e subir arquivos') + '</a>' + botaoInativar(p) + '</div></div>';
   }
 
   // 1.3 · razão limpo (Dony, 19/09/2026): sai do resultado do ① (os mesmos arquivos e decisões); abre com o ① pronto.

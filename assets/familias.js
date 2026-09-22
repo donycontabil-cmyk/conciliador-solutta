@@ -128,6 +128,13 @@
           texto: 'Aging do mês passado + movimento do razão do mês = a contabilidade; a sobra bate com o aging do mês. Fornecedor por fornecedor.',
           precisa: [{ papel: 'aging_anterior', texto: 'Aging (contas a pagar) do mês passado' }, { papel: 'aging_atual', texto: 'Aging (contas a pagar) do mês' }, { papel: 'razao_fornecedores', texto: 'Razão de fornecedores do mês' }],
           construido: true, semChecklist: true },
+        // Dony, 22/09/2026: "a conciliação de fornecedor só o razão contra o próprio razão, só para pegar distorções dentro
+        // do próprio razão; se eu tiver o diário, vai ser o diário; ele só vai pegar débito e crédito e vai me mostrar tudo
+        // que tem a crédito em aberto e tudo que está em débito em aberto". O mesmo razão de fornecedores do ①.
+        { id: 'passo4', numero: '④', tipo: 'fornecedor_somente_razao', titulo: 'Fornecedores · somente razão',
+          texto: 'O razão de fornecedores (ou o livro diário) contra ele mesmo: casa débito com crédito de cada fornecedor e mostra tudo o que ficou em aberto a crédito e a débito — para achar distorções dentro do razão.',
+          precisa: [{ papel: 'principal', texto: 'Razão de fornecedores (ou o livro diário)' }],
+          construido: true, semChecklist: true },
       ],
     },
     {

@@ -478,6 +478,11 @@
       // de adiantamento com o nome da conta cortado): { '634': { familia: 'fornecedores', papel: 'adiantamento' } }.
       const papeis = limparPapeisDeConta(empresa.papeisDeConta !== undefined ? empresa.papeisDeConta : (anterior && anterior.papeisDeConta));
       if (Object.keys(papeis).length) registro.papeisDeConta = papeis;
+      // Contas que os passos tiram do livro diário (Dony, 22/09/2026: "se eu carreguei o diário, ele tem que entender
+      // que o diário é o razão; eu quero poder selecionar quais são as contas que eu estou conciliando"):
+      // { fornecedores_principal: ['500', '510'], fornecedores_adiantamento: ['400'] }. Mesma regra dos outros campos.
+      const contasDoDiario = limparMapaDeListas(empresa.contasDoDiario !== undefined ? empresa.contasDoDiario : (anterior && anterior.contasDoDiario));
+      if (Object.keys(contasDoDiario).length) registro.contasDoDiario = contasDoDiario;
       // Logo e cor do relatório para o cliente (Dony, 18/09/2026: "um lugar em que eu coloque o logo da
       // empresa para sair no relatório"): imagem já reduzida pela tela (data URL de até ~400 KB) e cor
       // #rrggbb. Mesma regra: sem o campo na chamada, fica o que já estava; vazio tira.

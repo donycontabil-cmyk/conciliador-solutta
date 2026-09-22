@@ -131,6 +131,49 @@
   }
 
   // ------------------------------------------------------------------
+  // O FORNECEDOR PELO HISTÓRICO do livro diário. No razão do sistema o fornecedor vem da coluna Participante; o diário não
+  // tem essa coluna, e o nome só está no histórico. Quando o leitor do razão (LerRazao.lancamentoH) não acha o nome, estas
+  // formas, medidas no caso real (a conta de fornecedores ficava com 3 de cada 4 linhas sem fornecedor):
+  //   "Compras cfe NF nº. 123 - NOME", "Compras energia elétrica conf. NF nº. 1 - NOME", "Compras cfe n°.123 - Nome";
+  //   "Pagamento Fatura|Boleto|Recibo|DACTE|Apólice|Nota Fiscal Eletrônica 123 [Parc 1/13] NOME", "Pagamento Parc 1/13 NOME",
+  //   "Pagamento boleto - NOME", "Pagamento NOME - Pagamento realizado a partir da importação do extrato.";
+  //   "TED … DEST. NOME", "TRANSF CC PARA CC [PJ] NOME", "Desconto obtido de NOME NF …", "Juros pagos a NOME NF …",
+  //   "Empréstimos para Terceiros NOME Empréstimo …"; o nome depois de um " - " (a parte do extrato: "… - PAGTO ELETRON
+  //   COBRANCA NOME"); e o histórico que é só o nome, em maiúsculas ("NOME COMERCIO LTDA").
+  // ------------------------------------------------------------------
+  const PAGO_NO_EXTRATO = /\s*-\s*pagamento\s*realizado.*$/i;
+  const NAO_E_NOME = /^(RECLASS|AJUSTE|ESTORNO|BAIXA|TRANSF|PAGAMENTO|PAGTO|COMPRA|REF\b|DEVOLU|JUROS|DESCONTO|TARIFA|IOF|MULTA|SALDO|TOTAL|PROVIS|APROPRIA)/;
+  function nomeDoHistorico(historico) {
+    const h = String(historico || '').replace(/\s+/g, ' ').trim();
+    const achou = (nota, nome) => ({ nota: nota || '', fornecedor: String(nome || '').replace(/\s+/g, ' ').trim() });
+    let m = h.match(/^compras?(?:\s+[a-zà-ú]+){0,2}\s+(?:cfe|conf\.?|conforme)\s+(?:nf\s*)?n[º°o]?\.?\s*([\w.\/-]+?)\s*-\s*(.+)$/i);
+    if (m) return achou(m[1], m[2]);
+    const semRabo = h.replace(PAGO_NO_EXTRATO, '');
+    m = semRabo.match(/^pagamento\s+(?:fatura|boleto|recibo|dacte|ap[óo]lice|nota\s+fiscal(?:\s+eletr[ôo]nica)?)\s+\.{0,3}([\w.\/-]*\d[\w.\/-]*)\s+(?:parc\s+\d+\s*\/\s*\d+\s+)?(.+)$/i);
+    if (m) return achou(m[1], m[2]);
+    m = semRabo.match(/^pagamento\s+parc\s+\d+\s*\/\s*\d+\s+(.+)$/i) || semRabo.match(/^pagamento\s+boleto\s*-\s*(.+)$/i);
+    if (m) return achou('', m[1]);
+    if (PAGO_NO_EXTRATO.test(h)) { m = semRabo.match(/^pagamento\s+(.+)$/i); if (m) return achou('', m[1]); }
+    m = /^ted\b/i.test(h) && h.match(/\bdest\.?\s+(.+)$/i);
+    if (m) return achou('', m[1]);
+    m = h.match(/^transf\s+cc\s+para\s+cc\s+(?:p[jf]\s+)?(.+)$/i) || h.match(/^desconto\s+obtido\s+de\s+(.+?)(?:\.?\s+nf\s.*)?$/i) ||
+      h.match(/^juros\s+pagos\s+a\s+(.+?)(?:\.?\s+nf\s.*)?$/i) || h.match(/^empr[ée]stimos?\s+para\s+terceiros\s+(.+?)\s+empr[ée]stimo\b/i);
+    if (m) return achou('', m[1]);
+    const partes = h.split(/\s+-\s+/);
+    for (let i = partes.length - 1; i >= 1; i--) { const x = LerRazao.lancamentoH(partes[i]); if (x.fornecedor) return achou(x.nota, x.fornecedor); }
+    const palavras = h.split(' ').length;
+    if (/^[A-ZÀ-Ú&.\/' -]+$/.test(h) && palavras >= 2 && palavras <= 8 && !NAO_E_NOME.test(Util.semAcento(h))) return achou('', h);
+    return { nota: '', fornecedor: '' };
+  }
+  // O leitor do razão primeiro; sem nome, as formas do diário.
+  function lerHistorico(historico) {
+    const lido = LerRazao.lancamentoH(historico);
+    if (lido.fornecedor) return lido;
+    const d = nomeDoHistorico(historico);
+    return d.fornecedor ? { nota: lido.nota || d.nota, fornecedor: d.fornecedor } : lido;
+  }
+
+  // ------------------------------------------------------------------
   // O RAZÃO DE UMA CONTA tirado do diário, no desenho do razão que os passos usam.
   // op: { de (competência do começo; sem ela, o começo do diário), ate (competência do fim) }
   // ------------------------------------------------------------------
@@ -175,7 +218,7 @@
         const debito = lado === 'D' ? l.valor : 0, credito = lado === 'C' ? l.valor : 0;
         saldo += debito - credito;
         totalDebito += debito; totalCredito += credito;
-        const lido = LerRazao.lancamentoH(l.historico);
+        const lido = lerHistorico(l.historico);
         const cnpj = LerRazao.cnpjDoTextoH(l.historico);
         const x = { data: l.data, dia: l.dia, mes: l.mes, ano: l.ano, numero: String(l.grupo), historico: l.historico, contrapartida: contra, contrapartidas: contras,
           documento: '', participante: '', debito, credito, saldo, fornecedor: lido.fornecedor || '', linhaDoDiario: l.linha };
@@ -284,5 +327,5 @@
     return linhas.join('\r\n');
   }
 
-  return { planoDosBalancetes, movimentos, conferir, saldoNoComeco, razaoDaConta, contasDasConciliacoes, saldosDasContas, paraGuardar, compararDiarios, csvDoRazao };
+  return { planoDosBalancetes, movimentos, conferir, saldoNoComeco, razaoDaConta, contasDasConciliacoes, saldosDasContas, paraGuardar, compararDiarios, csvDoRazao, nomeDoHistorico, lerHistorico };
 });

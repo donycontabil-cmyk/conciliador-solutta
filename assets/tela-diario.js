@@ -155,19 +155,34 @@
       const info = E.plano.get(String(k));
       if (info || (d.contas || []).indexOf(String(k)) >= 0) detectadas.push({ reduzido: String(k), conta: info ? info.conta : '', titulo: info ? info.titulo : '', familia: e.familia, papel: e.papel, escolhido: true });
     });
+    // As escolhidas para os passos (contasDoDiario): entram mesmo se o plano não as achou.
+    const nosPassos = new Set();
+    Object.keys(emp.contasDoDiario || {}).forEach((k) => {
+      const papel = k.replace(/^fornecedores_/, '');
+      (emp.contasDoDiario[k] || []).forEach((red) => {
+        nosPassos.add(papel + '|' + red);
+        if (!detectadas.some((c) => c.reduzido === String(red) && c.familia === 'fornecedores' && c.papel === papel)) {
+          const info = E.plano.get(String(red));
+          detectadas.push({ reduzido: String(red), conta: info ? info.conta : '', titulo: info ? info.titulo : '', familia: 'fornecedores', papel, escolhido: true });
+        }
+      });
+    });
     const porRed = new Map(s.contas.map((c) => [c.reduzido, c]));
     const linhasConc = detectadas.map((c) => {
       const x = porRed.get(c.reduzido) || { lancamentos: 0, saldoInicial: null, debitos: 0, creditos: 0, saldoFinal: null, saldoBalancete: null, confere: null };
-      return '<tr><td class="sem-quebra">' + T.esc(NOME_PAPEL[c.familia + '/' + c.papel] || c.familia) + (c.escolhido ? ' <span class="suave pequeno" title="Escolhido para esta empresa">(escolhido)</span>' : '') + '</td>' +
+      const noPasso = c.familia === 'fornecedores' && nosPassos.has(c.papel + '|' + c.reduzido);
+      return '<tr><td class="sem-quebra">' + T.esc(NOME_PAPEL[c.familia + '/' + c.papel] || c.familia) + (c.escolhido && !noPasso ? ' <span class="suave pequeno" title="Escolhido para esta empresa">(escolhido)</span>' : '') +
+        (noPasso ? ' <span class="selo ok-diario" title="Os passos tiram o razão desta conta do livro diário">nos passos</span>' : '') + '</td>' +
         '<td class="nome"><b>' + T.esc(c.reduzido) + '</b> ' + T.esc(c.titulo || '—') + '<br><span class="suave pequeno">' + T.esc(c.conta || '') + '</span></td>' +
         '<td class="num">' + x.lancamentos.toLocaleString('pt-BR') + '</td>' + (x.saldoInicial === null ? '<td class="num suave">—</td>' : tdDC(x.saldoInicial)) + T.tdValor(x.debitos) + T.tdValor(x.creditos) +
         (x.saldoFinal === null ? '<td class="num suave">—</td>' : tdDC(x.saldoFinal)) +
         '<td>' + (x.confere === true ? '<span class="pilula verde">✓ bate</span>' : x.confere === false ? '<span class="pilula vermelho" title="O balancete diz ' + T.esc(T.valorDC(x.saldoBalancete, x.saldoBalancete >= 0 ? 'D' : 'C')) + '">✗ não bate</span>' : '<span class="suave pequeno">sem o balancete</span>') + '</td>' +
         '<td><button type="button" class="botao pequeno sem-quebra" data-ver-razao="' + T.esc(c.reduzido) + '">Ver razão</button></td></tr>';
     }).join('');
-    const contas = '<section class="cartao corpo" style="margin-top:14px"><h2>Contas das conciliações</h2>' +
-      '<p class="suave pequeno" style="margin:4px 0 10px">Achadas no plano de contas pelo nome e pela classificação. Nos passos de fornecedores, o botão <b>📒 Tirar do diário</b> monta o razão delas ' +
-      '(opcional: o razão continua podendo subir como sempre). Clientes e resultado usam a mesma base quando as conciliações chegarem.</p>' +
+    const contas = '<section class="cartao corpo" style="margin-top:14px"><div class="linha-flex"><h2 style="flex:1">Contas das conciliações</h2>' +
+      '<button type="button" class="botao pequeno primario" data-escolher-contas title="As contas de fornecedores e de adiantamento que os passos tiram do livro diário">✎ Escolher as contas dos passos</button></div>' +
+      '<p class="suave pequeno" style="margin:4px 0 10px">Achadas no plano de contas pelo nome e pela classificação. As marcadas <b>nos passos</b> viram o razão dos passos de fornecedores sozinhas — ' +
+      'o diário é o razão; conta com razão carregado continua com o razão. Clientes e resultado usam a mesma base quando as conciliações chegarem.</p>' +
       (detectadas.length ? '<div class="tabela-caixa"><table class="tabela"><thead><tr><th>Conciliação</th><th>Conta</th><th class="num">Lanç.</th><th class="num">Saldo inicial</th>' +
         '<th class="num">Débitos</th><th class="num">Créditos</th><th class="num">Saldo final</th><th title="Saldo final pelo diário × saldo do balancete de ' + T.esc(nomeFim) + '">Fim × balancete</th><th></th></tr></thead><tbody>' + linhasConc + '</tbody></table></div>'
         : '<p class="suave">Nenhuma conta de fornecedores, clientes ou bancos achada no plano de contas' + (E.balancetes.length ? '' : ' (carregue um balancete: o plano de contas vem dele)') + '.</p>') +
@@ -210,9 +225,19 @@
       }
       if (ev.target.closest('#diario-ver')) { verDaCaixa(raizEl); return; }
       if (ev.target.closest('[data-excel-razao]')) { baixarExcel(); return; }
+      if (ev.target.closest('[data-escolher-contas]')) { escolherContas(); return; }
     });
     const inp = raizEl.querySelector('#diario-conta');
     if (inp) inp.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); verDaCaixa(raizEl); } });
+  }
+
+  // A escolha das contas dos passos (fornecedores e adiantamento), guardada na empresa: os passos tiram o razão delas do
+  // diário sozinhos. Os lugares são os do Passo ① no último mês do diário.
+  function escolherContas() {
+    const comps = E.diario.meses.map((m) => m.comp);
+    const fim = comps[comps.length - 1];
+    const lugar = (id, papel, titulo) => ({ id, tipo: 'razao', papel, varias: true, competencia: fim, periodo: { de: null, ate: fim }, titulo, nome: titulo.toLowerCase(), arquivos: [] });
+    raiz.TelaSubir.doDiario(E.codigo, [lugar('F', 'principal', 'Razão de fornecedores'), lugar('A', 'adiantamento', 'Razão de adiantamento a fornecedores')], { soEscolha: true });
   }
 
   // A conta digitada: o código reduzido do começo ("2000 — Fornecedores…") ou o nome (a única conta com esse pedaço).

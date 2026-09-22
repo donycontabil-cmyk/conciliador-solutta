@@ -784,8 +784,81 @@
     return { competencia: r.competencia, fim: fim.texto, F: daConta('F'), A: daConta('A') };
   }
 
+  // ------------------------------------------------------------------
+  // Passo ④ — FORNECEDORES · SOMENTE RAZÃO (Dony, 22/09/2026: "a conciliação de fornecedor só o razão contra o próprio
+  // razão, só para pegar distorções dentro do próprio razão; se eu tiver o diário, vai ser o diário. Ele só vai pegar
+  // débito e crédito e vai me mostrar tudo que tem a crédito em aberto e tudo que está em débito em aberto").
+  // As mesmas batidas do ① dentro do razão de fornecedores (1x1, 1xN, Nx1, zerou e mesmo-dia, fornecedor por
+  // fornecedor), sem adiantamento e sem reclassificação. O que não bateu fica em aberto: a crédito (valor > 0 no lado F:
+  // nota sem pagamento) ou a débito (pagamento sem nota). Conferência: cada batida soma zero, então o saldo anterior + o
+  // que ficou em aberto = o saldo final do razão, no centavo.
+  // entrada: { competencia, contas: { F: [fonte] }, titulos (opcional: ajudam a reconhecer os nomes), decisoes: { donos } }
+  // ------------------------------------------------------------------
+  function somenteRazao(entrada) {
+    const t0 = Date.now();
+    const natureza = entrada.natureza || 'fornecedores';
+    const e = Object.assign({}, entrada, { natureza, contas: { F: (entrada.contas && entrada.contas.F) || [], A: [] } });
+    const montadas = montarLinhas(e);
+    const linhas = montadas.linhas;
+    const nomes = MotorNomes.resolver(linhas, { donos: (entrada.decisoes && entrada.decisoes.donos) || {}, titulos: entrada.titulos || [] });
+    for (const l of linhas) l.dono = nomes.porLinha.get(l.digital);
+    const e1 = etapa1(linhas, new Set());
+    for (const l of linhas) {
+      const b = e1.batidaDe.get(l.digital);
+      l.situacao = b ? 'bateu' : 'aberta';
+      l.batida = b ? b.id : null;
+      l.como = b ? b.como : null;
+    }
+    const nomeDe = (chave) => (chave === SEM ? { nome: 'Sem fornecedor', cnpj: '' } : nomes.fornecedores[chave] || { nome: chave, cnpj: '' });
+    const abertas = linhas.filter((l) => l.situacao === 'aberta' && l.valor !== 0);
+    const credito = abertas.filter((l) => l.valor > 0);
+    const debito = abertas.filter((l) => l.valor < 0);
+    // Por fornecedor: o que ficou em aberto de cada lado e o saldo (o fornecedor com os dois lados em aberto é o
+    // primeiro lugar para procurar distorção: pagamento que não casou com a nota).
+    const porChave = new Map();
+    for (const l of abertas) {
+      const k = l.dono.chave;
+      if (!porChave.has(k)) { const f = nomeDe(k); porChave.set(k, { chave: k, nome: f.nome, cnpj: f.cnpj || '', credito: 0, debito: 0, qtdCredito: 0, qtdDebito: 0, saldo: 0, linhas: [] }); }
+      const g = porChave.get(k);
+      if (l.valor > 0) { g.credito += l.valor; g.qtdCredito++; } else { g.debito -= l.valor; g.qtdDebito++; }
+      g.saldo += l.valor;
+      g.linhas.push(l.i);
+    }
+    const porFornecedor = Array.from(porChave.values()).map((g) => Object.assign(g, { osDoisLados: g.qtdCredito > 0 && g.qtdDebito > 0 }))
+      .sort((a, b) => (a.chave === SEM) - (b.chave === SEM) || Util.normalizarNome(a.nome).localeCompare(Util.normalizarNome(b.nome)));
+    const soma = (xs) => xs.reduce((t, l) => t + l.valor, 0);
+    const saldoAnterior = montadas.contas.F.reduce((t, c) => t + c.saldoAnterior, 0);
+    const movimento = soma(linhas);
+    const somaCredito = soma(credito), somaDebito = -soma(debito);
+    const falhas = [];
+    for (const b of e1.batidas) if (b.linhas.reduce((t, i) => t + linhas[i].valor, 0) !== 0) falhas.push('Batida ' + b.id + ' não soma zero.');
+    if (somaCredito - somaDebito !== movimento) falhas.push('O que ficou em aberto (' + Util.formatarCentavos(somaCredito - somaDebito) + ') não é o movimento do razão (' + Util.formatarCentavos(movimento) + ').');
+    const porFornecedorSoma = porFornecedor.reduce((t, g) => t + g.saldo, 0);
+    if (porFornecedorSoma !== somaCredito - somaDebito) falhas.push('A soma por fornecedor não fecha com o que ficou em aberto.');
+    if (!montadas.foraDaCompetencia) {
+      for (const c of montadas.contas.F) {
+        if (c.saldoFinalRazao !== null && c.saldoFinalRazao !== c.saldoFinal) {
+          falhas.push('Conta ' + c.codigo + ': saldo anterior + linhas = ' + Util.formatarCentavos(c.saldoFinal) + ', mas o razão diz ' + Util.formatarCentavos(c.saldoFinalRazao) + '.');
+        }
+      }
+    }
+    const bateram = linhas.filter((l) => l.situacao === 'bateu').length;
+    return {
+      natureza, competencia: entrada.competencia, textos: TEXTOS[natureza], linhas, contas: montadas.contas.F, foraDaCompetencia: montadas.foraDaCompetencia,
+      batidas: e1.batidas, abertas: { credito, debito }, porFornecedor, fornecedores: nomes.fornecedores,
+      totais: {
+        linhas: linhas.length, bateram, batidas: e1.batidas.length, zeradas: linhas.filter((l) => l.valor === 0).length,
+        credito: { qtd: credito.length, valor: somaCredito }, debito: { qtd: debito.length, valor: somaDebito },
+        saldoAnterior, movimento, saldoFinal: saldoAnterior + movimento,
+        fornecedoresComOsDoisLados: porFornecedor.filter((g) => g.osDoisLados).length,
+      },
+      invariantes: { ok: falhas.length === 0, falhas },
+      ms: Date.now() - t0,
+    };
+  }
+
   return {
     JANELA_DIAS, MAX_ITENS, MAX_CANDIDATAS, MAX_PASSOS, TEXTOS,
-    valorNoLado, saldoNoLado, montarLinhas, buscarSoma, etapa1, aplicarManuais, idDaBatida, idDaManual, calcularPasso1, composicao,
+    valorNoLado, saldoNoLado, montarLinhas, buscarSoma, etapa1, aplicarManuais, idDaBatida, idDaManual, calcularPasso1, composicao, somenteRazao,
   };
 });

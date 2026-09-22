@@ -83,22 +83,33 @@
     const comp = anoMes + '-01';
     const voltar = '#/empresa/' + encodeURIComponent(codigo) + '/fornecedores/' + anoMes;
     T.carregando(el, 'Abrindo o Passo ① de ' + U.nomeCompetencia(comp) + '…');
+    // O livro diário é o razão (Dony, 22/09/2026: "se eu carreguei o diário, automaticamente ele tem que entender que o
+    // diário é o razão; eu quero poder selecionar quais são as contas"): com as contas escolhidas, o razão delas sai do
+    // diário antes de abrir (só o que mudou). Conta com razão carregado continua com o razão.
+    const sinc = await sincronizarComODiario(codigo, comp, conferir);
+    if (!sinc) return;
     const dados = await carregarDados(codigo, anoMes, conferir);
     if (!dados) return;
     if (dados.erro) { el.innerHTML = '<div class="aviso ambar">' + T.esc(dados.erro) + ' <a href="#/">Voltar</a></div>'; return; }
     const { emp, arqs, checklistOk, falta } = dados;
     // Os arquivos sobem AQUI, cada um no seu lugar (Dony, 15/09/2026: "tem que ser em todas").
     if (!checklistOk || falta) {
+      // Falta razão e há diário guardado: a escolha das contas (ou o que falta para o diário servir) no lugar do "suba o razão".
+      const S = raiz.TelaSubir;
+      const doDiario = falta && sinc.prep ? (sinc.prep.ok ? (sinc.estado === 'escolher' ? S.cartaoDaEscolha(sinc.prep) : '')
+        : '<div class="aviso ambar" style="margin-bottom:12px"><span class="icone-aviso">📒</span><div>' + S.textoSemDiario(codigo, sinc.prep, comp) + '</div></div>') : '';
+      const extras = [S.lugarDoBalanceteDoDiario(falta ? sinc.prep : null)].filter(Boolean);
       el.innerHTML = '<a class="voltar" href="' + voltar + '">← Fornecedores · ' + U.nomeCompetencia(comp) + '</a>' +
         '<div class="cabecalho"><div class="titulos"><h1>Passo ① · Fornecedores × Adiantamento</h1>' +
         '<p class="suave">' + T.esc(emp.codigo + ' · ' + emp.nome) + ' · ' + U.nomeCompetencia(comp) + '</p></div></div>' +
         (checklistOk ? '' : '<div class="aviso ambar" style="margin-bottom:12px"><span class="icone-aviso">🔒</span><div><b>A conciliação espera o checklist "Antes de conciliar".</b><br>' +
           'Marque que os bancos foram conciliados e que as notas fiscais de entrada subiram. <a href="' + voltar + '">Ir para o checklist</a>' +
           (falta ? ' — os arquivos já podem subir aqui embaixo.' : '') + '</div></div>') +
-        (falta ? '<div class="aviso info" style="margin-bottom:12px"><span class="icone-aviso">📁</span><div><b>Suba cada razão no seu lugar.</b> ' +
-          'O programa sabe o que é pelo lugar onde você coloca. Falta: ' + [!arqs.F.length ? 'o razão de fornecedores' : '', !arqs.A.length ? 'o razão de adiantamento a fornecedores' : ''].filter(Boolean).join(' e ') + '.</div></div>' : '') +
-        painelDoPasso1(codigo, comp, arqs, true);
-      ligarPainelDoPasso1(el.querySelector('.arquivos-passo'), codigo, comp, arqs);
+        (doDiario || (falta ? '<div class="aviso info" style="margin-bottom:12px"><span class="icone-aviso">📁</span><div><b>Suba cada razão no seu lugar.</b> ' +
+          'O programa sabe o que é pelo lugar onde você coloca. Falta: ' + [!arqs.F.length ? 'o razão de fornecedores' : '', !arqs.A.length ? 'o razão de adiantamento a fornecedores' : ''].filter(Boolean).join(' e ') + '.</div></div>' : '')) +
+        painelDoPasso1(codigo, comp, arqs, true, extras);
+      ligarPainelDoPasso1(el.querySelector('.arquivos-passo'), codigo, comp, arqs, extras);
+      S.ligarCartaoDaEscolha(el.querySelector('.escolha-diario'), codigo, sinc.prep);
       return;
     }
     const registro = dados.registro;
@@ -146,10 +157,33 @@
 
   function chaveDoPainel1(codigo, comp) { return codigo + '|passo1|' + comp; }
 
+  // A linha do cabeçalho quando o razão sai do livro diário, com o botão de trocar as contas (data-acao="trocar-contas").
+  function linhaDoDiario(lugares) {
+    const resumo = raiz.TelaSubir.resumoDoDiario(lugares);
+    return resumo ? '<p class="pequeno diario-no-passo">📒 Do livro diário: ' + T.esc(resumo) +
+      ' · <button type="button" class="lapis forte" data-acao="trocar-contas" title="Escolher as contas que saem do livro diário (a escolha fica guardada na empresa)">✎ Trocar as contas</button></p>' : '';
+  }
+
+  // Os lugares de razão do ① com o que está guardado, sincronizados com o livro diário (TelaSubir.sincronizarDoDiario).
+  // Serve também o 1.3 e o ④ (o mesmo razão de fornecedores). null = outra tela foi aberta no meio do caminho.
+  async function sincronizarComODiario(codigo, comp, conferir) {
+    try {
+      const metas = await app().armazenamento.arquivos(codigo);
+      if (conferir && !conferir()) return null;
+      const sinc = await raiz.TelaSubir.sincronizarDoDiario(codigo, lugaresDoPasso1(comp, raiz.TelaFamilia.arquivosDoPasso1(metas, comp)));
+      if (conferir && !conferir()) return null;
+      return sinc;
+    } catch (e) {
+      T.avisoRapido('Livro diário: ' + T.mensagemDeErro(e), 'erro', 8000);
+      return { estado: 'erro', mudou: false };
+    }
+  }
+
   // fixo = sempre à vista, sem "Fechar" (tela de falta de arquivo ou do checklist).
-  function painelDoPasso1(codigo, comp, arqs, fixo) {
+  // extras: lugares a mais (o balancete que dá o saldo inicial do livro diário, quando falta).
+  function painelDoPasso1(codigo, comp, arqs, fixo, extras) {
     return raiz.TelaSubir.painel({
-      chave: chaveDoPainel1(codigo, comp), titulo: 'Arquivos do passo', resumo: U.nomeCompetencia(comp), fixo, lugares: lugaresDoPasso1(comp, arqs), metas: arqs.metas,
+      chave: chaveDoPainel1(codigo, comp), titulo: 'Arquivos do passo', resumo: U.nomeCompetencia(comp), fixo, lugares: lugaresDoPasso1(comp, arqs).concat(extras || []), metas: arqs.metas,
       depois: eDemonstracao(codigo)
         ? '<div class="linha-flex" style="margin-top:10px"><button type="button" class="botao" data-exemplo>🧪 Usar os razões de exemplo</button>' +
           '<span class="suave pequeno">Os razões de fornecedores e de adiantamento da empresa de demonstração (janeiro a julho/2026), com fornecedores, CNPJs e valores inventados.</span></div>'
@@ -157,9 +191,9 @@
     });
   }
 
-  function ligarPainelDoPasso1(el, codigo, comp, arqs) {
+  function ligarPainelDoPasso1(el, codigo, comp, arqs, extras) {
     if (!el) return;
-    const lugares = lugaresDoPasso1(comp, arqs);
+    const lugares = lugaresDoPasso1(comp, arqs).concat(extras || []);
     raiz.TelaSubir.ligar(el, codigo, lugares);
     el.addEventListener('click', async (ev) => {
       const b = ev.target.closest('[data-exemplo]');
@@ -221,7 +255,8 @@
       '<div class="cabecalho"><div class="titulos"><h1>Passo ① · Fornecedores × Adiantamento</h1>' +
       '<p class="suave">' + T.esc(E.emp.codigo + ' · ' + E.emp.nome) + ' · ' + U.nomeCompetencia(E.comp) + '</p>' +
       '<p class="suave pequeno">Fornecedores: ' + contaTxt(E.arquivos.F) + ' · Adiantamento: ' + contaTxt(E.arquivos.A) +
-      (E.arquivos.pagar ? ' · Contas a pagar: ' + E.arquivos.pagar.meta.titulos + ' títulos (ajuda a reconhecer nomes)' : '') + '</p></div>' +
+      (E.arquivos.pagar ? ' · Contas a pagar: ' + E.arquivos.pagar.meta.titulos + ' títulos (ajuda a reconhecer nomes)' : '') + '</p>' +
+      linhaDoDiario(lugaresDoPasso1(E.comp, E.arqs)) + '</div>' +
       '<div class="linha-flex" style="gap:12px"><span class="guardado" id="guardado" title="Cada decisão é gravada na hora, sozinha">' + (E.guardadoEm ? 'guardado às ' + U.horaLocal(E.guardadoEm) : 'nenhuma decisão tomada ainda') + '</span>' +
       // 1.3 (Dony, 19/09/2026): o que sobra em cada conta depois deste passo, para imprimir e mandar.
       '<button type="button" class="botao" data-acao="razao-limpo" title="1.3 · Razão limpo: só o que compõe o saldo de cada conta depois deste passo, por lançamento ou por fornecedor, para imprimir ou baixar em Excel">📄 1.3 Razão limpo</button>' +
@@ -695,6 +730,8 @@
         const a = acao.getAttribute('data-acao');
         // 1.3: espera a última decisão ser gravada, para o razão limpo sair com ela.
         if (a === 'razao-limpo') { acao.disabled = true; await E.fila; app().ir(E.voltar + '/passo13'); return; }
+        // Livro diário: trocar as contas que saem dele (a escolha fica na empresa; o passo abre de novo com elas).
+        if (a === 'trocar-contas') { await E.fila; await raiz.TelaSubir.doDiario(E.codigo, lugaresDoPasso1(E.comp, E.arqs)); return; }
         if (a === 'baixar') baixarArquivo();
         if (a === 'limpar-selecao') { E.selecao.clear(); redesenharAbaMantendoRolagem(); }
         if (a === 'reclassificar-mao') await reclassificarAMao();
@@ -880,5 +917,5 @@
     gravar('dono-trocado', digital, resultado.nome);
   }
 
-  raiz.TelaPasso1 = { mostrar, estado: () => E, carregarDados };
+  raiz.TelaPasso1 = { mostrar, estado: () => E, carregarDados, sincronizarComODiario, lugaresDoPasso1, linhaDoDiario };
 })(self);
