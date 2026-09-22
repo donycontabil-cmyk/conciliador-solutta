@@ -303,9 +303,11 @@
   function desenharAvisos() {
     const r = E.r;
     const partes = [];
+    const extras = r.batidas.filter((b) => b.regra === 'margem' || b.regra === 'valor').length;
     if (r.invariantes.ok) {
-      partes.push('<div class="aviso verde"><span class="icone-aviso">✓</span><div><b>Conferido no centavo.</b> Cada batida soma zero; as sobras de cada fornecedor fecham com o saldo dele; ' +
-        'o em aberto de cada conta fecha com o saldo do razão mexido pelos ajustes; o total do arquivo de ajustes fecha com as reclassificações marcadas.</div></div>');
+      partes.push('<div class="aviso verde"><span class="icone-aviso">✓</span><div><b>Conferido no centavo.</b> Cada batida soma zero; as sobras de cada ' + TX().pessoa + ' fecham com o saldo dele; ' +
+        'o em aberto de cada conta fecha com o saldo do razão mexido pelos ajustes; o total do arquivo de ajustes fecha com as reclassificações marcadas.' +
+        (extras ? ' <b>' + extras + '</b> conciliação(ões) pelas regras opcionais (± com margem e ≈ só pelo valor): o que elas deixaram de diferença continua em aberto e entra nesta conta.' : '') + '</div></div>');
     } else {
       partes.push('<div class="aviso vermelho"><span class="icone-aviso">⚠️</span><div><b>A conferência falhou — não use o arquivo de ajustes antes de revisar.</b><ul class="pequeno">' +
         r.invariantes.falhas.slice(0, 10).map((f) => '<li>' + T.esc(f) + '</li>').join('') + '</ul></div></div>');
@@ -439,23 +441,26 @@
   function abaBatidas(alvo, lado) {
     desenharFiltros([
       { tipo: 'busca', nome: 'busca', texto: 'Buscar fornecedor, histórico ou número da batida' },
+      { tipo: 'select', nome: 'regra', texto: 'Conciliado por qual regra', opcoes: opcoesDeRegra() },
       { tipo: 'select', nome: 'como', texto: 'Como bateu', opcoes: [['', 'Todos os jeitos'], ['1x1', '1x1'], ['1xN', '1xN'], ['Nx1', 'Nx1'], ['zerou', 'zerou'], ['mesmo-dia', 'mesmo dia']] },
     ]);
     const r = E.r;
     const busca = filtro('busca');
     const como = filtro('como');
+    const regra = filtro('regra');
     const desfeitas = E.decisoes.desfeitas.filter((d) => d.marcas.some((m) => { const l = E.porDigital.get(m); return l && l.lado === lado; }));
-    const lista = r.batidas.filter((b) => b.lado === lado && (!como || b.como === como) && (!busca || b.id.indexOf(busca.toUpperCase()) >= 0 ||
+    const lista = r.batidas.filter((b) => b.lado === lado && (!como || b.como === como) && (!regra || b.regra === regra) && (!busca || b.id.indexOf(busca.toUpperCase()) >= 0 ||
       combinaBusca(busca, b.linhas.map((i) => r.linhas[i].dono.nome + ' ' + r.linhas[i].historico).join(' '))));
     const topo = desfeitas.length ? '<div class="aviso ambar" style="margin-bottom:10px"><span class="icone-aviso">✕</span><div><b>' + desfeitas.length + ' batida(s) marcada(s) como não confere</b> — as linhas estão em aberto e não são casadas com outras.<ul class="pequeno" style="margin:6px 0 0">' +
       desfeitas.map((d) => '<li>' + T.esc(d.id) + ' · ' + d.marcas.length + ' linhas · por ' + T.esc(d.quem) + ' em ' + U.dataHoraLocal(d.quando) +
         ' <button type="button" class="botao pequeno" data-voltar-bater="' + T.esc(d.id) + '">Voltar a bater</button></li>').join('') + '</ul></div></div>' : '';
-    alvo.innerHTML = topo + '<div id="tabela-aba"></div>';
+    alvo.innerHTML = barraDeRegras(lado) + topo + '<div id="tabela-aba"></div>';
     const primeiraDa = (b) => b.linhas.map((i) => r.linhas[i]).sort((x, y) => x.dia - y.dia || x.i - y.i)[0];
     T.tabelaPaginada(alvo.querySelector('#tabela-aba'), {
-      ordem: { id: 'p1-batidas', colunas: [null, TXT((b) => b.como), TXT((b) => nomeDoDono(primeiraDa(b))), NUM((b) => b.linhas.length), VALOR((b) => b.valor),
+      ordem: { id: 'p1-batidas', colunas: [null, TXT((b) => b.regra), TXT((b) => b.como), TXT((b) => nomeDoDono(primeiraDa(b))), NUM((b) => b.linhas.length), VALOR((b) => b.valor),
         DATA((b) => primeiraDa(b).data), TXT((b) => b.id), null] },
-      cabecalho: '<th style="width:28px"></th><th>Como</th><th>Fornecedor</th><th class="num">Linhas</th><th class="num">Valor</th><th>Datas</th><th>Batida</th><th></th>',
+      cabecalho: '<th style="width:28px"></th><th>Conciliado por</th><th>Como</th><th>' + T.esc(TX().pessoa.charAt(0).toUpperCase() + TX().pessoa.slice(1)) +
+        '</th><th class="num">Linhas</th><th class="num">Valor</th><th>Datas</th><th>Batida</th><th></th>',
       linhas: lista,
       porPagina: 200,
       vazio: 'Nenhuma batida com estes filtros.',
@@ -464,17 +469,80 @@
         const aberto = E.abertos.has(b.id);
         const nome = ls[0].dono.chave === SEM ? '<span class="falta">sem fornecedor</span>' : T.esc(ls[0].dono.nome);
         let html = '<tr class="' + (aberto ? 'destaque' : '') + '" id="b-' + b.id + '"><td><button type="button" class="lapis" data-abrir="' + b.id + '" title="Ver as linhas">' + (aberto ? '▾' : '▸') + '</button></td>' +
+          '<td>' + seloRegra(b.regra) + (b.diferenca ? ' <span class="falta pequeno">dif. ' + T.moeda(Math.abs(b.diferenca)) + '</span>' : '') + '</td>' +
           '<td>' + T.seloComo(b.como) + '</td><td class="nome">' + nome + '</td><td class="num">' + ls.length + '</td>' + T.tdValor(b.valor) +
           '<td class="num">' + T.esc(ls[0].data + (ls.length > 1 && ls[ls.length - 1].data !== ls[0].data ? ' a ' + ls[ls.length - 1].data : '')) + '</td>' +
           '<td class="pequeno suave">' + T.esc(b.id) + '</td>' +
           '<td class="num"><button type="button" class="botao pequeno perigo" data-nao-confere="' + b.id + '" title="As linhas voltam a ficar em aberto e não são casadas com outras">✕ Não confere</button></td></tr>';
         if (aberto) {
-          html += ls.map((l) => '<tr class="sub"><td></td><td class="num">' + l.data + '</td><td class="historico" colspan="2">' + T.esc(l.historico) + '</td>' +
+          html += ls.map((l) => '<tr class="sub"><td></td><td class="num">' + l.data + '</td><td class="historico" colspan="3">' + T.esc(l.historico) + '</td>' +
             T.tdValor(l.debito) + T.tdValor(l.credito) + '<td colspan="2">' + (l.reclass ? obsDaLinha(Object.assign({}, l, { batida: null })) : '<span class="suave pequeno">' + (l.valor > 0 ? 'forma o saldo' : 'baixa') + '</span>') + '</td></tr>').join('');
         }
         return html;
       },
     });
+  }
+
+  // ------------------------------------------------------------------
+  // As REGRAS da conciliação dentro do razão (Dony, 22/09/2026: "eu quero aqueles três botõezinhos que tem no
+  // fornecedor versus aging, e um quarto: conciliar por fornecedor e valor"). Cada botão LIGA ou DESLIGA a
+  // regra e o passo recalcula na hora: ⚡ documento e fornecedor e 👤 fornecedor e valor vêm ligados (é o que o
+  // ① sempre fez); ± com margem e ≈ só pelo valor só entram quando ele aperta, como no ③.
+  // ------------------------------------------------------------------
+  const CLASSE_REGRA = { documento: 'documento', 'fornecedor-valor': 'fornecedor', margem: 'margem', valor: 'valor', 'mesmo-dia': 'opcional' };
+  function regrasLigadas() { return M.regrasDe(E.decisoes.regras); }
+  function seloRegra(id) {
+    const g = M.REGRA_DE[id] || { icone: '', nome: id, texto: '' };
+    return '<span class="selo ' + (CLASSE_REGRA[id] || 'opcional') + '" title="' + T.esc(g.texto) + '">' + g.icone + ' ' + T.esc(g.curto || g.nome) + '</span>';
+  }
+  function opcoesDeRegra() {
+    return [['', 'Conciliado por: tudo']].concat(M.REGRAS.map((g) => [g.id, g.icone + ' ' + g.nome])).concat([['mesmo-dia', '📅 Mesmo dia, sem ' + TX().pessoa]]);
+  }
+  function barraDeRegras(lado) {
+    const r = E.r;
+    const regras = regrasLigadas();
+    const qtd = (id) => r.batidas.filter((b) => b.lado === lado && b.regra === id).length;
+    const botao = (g) => {
+      const ligada = !!regras[g.id];
+      return '<button type="button" class="acao ' + CLASSE_REGRA[g.id] + (ligada ? '' : ' apagada') + '" data-regra="' + g.id + '" ' +
+        'title="' + T.esc(g.texto + (ligada ? ' · Clique para DESLIGAR esta regra.' : ' · Clique para LIGAR esta regra.')) + '">' +
+        '<span class="acao-icone" aria-hidden="true">' + g.icone + '</span>' +
+        '<span class="acao-texto"><b>' + T.esc(g.nome) + '</b><small>' + T.esc(g.sub || g.curto) + '</small></span>' +
+        '<span class="estado">' + (ligada ? qtd(g.id).toLocaleString('pt-BR') : 'ligar') + '</span></button>';
+    };
+    const t = r.totais[lado];
+    const md = qtd('mesmo-dia');
+    const avisos = [
+      t.comMargem.qtd ? '<span class="falta">± <b>' + t.comMargem.qtd + '</b> com margem: a diferença de ' + T.moeda(Math.abs(t.comMargem.valor)) + ' continua em aberto (confira uma a uma).</span>' : '',
+      t.soPeloValor.qtd ? '<span class="falta">≈ <b>' + t.soPeloValor.qtd + '</b> só pelo valor: são de ' + TX().pessoas + ' diferentes — confira antes de usar o arquivo de ajustes.</span>' : '',
+    ].filter(Boolean).join(' ');
+    return '<div class="acoes-ab" style="margin:0 0 12px"><div class="acoes-conciliar quatro">' + M.REGRAS.map(botao).join('') + '</div>' +
+      '<p class="pequeno suave" style="margin:0">Cada botão liga ou desliga a regra e o passo recalcula na hora. ' +
+      (md ? '📅 <b>' + md + '</b> bateram no mesmo dia, sem ' + TX().pessoa + '. ' : '') + avisos + '</p></div>';
+  }
+
+  // Liga/desliga uma regra: recalcula, grava a decisão e já mostra o que ela fez.
+  async function alternarRegra(id) {
+    const g = M.REGRA_DE[id];
+    if (!g) return;
+    const regras = regrasLigadas();
+    const ligar = !regras[id];
+    const antes = { batidas: E.r.batidas.length, bateram: E.r.totais.F.bateram + E.r.totais.A.bateram };
+    const novas = Object.assign({}, regras);
+    novas[id] = ligar;
+    E.decisoes.regras = novas;
+    if (ligar) E.filtros[E.aba + '.regra'] = id;
+    else if (filtro('regra') === id) E.filtros[E.aba + '.regra'] = '';
+    recalcularEDesenhar();
+    const r = E.r;
+    const dif = (r.totais.F.bateram + r.totais.A.bateram) - antes.bateram;
+    const daRegra = r.batidas.filter((b) => b.regra === id).length;
+    const texto = (ligar ? 'Ligou' : 'Desligou') + ' a regra ' + g.icone + ' ' + g.nome + ' (' + g.curto + '): ' +
+      (ligar ? daRegra + ' conciliação(ões) por esta regra, ' + (dif >= 0 ? '+' : '') + dif + ' linha(s) a mais conciliadas'
+        : Math.abs(dif) + ' linha(s) voltaram a ficar em aberto');
+    historico(texto);
+    await gravar('passo1-regra-' + (ligar ? 'ligada' : 'desligada'), E.registro.id, texto);
+    T.avisoRapido(texto + '. Clique de novo no botão para voltar atrás.', r.invariantes.ok ? 'ok' : 'erro', 9000);
   }
 
   // ---------- 2 · Reclassificações ----------
@@ -746,6 +814,8 @@
         gravar('reclassificacao-mao-desfeita', id);
         return;
       }
+      const regra = alvo.closest('[data-regra]');
+      if (regra) { await alternarRegra(regra.getAttribute('data-regra')); return; }
       const acao = alvo.closest('[data-acao]');
       if (acao) {
         const a = acao.getAttribute('data-acao');

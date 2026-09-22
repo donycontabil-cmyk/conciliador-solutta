@@ -22,6 +22,29 @@
   // Janela de 90 dias: MEDIDA. Janela maior casava MENOS, porque o teto de 24
   // candidatas corta as certas (Parte 7.2 e armadilha 17).
   const JANELA_DIAS = 90;
+  // As REGRAS de conciliação dentro do razão (Dony, 22/09/2026: "eu quero aqueles três botõezinhos que tem no
+  // fornecedor versus aging, e um quarto: conciliar por fornecedor e valor — se o fornecedor tem o débito e o
+  // crédito e bate o valor, concilia"). As duas primeiras vêm ligadas (é o que o ① sempre fez); as duas últimas
+  // só rodam quando ele aperta o botão, como no ③.
+  const MARGEM = 100; // R$ 1,00 — a mesma margem do ③
+  const REGRAS = [
+    { id: 'documento', icone: '⚡', nome: 'Documento e fornecedor', curto: 'documento e fornecedor', sub: 'o mesmo documento', padrao: true,
+      texto: 'Mesmo fornecedor e MESMO documento (a nota), valor igual: o par certo, sem chute.' },
+    { id: 'fornecedor-valor', icone: '👤', nome: 'Fornecedor e valor', curto: 'fornecedor e valor', sub: 'sem olhar o documento', padrao: true,
+      texto: 'Mesmo fornecedor, sem olhar o documento: o débito mata o crédito de mesmo valor (1x1), uma baixa mata várias notas (1xN), várias baixas matam uma nota (Nx1) e o que sobra do fornecedor zerando entre si.' },
+    { id: 'margem', icone: '±', nome: 'Com margem', curto: 'com margem', sub: 'doc + fornecedor · até ' + Util.formatarCentavos(MARGEM), padrao: false,
+      texto: 'Mesmo fornecedor e mesmo documento aceitando diferença de até R$ 1,00 (centavos de arredondamento). A diferença continua em aberto e aparece na conferência.' },
+    { id: 'valor', icone: '≈', nome: 'Só pelo valor', curto: 'só pelo valor', sub: 'sem doc e sem fornecedor', padrao: false,
+      texto: 'O que sobrou, casado só por VALOR igual dentro da mesma conta, sem olhar documento e fornecedor. Só valor quebrado: inteiro terminado em zero (10, 100, 200…) fica de fora, para não casar coisa à toa.' },
+  ];
+  const REGRAS_PADRAO = { documento: true, 'fornecedor-valor': true, margem: false, valor: false };
+  const REGRA_DE = {};
+  for (const r of REGRAS) REGRA_DE[r.id] = r;
+  REGRA_DE['mesmo-dia'] = { id: 'mesmo-dia', icone: '📅', nome: 'Mesmo dia, sem fornecedor', curto: 'mesmo dia', sub: 'sem fornecedor, mesma conta e mesmo dia', padrao: true,
+    texto: 'Linha SEM fornecedor com outra sem fornecedor, na mesma conta, no mesmo dia e no mesmo valor (sem nome, data diferente seria chute).' };
+  function regrasDe(regras) { return Object.assign({}, REGRAS_PADRAO, regras || {}); }
+  // A mesma régua do ③: valor inteiro terminado em zero (10, 20, 100, 200, 1.000…) não concilia só pelo valor.
+  function valorRedondo(centavos) { return Math.abs(Number(centavos) || 0) % 1000 === 0; }
   const MAX_ITENS = 6;
   const MAX_CANDIDATAS = 24;
   // Busca de combinações sem teto congela a tela (armadilha 18). Não achar dentro do teto = não bateu.
@@ -144,18 +167,32 @@
     return 'BR-' + Util.hash8(marcas.slice().sort().join('#'));
   }
 
-  function etapa1(linhas, bloqueadas) {
+  function etapa1(linhas, bloqueadas, opcoes) {
+    const regras = regrasDe(opcoes && opcoes.regras);
     const batidas = [];
     const batidaDe = new Map();
-    const registrar = (como, lado, chave, grupo) => {
+    // O que as regras opcionais tiraram do fornecedor além do que era dele: a margem deixa os centavos da
+    // diferença e o "só pelo valor" tira de um fornecedor o que devolve a outro. Fica na conferência.
+    const residuos = new Map();
+    const registrar = (como, lado, chave, grupo, regra) => {
       const soma = grupo.reduce((s, l) => s + l.valor, 0);
-      if (soma !== 0) throw new Error('Batida que não soma zero (' + como + '): ' + soma);
+      if (soma !== 0 && regra !== 'margem') throw new Error('Batida que não soma zero (' + como + '): ' + soma);
       const marcas = grupo.map((l) => l.digital);
-      const b = { id: idDaBatida(marcas), como, lado, chave, marcas, valor: grupo.filter((l) => l.valor > 0).reduce((s, l) => s + l.valor, 0), linhas: grupo.map((l) => l.i) };
+      const b = { id: idDaBatida(marcas), como, regra: regra || 'fornecedor-valor', lado, chave, marcas,
+        valor: grupo.filter((l) => l.valor > 0).reduce((s, l) => s + l.valor, 0), diferenca: soma, linhas: grupo.map((l) => l.i) };
       batidas.push(b);
       for (const l of grupo) batidaDe.set(l.digital, b);
+      if (b.regra === 'margem' || b.regra === 'valor') {
+        for (const l of grupo) {
+          const k = l.dono.chave + '|' + l.lado;
+          residuos.set(k, (residuos.get(k) || 0) + l.valor);
+        }
+      }
       return b;
     };
+    const porCusto = (x, y) => x.custo - y.custo || x.o1 - y.o1 || x.o2 - y.o2;
+    const custoDoPar = (f, b) => ({ f, b, custo: Math.abs(f.dia - b.dia) + (b.dia < f.dia ? JANELA_DIAS : 0),
+      o1: Math.min(f.i, b.i), o2: Math.max(f.i, b.i) });
 
     // Grupos por fornecedor e por lado.
     const grupos = new Map();
@@ -178,62 +215,101 @@
       const chave = grupo[0].dono.chave;
       const aberta = (l) => !batidaDe.has(l.digital);
 
-      // 1x1 — mesmo valor, sinais opostos. Todos os pares possíveis, ordenados por
-      // custo = |dias| + 90 se quem baixa vem ANTES de quem forma; empate pela ordem das linhas.
-      const baixasPorValor = new Map();
-      for (const l of grupo) if (l.valor < 0) {
-        const v = -l.valor;
-        if (!baixasPorValor.has(v)) baixasPorValor.set(v, []);
-        baixasPorValor.get(v).push(l);
+      // ⚡ DOCUMENTO E FORNECEDOR — o par certo primeiro: mesma nota e mesmo valor, sinais opostos.
+      if (regras.documento) {
+        const porDocValor = new Map();
+        for (const l of grupo) if (l.valor < 0 && l.nota) {
+          const kk = l.nota + '|' + (-l.valor);
+          if (!porDocValor.has(kk)) porDocValor.set(kk, []);
+          porDocValor.get(kk).push(l);
+        }
+        const pares = [];
+        for (const f of grupo) {
+          if (f.valor <= 0 || !f.nota) continue;
+          for (const b of porDocValor.get(f.nota + '|' + f.valor) || []) pares.push(custoDoPar(f, b));
+        }
+        pares.sort(porCusto);
+        for (const p of pares) if (aberta(p.f) && aberta(p.b)) registrar('1x1', lado, chave, [p.f, p.b], 'documento');
       }
-      const pares = [];
-      for (const f of grupo) {
-        if (f.valor <= 0) continue;
-        const cands = baixasPorValor.get(f.valor);
-        if (!cands) continue;
-        for (const b of cands) {
-          pares.push({ f, b, custo: Math.abs(f.dia - b.dia) + (b.dia < f.dia ? JANELA_DIAS : 0),
-            o1: Math.min(f.i, b.i), o2: Math.max(f.i, b.i) });
+
+      // 👤 FORNECEDOR E VALOR — sem olhar o documento.
+      if (regras['fornecedor-valor']) {
+        // 1x1 — mesmo valor, sinais opostos. Todos os pares possíveis, ordenados por
+        // custo = |dias| + 90 se quem baixa vem ANTES de quem forma; empate pela ordem das linhas.
+        const baixasPorValor = new Map();
+        for (const l of grupo) if (l.valor < 0) {
+          const v = -l.valor;
+          if (!baixasPorValor.has(v)) baixasPorValor.set(v, []);
+          baixasPorValor.get(v).push(l);
+        }
+        const pares = [];
+        for (const f of grupo) {
+          if (f.valor <= 0) continue;
+          const cands = baixasPorValor.get(f.valor);
+          if (!cands) continue;
+          for (const b of cands) pares.push(custoDoPar(f, b));
+        }
+        pares.sort(porCusto);
+        for (const p of pares) {
+          if (aberta(p.f) && aberta(p.b)) registrar('1x1', lado, chave, [p.f, p.b], 'fornecedor-valor');
+        }
+
+        // 1xN — uma baixa = soma de várias que formam, até 90 dias antes dela.
+        const porData = grupo.slice().sort((x, y) => x.dia - y.dia || x.i - y.i);
+        for (const b of porData) {
+          if (b.valor >= 0 || !aberta(b)) continue;
+          const alvo = -b.valor;
+          const cands = porData.filter((f) => f.valor > 0 && aberta(f) && f.valor < alvo && f.dia <= b.dia && f.dia >= b.dia - JANELA_DIAS)
+            .sort((x, y) => y.dia - x.dia || x.i - y.i).slice(0, MAX_CANDIDATAS);
+          if (cands.length < 2) continue;
+          const idx = buscarSoma(cands.map((f) => f.valor), alvo);
+          if (idx) registrar('1xN', lado, chave, [b].concat(idx.map((j) => cands[j])), 'fornecedor-valor');
+        }
+
+        // Nx1 — uma que forma = soma de várias baixas, até 90 dias depois.
+        for (const f of porData) {
+          if (f.valor <= 0 || !aberta(f)) continue;
+          const alvo = f.valor;
+          const cands = porData.filter((b) => b.valor < 0 && aberta(b) && -b.valor < alvo && b.dia >= f.dia && b.dia <= f.dia + JANELA_DIAS)
+            .sort((x, y) => x.dia - y.dia || x.i - y.i).slice(0, MAX_CANDIDATAS);
+          if (cands.length < 2) continue;
+          const idx = buscarSoma(cands.map((b) => -b.valor), alvo);
+          if (idx) registrar('Nx1', lado, chave, [f].concat(idx.map((j) => cands[j])), 'fornecedor-valor');
+        }
+
+        // zerou — o que sobrou do fornecedor naquele lado soma zero.
+        const resto = grupo.filter(aberta);
+        if (resto.length >= 2 && resto.some((l) => l.valor > 0) && resto.some((l) => l.valor < 0) &&
+          resto.reduce((s, l) => s + l.valor, 0) === 0) {
+          registrar('zerou', lado, chave, resto, 'fornecedor-valor');
         }
       }
-      pares.sort((x, y) => x.custo - y.custo || x.o1 - y.o1 || x.o2 - y.o2);
-      for (const p of pares) {
-        if (aberta(p.f) && aberta(p.b)) registrar('1x1', lado, chave, [p.f, p.b]);
-      }
 
-      // 1xN — uma baixa = soma de várias que formam, até 90 dias antes dela.
-      const porData = grupo.slice().sort((x, y) => x.dia - y.dia || x.i - y.i);
-      for (const b of porData) {
-        if (b.valor >= 0 || !aberta(b)) continue;
-        const alvo = -b.valor;
-        const cands = porData.filter((f) => f.valor > 0 && aberta(f) && f.valor < alvo && f.dia <= b.dia && f.dia >= b.dia - JANELA_DIAS)
-          .sort((x, y) => y.dia - x.dia || x.i - y.i).slice(0, MAX_CANDIDATAS);
-        if (cands.length < 2) continue;
-        const idx = buscarSoma(cands.map((f) => f.valor), alvo);
-        if (idx) registrar('1xN', lado, chave, [b].concat(idx.map((j) => cands[j])));
-      }
-
-      // Nx1 — uma que forma = soma de várias baixas, até 90 dias depois.
-      for (const f of porData) {
-        if (f.valor <= 0 || !aberta(f)) continue;
-        const alvo = f.valor;
-        const cands = porData.filter((b) => b.valor < 0 && aberta(b) && -b.valor < alvo && b.dia >= f.dia && b.dia <= f.dia + JANELA_DIAS)
-          .sort((x, y) => x.dia - y.dia || x.i - y.i).slice(0, MAX_CANDIDATAS);
-        if (cands.length < 2) continue;
-        const idx = buscarSoma(cands.map((b) => -b.valor), alvo);
-        if (idx) registrar('Nx1', lado, chave, [f].concat(idx.map((j) => cands[j])));
-      }
-
-      // zerou — o que sobrou do fornecedor naquele lado soma zero.
-      const resto = grupo.filter(aberta);
-      if (resto.length >= 2 && resto.some((l) => l.valor > 0) && resto.some((l) => l.valor < 0) &&
-        resto.reduce((s, l) => s + l.valor, 0) === 0) {
-        registrar('zerou', lado, chave, resto);
+      // ± COM MARGEM (só quando ele aperta o botão) — mesmo documento e mesmo fornecedor, diferença de até R$ 1,00.
+      if (regras.margem) {
+        const porDoc = new Map();
+        for (const l of grupo) if (l.valor < 0 && l.nota) {
+          if (!porDoc.has(l.nota)) porDoc.set(l.nota, []);
+          porDoc.get(l.nota).push(l);
+        }
+        const porData = grupo.slice().sort((x, y) => x.dia - y.dia || x.i - y.i);
+        for (const f of porData) {
+          if (f.valor <= 0 || !f.nota || !aberta(f)) continue;
+          let melhor = null;
+          for (const b of porDoc.get(f.nota) || []) {
+            if (!aberta(b)) continue;
+            const dif = f.valor + b.valor;
+            if (Math.abs(dif) > MARGEM) continue;
+            const custo = Math.abs(dif) * 1000 + Math.abs(f.dia - b.dia);
+            if (!melhor || custo < melhor.custo) melhor = { b, custo };
+          }
+          if (melhor) registrar('1x1', lado, chave, [f, melhor.b], 'margem');
+        }
       }
       void k;
     }
 
-    // mesmo-dia — linha SEM fornecedor só bate com outra sem fornecedor, na mesma conta,
+    // 📅 mesmo-dia — linha SEM fornecedor só bate com outra sem fornecedor, na mesma conta,
     // no mesmo dia e no mesmo valor (sem nome, data diferente seria chute).
     for (const grupo of semDono.values()) {
       const usados = new Set();
@@ -243,10 +319,39 @@
         if (!b) continue;
         usados.add(a.digital);
         usados.add(b.digital);
-        registrar('mesmo-dia', a.lado, SEM, [a, b]);
+        registrar('mesmo-dia', a.lado, SEM, [a, b], 'mesmo-dia');
       }
     }
-    return { batidas, batidaDe };
+
+    // ≈ SÓ PELO VALOR (só quando ele aperta o botão) — o que sobrou, casado por valor igual dentro da mesma
+    // conta, sem olhar documento e fornecedor; só valor quebrado. Fornecedores diferentes: o que sai de um
+    // volta para o outro, e isso aparece na conferência.
+    if (regras.valor) {
+      for (const lado of ['F', 'A']) {
+        const livres = linhas.filter((l) => l.lado === lado && l.valor !== 0 && !bloqueadas.has(l.digital) &&
+          !batidaDe.has(l.digital) && !valorRedondo(l.valor));
+        const porValor = new Map();
+        for (const l of livres) if (l.valor < 0) {
+          const v = -l.valor;
+          if (!porValor.has(v)) porValor.set(v, []);
+          porValor.get(v).push(l);
+        }
+        const positivos = livres.filter((l) => l.valor > 0).sort((x, y) => x.dia - y.dia || x.i - y.i);
+        for (const f of positivos) {
+          if (batidaDe.has(f.digital)) continue;
+          const cands = porValor.get(f.valor);
+          if (!cands) continue;
+          let melhor = -1;
+          for (let j = 0; j < cands.length; j++) {
+            const b = cands[j];
+            if (batidaDe.has(b.digital)) continue;
+            if (melhor < 0 || Math.abs(b.dia - f.dia) < Math.abs(cands[melhor].dia - f.dia)) melhor = j;
+          }
+          if (melhor >= 0) registrar('1x1', lado, f.dono.chave, [f, cands[melhor]], 'valor');
+        }
+      }
+    }
+    return { batidas, batidaDe, residuos, regras };
   }
 
   // ------------------------------------------------------------------
@@ -332,6 +437,7 @@
       comp: entrada.competencia, donos, desfeitas: desfeitas.map((d) => d.id + ':' + (d.marcas || []).length),
       manuais: (decisoes.manuais || []).map((m) => (m.marcas || []).join('#')).sort(),
       titulos: (entrada.titulos || []).length,
+      regras: regrasDe(decisoes.regras),
     });
 
     let base;
@@ -363,7 +469,7 @@
           desfeitaDe.set(m, d);
         }
       }
-      const e1 = etapa1(linhas, bloqueadas);
+      const e1 = etapa1(linhas, bloqueadas, { regras: decisoes.regras });
       base = { linhas, contas: montadas.contas, foraDaCompetencia: montadas.foraDaCompetencia, nomes, porDigital,
         manuais, desfeitaDe, desfeitasQueNaoEncaixam, e1, ms: Date.now() - t0 };
       if (cache) { cache.chave = chaveCache; cache.base = base; }
@@ -603,6 +709,12 @@
       for (const s of sugestoes) if (s.marcada) efeito += (s.sentido === 'direta' ? -1 : 1) * s.valor;
       for (const m of manuais.validas) efeito += (m.sentido === 'direta' ? -1 : 1) * m.valor;
       const somaSobras = sobras.reduce((t, l) => t + l.valor, 0);
+      // O que as conciliações opcionais deixaram (os centavos da margem) continua em aberto: sem isso o
+      // "em aberto" não fecharia mais com o saldo da conta.
+      let residuo = 0;
+      e1.residuos.forEach((v, k) => { if (k.endsWith('|' + lado)) residuo += v; });
+      const comMargem = e1.batidas.filter((b) => b.lado === lado && b.regra === 'margem');
+      const soPeloValor = e1.batidas.filter((b) => b.lado === lado && b.regra === 'valor');
       const naoBateu = sobras.filter((l) => l.situacao !== 'auto' && l.situacao !== 'manual');
       totais[lado] = {
         titulo: textos[lado],
@@ -611,11 +723,14 @@
         bateram: ls.length - sobras.length,
         sobraram: sobras.length,
         sobras: somaSobras,
+        residuo,
+        comMargem: { qtd: comMargem.length, valor: comMargem.reduce((t, b) => t + b.diferenca, 0) },
+        soPeloValor: { qtd: soPeloValor.length, valor: soPeloValor.reduce((t, b) => t + b.valor, 0) },
         saldoAnterior,
         movimento,
         saldoFinal: saldoAnterior + movimento,
         efeitoAjustes: efeito,
-        emAberto: saldoAnterior + somaSobras + efeito,
+        emAberto: saldoAnterior + somaSobras + residuo + efeito,
         saldoDepoisDosAjustes: saldoAnterior + movimento + efeito,
         naoBateu: { qtd: naoBateu.length, valor: naoBateu.reduce((t, l) => t + l.valor, 0) },
         semFornecedor: { qtd: sobras.filter((l) => l.dono.chave === SEM).length, valor: sobras.filter((l) => l.dono.chave === SEM).reduce((t, l) => t + l.valor, 0) },
@@ -625,7 +740,8 @@
         if (!k.endsWith('|' + lado)) continue;
         const chave = k.slice(0, k.lastIndexOf('|'));
         const s = sobras.filter((l) => l.dono.chave === chave).reduce((t, l) => t + l.valor, 0);
-        if (s !== r.tinha) falhas.push('Sobras de ' + chave + ' (' + lado + ') não fecham com o saldo dele: ' + Util.formatarCentavos(s) + ' × ' + Util.formatarCentavos(r.tinha));
+        const resto = e1.residuos.get(chave + '|' + lado) || 0;
+        if (s + resto !== r.tinha) falhas.push('Sobras de ' + chave + ' (' + lado + ') não fecham com o saldo dele: ' + Util.formatarCentavos(s + resto) + ' × ' + Util.formatarCentavos(r.tinha));
       }
       // Soma dos fornecedores + saldo anterior = saldo da conta.
       const somaForn = Array.from(porChaveLado.entries()).filter(([k]) => k.endsWith('|' + lado)).reduce((t, [, r]) => t + r.tinha, 0);
@@ -659,6 +775,8 @@
       manuais: manuais.validas.length,
       diretas: { qtd: diretas.length + mDiretas.length, valor: diretas.reduce((t, s) => t + s.valor, 0) + mDiretas.reduce((t, m) => t + m.valor, 0) },
       inversas: { qtd: inversas.length + mInversas.length, valor: inversas.reduce((t, s) => t + s.valor, 0) + mInversas.reduce((t, m) => t + m.valor, 0) },
+      regras: regrasDe(decisoes.regras),
+      porRegra: REGRAS.concat([REGRA_DE['mesmo-dia']]).map((g) => ({ id: g.id, qtd: e1.batidas.filter((b) => b.regra === g.id).length })),
       suspeitasDesmarcadas: sugestoes.filter((s) => s.desmarcadaPorSuspeita).length,
       naoBateu: { F: totais.F.naoBateu, A: totais.A.naoBateu },
       semFornecedor: { qtd: totais.F.semFornecedor.qtd + totais.A.semFornecedor.qtd, valor: totais.F.semFornecedor.valor + totais.A.semFornecedor.valor },
@@ -741,6 +859,21 @@
       if (l.situacao === 'bateu' || movidas.has(l.i)) continue;
       doPool(l.lado, l.dono.chave).push(daLinha(l));
     }
+    // O resto das conciliações opcionais (± com margem e ≈ só pelo valor): o que saiu do fornecedor além do
+    // que era dele continua compondo o saldo dele, com o número da conciliação no histórico.
+    for (const b of r.batidas || []) {
+      if (b.regra !== 'margem' && b.regra !== 'valor') continue;
+      const porChave = new Map();
+      for (const i of b.linhas) {
+        const l = r.linhas[i];
+        porChave.set(l.dono.chave, (porChave.get(l.dono.chave) || 0) + l.valor);
+      }
+      porChave.forEach((v, chave) => {
+        if (v === 0) return;
+        doPool(b.lado, chave).push(virtual(b.lado, chave, v, 'diferença da conciliação ' + b.id + ' (' + ((REGRA_DE[b.regra] || {}).curto || b.regra) + ')', 'conciliacao'));
+      });
+    }
+
     // Diretas: abatem o mesmo valor nas duas contas, no fim da competência (cada conta no dono das linhas dela).
     const dono = (idxs, reserva) => (idxs && idxs.length ? r.linhas[idxs[0]].dono.chave : reserva);
     for (const s of r.sugestoes) {
@@ -858,7 +991,7 @@
   }
 
   return {
-    JANELA_DIAS, MAX_ITENS, MAX_CANDIDATAS, MAX_PASSOS, TEXTOS,
+    JANELA_DIAS, MAX_ITENS, MAX_CANDIDATAS, MAX_PASSOS, TEXTOS, MARGEM, REGRAS, REGRAS_PADRAO, REGRA_DE, regrasDe, valorRedondo,
     valorNoLado, saldoNoLado, montarLinhas, buscarSoma, etapa1, aplicarManuais, idDaBatida, idDaManual, calcularPasso1, composicao, somenteRazao,
   };
 });
