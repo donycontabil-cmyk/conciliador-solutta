@@ -285,6 +285,7 @@
       painelDoPasso1(E.codigo, E.comp, E.arqs, false, null, E.fam.id) +
       '<div id="avisos"></div>' +
       '<div class="grade-4" id="cartoes" style="margin-top:14px"></div>' +
+      '<div id="regras"></div>' +
       '<div class="abas" id="abas" role="tablist"></div>' +
       '<div class="filtros" id="filtros"></div>' +
       '<div id="aba"></div>' +
@@ -293,6 +294,7 @@
     raiz.TelaSubir.ligarBotao(E.el.querySelector('[data-abrir-arquivos]'));
     desenharAvisos();
     desenharCartoes();
+    desenharRegras();
     desenharAbas();
     desenharAba();
     ligarEventos();
@@ -454,7 +456,7 @@
     const topo = desfeitas.length ? '<div class="aviso ambar" style="margin-bottom:10px"><span class="icone-aviso">✕</span><div><b>' + desfeitas.length + ' batida(s) marcada(s) como não confere</b> — as linhas estão em aberto e não são casadas com outras.<ul class="pequeno" style="margin:6px 0 0">' +
       desfeitas.map((d) => '<li>' + T.esc(d.id) + ' · ' + d.marcas.length + ' linhas · por ' + T.esc(d.quem) + ' em ' + U.dataHoraLocal(d.quando) +
         ' <button type="button" class="botao pequeno" data-voltar-bater="' + T.esc(d.id) + '">Voltar a bater</button></li>').join('') + '</ul></div></div>' : '';
-    alvo.innerHTML = barraDeRegras(lado) + topo + '<div id="tabela-aba"></div>';
+    alvo.innerHTML = topo + '<div id="tabela-aba"></div>';
     const primeiraDa = (b) => b.linhas.map((i) => r.linhas[i]).sort((x, y) => x.dia - y.dia || x.i - y.i)[0];
     T.tabelaPaginada(alvo.querySelector('#tabela-aba'), {
       ordem: { id: 'p1-batidas', colunas: [null, TXT((b) => b.regra), TXT((b) => b.como), TXT((b) => nomeDoDono(primeiraDa(b))), NUM((b) => b.linhas.length), VALOR((b) => b.valor),
@@ -498,10 +500,14 @@
   function opcoesDeRegra() {
     return [['', 'Conciliado por: tudo']].concat(M.REGRAS.map((g) => [g.id, g.icone + ' ' + g.nome])).concat([['mesmo-dia', '📅 Mesmo dia, sem ' + TX().pessoa]]);
   }
-  function barraDeRegras(lado) {
+  function desenharRegras() {
+    const alvo = E.el.querySelector('#regras');
+    if (alvo) alvo.innerHTML = barraDeRegras();
+  }
+  function barraDeRegras() {
     const r = E.r;
     const regras = regrasLigadas();
-    const qtd = (id) => r.batidas.filter((b) => b.lado === lado && b.regra === id).length;
+    const qtd = (id) => r.batidas.filter((b) => b.regra === id).length;
     const botao = (g) => {
       const ligada = !!regras[g.id];
       return '<button type="button" class="acao ' + CLASSE_REGRA[g.id] + (ligada ? '' : ' apagada') + '" data-regra="' + g.id + '" ' +
@@ -510,14 +516,16 @@
         '<span class="acao-texto"><b>' + T.esc(g.nome) + '</b><small>' + T.esc(g.sub || g.curto) + '</small></span>' +
         '<span class="estado">' + (ligada ? qtd(g.id).toLocaleString('pt-BR') : 'ligar') + '</span></button>';
     };
-    const t = r.totais[lado];
+    const t = { comMargem: { qtd: r.totais.F.comMargem.qtd + r.totais.A.comMargem.qtd, valor: r.totais.F.comMargem.valor + r.totais.A.comMargem.valor },
+      soPeloValor: { qtd: r.totais.F.soPeloValor.qtd + r.totais.A.soPeloValor.qtd } };
     const md = qtd('mesmo-dia');
     const avisos = [
       t.comMargem.qtd ? '<span class="falta">± <b>' + t.comMargem.qtd + '</b> com margem: a diferença de ' + T.moeda(Math.abs(t.comMargem.valor)) + ' continua em aberto (confira uma a uma).</span>' : '',
       t.soPeloValor.qtd ? '<span class="falta">≈ <b>' + t.soPeloValor.qtd + '</b> só pelo valor: são de ' + TX().pessoas + ' diferentes — confira antes de usar o arquivo de ajustes.</span>' : '',
     ].filter(Boolean).join(' ');
-    return '<div class="acoes-ab" style="margin:0 0 12px"><div class="acoes-conciliar quatro">' + M.REGRAS.map(botao).join('') + '</div>' +
-      '<p class="pequeno suave" style="margin:0">Cada botão liga ou desliga a regra e o passo recalcula na hora. ' +
+    return '<div class="acoes-ab" style="margin:14px 0 0"><div class="rotulo-regras pequeno">Conciliação dentro do razão · o que o programa pode casar sozinho</div>' +
+      '<div class="acoes-conciliar quatro">' + M.REGRAS.map(botao).join('') + '</div>' +
+      '<p class="pequeno suave" style="margin:0">Cada botão liga ou desliga a regra e o passo recalcula na hora; as conciliações aparecem em <b>1 · Bateu no razão</b>, com o filtro <b>Conciliado por</b>. ' +
       (md ? '📅 <b>' + md + '</b> bateram no mesmo dia, sem ' + TX().pessoa + '. ' : '') + avisos + '</p></div>';
   }
 
@@ -899,6 +907,7 @@
     calcular();
     desenharAvisos();
     desenharCartoes();
+    desenharRegras();
     desenharAbas();
     // Redesenha a aba sem pular para o topo (a pessoa continua onde estava).
     redesenharAbaMantendoRolagem();

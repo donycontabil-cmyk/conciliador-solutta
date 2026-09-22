@@ -252,6 +252,31 @@
   function jaRecarregou() { try { return raiz.sessionStorage.getItem(CHAVE_RECARGA) === '1'; } catch (e) { return true; } }
   function marcarRecarga(valor) { try { if (valor) raiz.sessionStorage.setItem(CHAVE_RECARGA, '1'); else raiz.sessionStorage.removeItem(CHAVE_RECARGA); } catch (e) { /* sem sessionStorage: segue */ } }
 
+  // Lê o config.js do servidor SEM cache e compara o número da versão com o que está aberto. Maior lá =
+  // esta página é velha: recarrega uma vez com um endereço que o cache não tem. Em pasta local (file://) e
+  // sem rede não faz nada — é só uma ajuda, nunca atrapalha quem está trabalhando.
+  const CHAVE_VERSAO = 'conciliador-solutta.recarga-versao';
+  async function conferirVersaoPublicada() {
+    try {
+      if (!raiz.fetch || String(raiz.location.protocol).indexOf('http') !== 0) return;
+      const aqui = Number((raiz.CONFIG || {}).numero) || 0;
+      if (!aqui) return;
+      const resposta = await raiz.fetch('config.js?versao=' + Date.now(), { cache: 'no-store' });
+      if (!resposta.ok) return;
+      const achado = (await resposta.text()).match(/numero:\s*(\d+)/);
+      const publicada = achado ? Number(achado[1]) : 0;
+      if (!publicada || publicada <= aqui) { try { raiz.sessionStorage.removeItem(CHAVE_VERSAO); } catch (e) { /* segue */ } return; }
+      let jaTentou = false;
+      try { jaTentou = raiz.sessionStorage.getItem(CHAVE_VERSAO) === String(publicada); } catch (e) { jaTentou = true; }
+      if (jaTentou) { // recarregou e continua velha: o aviso fica na tela, com o botão
+        if (raiz.Tela && raiz.Tela.avisoRapido) raiz.Tela.avisoRapido('Existe uma versão mais nova (' + publicada + ') do que a que abriu aqui (' + aqui + '). Aperte Ctrl+F5 para pegar.', 'ambar', 20000);
+        return;
+      }
+      try { raiz.sessionStorage.setItem(CHAVE_VERSAO, String(publicada)); } catch (e) { /* segue */ }
+      raiz.location.replace(raiz.location.origin + raiz.location.pathname + '?versao=' + publicada + raiz.location.hash);
+    } catch (e) { /* sem rede ou sem permissão: o programa continua como está */ }
+  }
+
   async function iniciar() {
     const faltam = MODULOS.filter((m) => !raiz[m]);
     if (faltam.length) {
@@ -271,6 +296,10 @@
     }
     marcarRecarga(false);
     App.config = raiz.CONFIG;
+    // A versão publicada é mais nova do que a que abriu? Então o navegador serviu a página velha (as peças
+    // estão todas lá, mas são as antigas: o programa abre sem as novidades). Recarrega UMA vez sozinho.
+    // (Dony, 22/09/2026: "abri aqui a versão 55 e não vi esses botões" — era a página velha no cache.)
+    conferirVersaoPublicada();
     const params = new URLSearchParams(raiz.location.search);
     App.modo = params.get('modo') === 'memoria' ? 'memoria' : (App.config.modo || 'pasta');
     App.demonstracao = !!(App.config.demonstracao || params.get('demonstracao') === '1');
