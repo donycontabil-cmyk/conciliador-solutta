@@ -55,7 +55,7 @@
     { familia: 'fornecedores', papel: 'principal', descricao: 'FORNECEDOR(ES); ou no passivo: PARCEIROS / (CONTAS|DUPLICATAS|TITULOS) A PAGAR, sem ADIANT',
       teste: (n, c) => !temAdiant(n) && (
         /FORNEC/.test(n) ||
-        ((/PARCEIRO/.test(n) || /(DUPLICATAS?|TITULOS?|CONTAS?) A PAGAR/.test(n)) && /^2/.test(String(c || '').trim()))
+        ((/PARCEIRO/.test(n) || /(DUPLICATAS?|TITULOS?|CONTAS?) A PAGAR/.test(n)) && classe(c) === '2')
       ) },
     { familia: 'clientes', papel: 'principal', descricao: 'no ativo, sem ADIANT: CLIENTE, MENSALIDADE, DUPLICATAS/CONTAS/TITULOS A RECEBER',
       teste: (n, c) => ativo(c) && !temAdiant(n) &&
@@ -65,7 +65,9 @@
         (bancoDoNome(n) !== null || /BANCOS? CONTA MOVIMENTO/.test(n) || /CONTA CORRENTE/.test(n) || contem(n, 'C C')) },
   ];
 
-  function ativo(classificacao) { return /^1/.test(String(classificacao || '').trim()); }
+  // A classe da conta pelo começo da classificação, sem o zero da frente (planos com "01.1.2…" e "02.1.1…").
+  function classe(classificacao) { return String(classificacao || '').trim().replace(/^0+(?=\d)/, '').charAt(0); }
+  function ativo(classificacao) { return classe(classificacao) === '1'; }
 
   // dica: { nomeArquivo } — quando o nome da conta vem cortado no razão (cliente real, 15/09/2026:
   // "ADIANTAMENTO A"), o nome do arquivo ("razao_adto_fornecedores") completa.
@@ -85,7 +87,7 @@
       return { familia: 'fornecedores', papel: 'adiantamento', regra: 'nome da conta cortado ("' + (conta.nome || '') + '") no ativo; o nome do arquivo diz adiantamento a fornecedores', banco: null };
     }
     // Conta de banco no PASSIVO é cheque especial e fica fora.
-    if (bancoDoNome(nome) && /^2/.test(String(classif || ''))) {
+    if (bancoDoNome(nome) && classe(classif) === '2') {
       return { familia: null, papel: null, regra: 'conta de banco no passivo (cheque especial): fica fora', banco: null };
     }
     return { familia: null, papel: null, regra: 'nenhuma conciliação usa esta conta', banco: null };

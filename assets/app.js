@@ -122,6 +122,8 @@
         (r.familia === 'fornecedores' ? 'ativo' : '') + '">📦 Fornecedores<span class="sub">checklist e passos</span></a>');
       partes.push('<a href="#/empresa/' + encodeURIComponent(r.codigo) + '/apresentacao' + (r.ano ? '/' + r.ano : '') + '" class="' +
         (r.nome === 'apresentacao' ? 'ativo' : '') + '">📊 Apresentação<span class="sub">balancetes, DRE e LALUR</span></a>');
+      partes.push('<a href="#/empresa/' + encodeURIComponent(r.codigo) + '/diario' + (r.ano ? '/' + r.ano : '') + '" class="' +
+        (r.nome === 'diario' ? 'ativo' : '') + '">📒 Livro diário<span class="sub">todas as contas; confere com o balancete</span></a>');
     }
     partes.push('<div class="grupo">Programa</div>');
     partes.push('<a href="#/suporte" class="' + (r.nome === 'suporte' ? 'ativo' : '') + '">🔎 Ver o desenho de um arquivo<span class="sub">para adaptar a um sistema novo</span></a>');
@@ -147,6 +149,8 @@
     if (p[0] === 'empresa' && p[1]) {
       // Relatório de apresentação: #/empresa/<código>/apresentacao[/<ano>]
       if (p[2] === 'apresentacao') return { codigo: p[1], nome: 'apresentacao', ano: /^\d{4}$/.test(p[3] || '') ? Number(p[3]) : null };
+      // Livro diário: #/empresa/<código>/diario[/<ano>]
+      if (p[2] === 'diario') return { codigo: p[1], nome: 'diario', ano: /^\d{4}$/.test(p[3] || '') ? Number(p[3]) : null };
       const r = { codigo: p[1], nome: 'empresa' };
       if (p[2]) { r.nome = 'familia'; r.familia = p[2]; }
       if (p[3] && /^\d{4}-\d{2}$/.test(p[3])) r.anoMes = p[3];
@@ -186,6 +190,7 @@
       else if (r.nome === 'sobre') mostrarSobre(conteudo);
       else if (r.nome === 'empresa') await raiz.TelaEmpresa.mostrar(conteudo, r.codigo, conferir);
       else if (r.nome === 'apresentacao') await raiz.TelaApresentacao.mostrar(conteudo, r.codigo, r.ano, conferir);
+      else if (r.nome === 'diario') await raiz.TelaDiario.mostrar(conteudo, r.codigo, r.ano, conferir);
       else if (r.nome === 'familia') await raiz.TelaFamilia.mostrar(conteudo, r.codigo, r.familia, r.anoMes, conferir);
       else if (r.nome === 'passo' && r.passo === 'passo1') await raiz.TelaPasso1.mostrar(conteudo, r.codigo, r.anoMes, conferir);
       // 1.3 · razão limpo: o que compõe os saldos depois do ① (para imprimir e mandar ao financeiro).

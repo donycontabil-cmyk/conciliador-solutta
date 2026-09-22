@@ -1270,5 +1270,5 @@
     delete c.totalCreditoDeclarado;
   }
 
-  return { reconhecer, ler, mapearCabecalho, ehCabecalho, lerLinhaDeConta, periodoPeloNome, lerFaixaDeDatas, notaEFornecedorE, lancamentoF, lancamentoG, lancamentoH, periodoDoMes };
+  return { reconhecer, ler, mapearCabecalho, ehCabecalho, lerLinhaDeConta, periodoPeloNome, lerFaixaDeDatas, notaEFornecedorE, lancamentoF, lancamentoG, lancamentoH, cnpjDoTextoH, periodoDoMes };
 });

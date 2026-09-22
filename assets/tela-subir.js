@@ -17,7 +17,8 @@
  *
  * Cada passo monta os seus lugares:
  *   { id, parte, titulo, sub, nome (para as mensagens), log,
- *     tipo: 'razao' | 'financeiro_pagar' | 'financeiro_adiantamento' | 'balancete' (relatório de apresentação), competencia,
+ *     tipo: 'razao' | 'financeiro_pagar' | 'financeiro_adiantamento' | 'balancete' (relatório de apresentação) | 'diario' (livro
+ *       diário do ano: os razões dos passos podem sair dele — opcional, o razão continua subindo como sempre), competencia,
  *     papel (razão: 'principal' | 'adiantamento'), varias (razão com mais de uma conta), opcional,
  *     periodo: { de, ate } (razão: confere se há lançamento; de = null → tudo até o fim do mês),
  *     nomePeriodo, arquivos: [meta, ...] (a versão que o passo usa agora),
@@ -70,10 +71,19 @@
     return app().armazenamento.guardarArquivo(codigo, meta, { tipo: 'balancete', empresa: b.empresa, cnpj: b.cnpj, periodo: b.periodo, contas: b.contas, total: b.total }, r.bytes);
   }
 
+  // Guarda um livro diário no lugar do ano (competência = janeiro do ano do fim do diário).
+  function guardarDiario(codigo, r, comp, extra) {
+    const d = r.diario;
+    const meta = Object.assign({ tipo: 'diario', arquivo: r.nomeArquivo, competencia: comp, periodo: d.periodo, lancamentos: d.lancamentos.length, contas: d.contas.length,
+      totalDebitos: d.totalDebitos, totalCreditos: d.totalCreditos, confere: d.confere, empresaNoArquivo: d.empresa, cnpjNoArquivo: d.cnpj, hashDoConteudo: r.hash }, extra || {});
+    return app().armazenamento.guardarArquivo(codigo, meta, raiz.MotorDiario.paraGuardar(d), r.bytes);
+  }
+
   // Os arquivos guardados que ocupam o mesmo lugar que este (as versões): aging = mesmo tipo e
-  // competência; razão = mesma competência e papel — e a mesma conta no lugar de várias contas (①).
-  // Sem o lugar, o razão é o da mesma conta.
+  // competência; razão = mesma competência e papel — e a mesma conta no lugar de várias contas (①);
+  // livro diário = o do mesmo ano. Sem o lugar, o razão é o da mesma conta.
   function doMesmoLugar(metas, m, lugar) {
+    if (m.tipo === 'diario') return metas.filter((x) => x.tipo === 'diario' && String(x.competencia).slice(0, 4) === String(m.competencia).slice(0, 4));
     if (m.tipo !== 'razao') return metas.filter((x) => x.tipo === m.tipo && x.competencia === m.competencia);
     const porConta = !lugar || lugar.varias;
     return metas.filter((x) => x.tipo === 'razao' && x.competencia === m.competencia && x.conta && m.conta &&
@@ -212,7 +222,7 @@
   // "9 entraram · 2 saíram · 1 mudou" (ou "mesmos itens").
   function textoComparacao(c, tipo) {
     if (!c || c.iguais === undefined) return 'comparada com a versão anterior';
-    const nome = tipo === 'razao' ? ['lançamento', 'lançamentos'] : tipo === 'balancete' ? ['conta', 'contas'] : ['título', 'títulos'];
+    const nome = tipo === 'razao' || tipo === 'diario' ? ['lançamento', 'lançamentos'] : tipo === 'balancete' ? ['conta', 'contas'] : ['título', 'títulos'];
     const partes = [];
     if (c.entraram) partes.push('<b>' + c.entraram + '</b> ' + (c.entraram === 1 ? 'entrou' : 'entraram'));
     if (c.sairam) partes.push('<b>' + c.sairam + '</b> ' + (c.sairam === 1 ? 'saiu' : 'saíram'));
@@ -224,6 +234,10 @@
   // Desenho
   // ------------------------------------------------------------------
   function detalheDoArquivo(m) {
+    if (m.tipo === 'diario') {
+      return (m.lancamentos || 0).toLocaleString('pt-BR') + ' lançamentos · ' + (m.periodo ? T.esc(m.periodo.de + ' a ' + m.periodo.ate) : '') +
+        (m.confere === false ? ' · <span class="falta">débitos ≠ créditos</span>' : ' · débitos = créditos');
+    }
     if (m.tipo === 'balancete') {
       return (m.contas || 0) + ' contas · ' + (m.resultado >= 0 ? 'lucro' : 'prejuízo') + ' do mês ' + T.moeda(Math.abs(m.resultado || 0)) +
         (m.confere === false ? ' · <span class="falta">não fecha</span>' : '');
@@ -232,7 +246,7 @@
       ? 'conta ' + T.esc(m.conta.codigo + ' ' + (m.conta.nome || '')) + ' · ' + (m.lancamentos || 0) + ' lanç.' + (m.periodo ? ' · ' + T.esc(m.periodo.de + ' a ' + m.periodo.ate) : '')
       : (m.titulos || 0) + ' títulos · ' + T.moeda(m.total || 0);
   }
-  function tipoDaComparacao(m) { return m.tipo === 'razao' ? 'razao' : m.tipo === 'balancete' ? 'balancete' : 'aging'; }
+  function tipoDaComparacao(m) { return m.tipo === 'razao' ? 'razao' : m.tipo === 'balancete' ? 'balancete' : m.tipo === 'diario' ? 'diario' : 'aging'; }
   function quemEnviou(m) { return m.enviadoEm ? T.esc(m.enviadoPor || '') + ' em ' + U.dataHoraLocal(m.enviadoEm) : ''; }
 
   function descreverArquivo(m, lugar, metas) {
@@ -245,6 +259,7 @@
     const tipo = tipoDaComparacao(m);
     const comparar = antigas.length || (m.comparacao && m.comparacao.com);
     return '<div class="arquivo-lugar"><div><b>' + T.esc(m.arquivo) + '</b>' +
+      (m.origem === 'diario' ? ' <span class="selo do-diario" title="Razão montado a partir do livro diário ' + T.esc(m.diarioArquivo || '') + ', com o saldo inicial do balancete">📒 do diário</span>' : '') +
       (versoes.length > 1 ? ' <span class="selo versao" title="O programa usa a versão mais nova; as anteriores continuam guardadas">versão ' + numero + ' · em uso</span>' : '') +
       '<br><span class="suave">' + detalheDoArquivo(m) + outroMes + (quem ? ' · ' + quem : '') + '</span>' +
       (comparar ? '<br><span class="pequeno">Em relação à versão anterior: ' + textoComparacao(m.comparacao, tipo) +
@@ -283,6 +298,19 @@
     const guardados = lugares.reduce((s, l) => s + l.arquivos.length, 0);
     if (op.aberto && op.chave) abertos.add(op.chave);
     const visivel = op.fixo || (op.chave && abertos.has(op.chave));
+    // Livro diário guardado que cobre o período dos razões: eles podem sair dele (opcional — o razão continua subindo
+    // como sempre).
+    const razoes = lugares.filter((l) => l.tipo === 'razao');
+    const doDiarioNo = new Map(razoes.map((l) => [l.id, diarioDoLugar(op.metas, l)]).filter((x) => x[1]));
+    const umDiario = doDiarioNo.size ? doDiarioNo.values().next().value : null;
+    const codigoAberto = app() && app().rota && app().rota.codigo;
+    const avisoDiario = umDiario
+      ? '<div class="aviso info diario-no-painel"><span class="icone-aviso">📒</span><div><b>O livro diário de ' + T.esc(String(umDiario.competencia).slice(0, 4)) + ' está guardado</b> (' +
+        T.esc(umDiario.periodo.de + ' a ' + umDiario.periodo.ate) + '): os razões podem sair dele, sem subir conta por conta — ou suba o razão como sempre, é você quem escolhe. ' +
+        '<button type="button" class="botao pequeno" data-do-diario-todos>📒 Tirar ' + (doDiarioNo.size > 1 ? 'os razões' : 'o razão') + ' do diário</button></div></div>'
+      : razoes.length && codigoAberto
+        ? '<p class="suave pequeno" style="margin:-4px 0 10px">Tem o livro diário da empresa? Guarde em <a href="#/empresa/' + encodeURIComponent(codigoAberto) + '/diario">📒 Livro diário</a> e os razões podem sair dele (opcional).</p>'
+        : '';
     return '<section class="cartao corpo arquivos-passo" data-painel-arquivos="' + T.esc(op.chave || '') + '"' + (visivel ? '' : ' hidden') + '>' +
       '<div class="cab-arquivos"><h3>📁 ' + T.esc(op.titulo || 'Arquivos deste passo') + '</h3>' +
       '<span class="suave pequeno">' + (op.resumo ? T.esc(op.resumo) + ' · ' : '') +
@@ -291,7 +319,7 @@
       '<p class="suave pequeno" style="margin:0 0 10px">Cada arquivo tem o seu lugar: <b>⬆ Carregar</b> (ou arraste o arquivo em cima do lugar) e <b>🗑 Excluir</b>. ' +
       'Chegou um arquivo novo (razão refeito, aging corrigido)? Use <b>🔄 Carregar nova versão</b>: a nova passa a ser a usada, a anterior continua guardada ' +
       'e o programa mostra o que mudou de uma para a outra.</p>' +
-      (op.antes || '') +
+      (op.antes || '') + avisoDiario +
       '<div class="lugares">' + lugares.map((l) => {
         const tem = l.arquivos.length > 0;
         const rotulo = !tem ? '⬆ Carregar' : l.varias ? '⬆ Carregar outra conta ou versão' : '🔄 Carregar nova versão';
@@ -302,6 +330,7 @@
           '<div class="arquivos-do-lugar pequeno">' + (tem ? l.arquivos.map((m) => descreverArquivo(m, l, op.metas)).join('')
             : l.opcional ? '<span class="suave">opcional</span>' : '<span class="falta">falta</span>') + '</div>' +
           '<div class="linha-flex" style="margin-top:auto"><button type="button" class="botao pequeno' + (tem || l.opcional ? '' : ' primario') + '" data-subir-lugar="' + l.id + '"' + dica + '>' + rotulo + '</button>' +
+          (doDiarioNo.has(l.id) ? '<button type="button" class="botao pequeno" data-do-diario="' + l.id + '" title="Montar o razão das contas deste lugar a partir do livro diário guardado, com o saldo inicial do balancete">📒 Tirar do diário</button>' : '') +
           '<span class="suave pequeno">ou arraste o arquivo aqui</span></div>' +
           '<input type="file" class="escondido" data-arquivo-lugar="' + l.id + '"' + (l.varias ? ' multiple' : '') + ' accept=".xls,.xlsx,.xlsm,.csv,.txt"></div>';
       }).join('') + '</div>' +
@@ -340,7 +369,7 @@
       if (!lista.length || !lugar) return;
       if (lista.length > 1 && !lugar.varias) { T.avisoRapido('Este lugar é de um arquivo só: solte um de cada vez.', 'erro'); return; }
       let algum = false;
-      for (const f of lista) algum = (await subir(codigo, lugar, f, { semRota: true })) || algum;
+      for (const f of lista) algum = (await subir(codigo, lugar, f, { semRota: true, lugares })) || algum;
       if (algum) app().mostrarRota();
     };
     // O arquivo de um botão (a versão em uso ou uma antiga).
@@ -356,6 +385,10 @@
       if (ev.target.closest('[data-fechar-arquivos]')) { mostrarPainel(el, false); return; }
       const b = ev.target.closest('[data-subir-lugar]');
       if (b) { const inp = el.querySelector('[data-arquivo-lugar="' + b.getAttribute('data-subir-lugar') + '"]'); if (inp) inp.click(); return; }
+      // Razão tirado do livro diário (opcional): de um lugar ou de todos os lugares de razão do quadro.
+      const dd = ev.target.closest('[data-do-diario]');
+      if (dd) { const l = doLugar(dd.getAttribute('data-do-diario')); await doDiario(codigo, l ? [l] : []); return; }
+      if (ev.target.closest('[data-do-diario-todos]')) { await doDiario(codigo, lugares); return; }
       const ver = ev.target.closest('[data-ver-versao]');
       if (ver) {
         ev.preventDefault();
@@ -415,19 +448,92 @@
     } catch (e) { return base; }
   }
   function comparar(tipo, antes, depois) {
+    if (tipo === 'diario') return raiz.MotorDiario.compararDiarios(antes, depois);
     return tipo === 'balancete' ? raiz.MotorApresentacao.compararBalancetes(antes, depois) : motor().compararVersoes(tipo, antes, depois);
   }
 
-  // Sobe UM arquivo num lugar. Devolve true se guardou. op: { semRota } (não redesenha no fim).
+  // Arquivo posto no lugar do diário com lançamentos (conta de débito, crédito e valor) mas sem o título de livro
+  // diário — pode ser uma planilha de lançamentos (importação, reclassificação): pergunta se é o diário completo.
+  // Devolve o diário lido, false (não é) ou null (nem tem lançamentos assim).
+  async function diarioSemTitulo(r, arquivo) {
+    let abas;
+    try { abas = raiz.LerPlanilha.abrir(r.bytes).abas; } catch (e) { return null; }
+    if (raiz.LerDiario.reconhecer(abas, { semTitulo: true }).tipo !== 'diario') return null;
+    const d = raiz.LerDiario.ler(abas, { nomeArquivo: arquivo.name });
+    if (!d.lancamentos.length) return null;
+    const ok = await T.confirmar({ titulo: 'É o livro diário completo?',
+      texto: '<b>' + T.esc(arquivo.name) + '</b> tem ' + d.lancamentos.length.toLocaleString('pt-BR') + ' lançamentos (' + T.esc(d.periodo.de + ' a ' + d.periodo.ate) + ', ' +
+        d.contas.length + ' contas) com conta de débito, conta de crédito e valor, mas não tem o título de livro diário: pode ser uma planilha de lançamentos ' +
+        '(importação, reclassificação). Guardar como o livro diário da empresa?',
+      botao: 'É o diário: guardar' });
+    return ok ? d : false;
+  }
+
+  // O número da versão de cada arquivo novo ("versão 2 (a anterior continua guardada: 9 entraram)").
+  async function textoDasVersoes(codigo, lugar, novas) {
+    if (!novas.length) return '';
+    const metas = await app().armazenamento.arquivos(codigo);
+    return novas.map((n) => {
+      const qtd = versoesDoArquivo(metas, n.meta, lugar).length;
+      if (qtd < 2) return '';
+      return 'versão ' + qtd + ' (a anterior continua guardada' + (n.comparacao && n.comparacao.iguais !== undefined
+        ? ': ' + textoComparacao(n.comparacao, tipoDaComparacao(lugar)).replace(/<\/?b>/g, '') : '') + ')';
+    }).filter(Boolean).join('; ');
+  }
+
+  // Guarda contas de razão num lugar de razão: cada conta vira a versão nova da mesma conta do lugar (a anterior
+  // continua guardada), com a comparação; a empresa passa a saber o papel das contas. itens: [{ r (o razão lido),
+  // conta, extra (campos a mais no registro) }]. Devolve { novas, jaEra } ou null (desistiu na conferência da troca).
+  async function guardarContasNoLugar(codigo, lugar, itens) {
+    const arm = app().armazenamento;
+    const papel = { familia: 'fornecedores', papel: lugar.papel };
+    const lembrar = {};
+    const novas = [];
+    let jaEra = true;
+    for (const { r, conta, extra: maisCampos } of itens) {
+      const auto = conta.papel || {};
+      if (auto.familia !== papel.familia || auto.papel !== papel.papel) lembrar[conta.codigo] = papel;
+      const ativo = emUsoNoLugar(lugar, conta);
+      // Já é a versão em uso deste lugar: nada a fazer.
+      if (ativo && ativo.hashDoConteudo === r.hash && ativo.conta && String(ativo.conta.codigo) === String(conta.codigo)) continue;
+      jaEra = false;
+      const comparacao = ativo ? await compararComEmUso(ativo, 'razao', { conta }) : null;
+      if (ativo && typeof lugar.conferirTroca === 'function' && !(await lugar.conferirTroca({ tipo: 'razao', conta }, comparacao))) return null;
+      const extra = Object.assign({}, maisCampos || {}, comparacao ? { comparacao } : {});
+      let g = await guardarContaDoRazao(codigo, r, conta, papel, lugar.competencia, extra);
+      if (g.jaExistia && g.meta.conta && (g.meta.conta.papel !== papel.papel || g.meta.conta.familia !== papel.familia)) {
+        // Já estava guardado com outro papel: guarda de novo com o papel deste lugar.
+        await arm.apagarArquivo(g.meta.id);
+        g = await guardarContaDoRazao(codigo, r, conta, papel, lugar.competencia, extra);
+      } else if (g.jaExistia && (!ativo || g.meta.id !== ativo.id)) {
+        // Uma versão antiga deste lugar carregada de novo: vira a versão nova (a mais nova é a usada).
+        g = await guardarContaDoRazao(codigo, r, conta, papel, lugar.competencia, Object.assign({ recarga: U.agoraISO() }, extra));
+      }
+      novas.push({ meta: g.meta, ativo, comparacao });
+    }
+    // A empresa passa a saber o papel destas contas.
+    if (Object.keys(lembrar).length) {
+      const cad = (await arm.empresas()).find((e) => String(e.codigo) === String(codigo)); // relido: outra pessoa pode ter mexido
+      const salvo = await arm.salvarEmpresa(Object.assign({}, cad, { papeisDeConta: Object.assign({}, cad.papeisDeConta || {}, lembrar) }));
+      const ix = app().empresas.findIndex((e) => String(e.codigo) === String(codigo));
+      if (ix >= 0) app().empresas[ix] = salvo;
+    }
+    return { novas, jaEra };
+  }
+
+  // Sobe UM arquivo num lugar. Devolve true se guardou. op: { semRota (não redesenha no fim), lugares (os outros
+  // lugares do quadro: o diário solto num razão serve todos), lido (o arquivo já lido) }.
   async function subir(codigo, lugar, arquivo, op) {
     const arm = app().armazenamento;
-    T.avisoRapido('Lendo ' + arquivo.name + '…', null, 2500);
-    let r;
-    try {
-      const bytes = await T.lerArquivoComoBytes(arquivo);
-      r = raiz.Leitor.ler(bytes, arquivo.name);
-      r.bytes = bytes;
-    } catch (e) { T.avisoRapido('Não consegui ler ' + arquivo.name + ': ' + T.mensagemDeErro(e), 'erro'); return false; }
+    let r = op && op.lido;
+    if (!r) {
+      T.avisoRapido('Lendo ' + arquivo.name + '…', null, 2500);
+      try {
+        const bytes = await T.lerArquivoComoBytes(arquivo);
+        r = raiz.Leitor.ler(bytes, arquivo.name);
+        r.bytes = bytes;
+      } catch (e) { T.avisoRapido('Não consegui ler ' + arquivo.name + ': ' + T.mensagemDeErro(e), 'erro'); return false; }
+    }
     const naoServe = (esperado, outroTipo) => T.janela({
       titulo: 'Esse arquivo não é ' + esperado,
       corpo: '<p style="line-height:1.5">Este lugar é o do <b>' + T.esc(lugar.nome) + '</b>, mas <b>' + T.esc(arquivo.name) + '</b> ' +
@@ -437,6 +543,20 @@
       let resumo, jaEra = true;
       const novas = []; // { meta, comparacao } das versões guardadas agora
       const versaoNova = async (g, ativo, comparacao) => { novas.push({ meta: g.meta, ativo, comparacao }); };
+      // O livro diário solto num lugar de razão: guarda como o diário do ano e oferece tirar dele as contas dos razões.
+      if (lugar.tipo === 'razao' && r.tipo === 'diario' && r.diario && r.diario.lancamentos.length) {
+        const d = r.diario;
+        const ok = await T.confirmar({ titulo: 'Esse arquivo é o livro diário',
+          texto: '<b>' + T.esc(arquivo.name) + '</b> é o livro diário da empresa (' + T.esc(d.periodo.de + ' a ' + d.periodo.ate) + ', ' + d.lancamentos.length.toLocaleString('pt-BR') + ' lançamentos). ' +
+            'Guardar como o diário de ' + T.esc(d.periodo.ate.slice(6, 10)) + ' e escolher as contas que saem dele para este passo?',
+          botao: 'Guardar o diário' });
+        if (!ok) return false;
+        const lugarDiario = lugarDoDiario(d.periodo.ate.slice(6, 10), await arm.arquivos(codigo));
+        if (!(await subir(codigo, lugarDiario, arquivo, { semRota: true, lido: r }))) return false;
+        await doDiario(codigo, (op && op.lugares) || [lugar], { semRota: true });
+        if (!(op && op.semRota)) app().mostrarRota();
+        return true;
+      }
       if (lugar.tipo === 'razao') {
         if (r.tipo !== 'razao' || !r.contas || !r.contas.length) { await naoServe('um razão', r.tipo !== 'razao' && r.tipo !== 'desconhecido'); return false; }
         const emp = app().empresas.find((e) => String(e.codigo) === String(codigo)) || {};
@@ -466,38 +586,60 @@
             botao: 'Guardar assim mesmo', perigo: true });
           if (!ok) return false;
         }
-        const papel = { familia: 'fornecedores', papel: lugar.papel };
-        const lembrar = {};
-        for (const conta of contas) {
-          const auto = conta.papel || {};
-          if (auto.familia !== papel.familia || auto.papel !== papel.papel) lembrar[conta.codigo] = papel;
-          const ativo = emUsoNoLugar(lugar, conta);
-          // Já é a versão em uso deste lugar: nada a fazer.
-          if (ativo && ativo.hashDoConteudo === r.hash && ativo.conta && String(ativo.conta.codigo) === String(conta.codigo)) continue;
+        const guardadas = await guardarContasNoLugar(codigo, lugar, contas.map((conta) => ({ r, conta })));
+        if (!guardadas) return false;
+        if (!guardadas.jaEra) jaEra = false;
+        guardadas.novas.forEach((n) => novas.push(n));
+        resumo =(contas.length === 1 ? 'conta ' + contas[0].codigo : contas.length + ' contas (' + contas.map((c) => c.codigo).join(', ') + ')') +
+          ' · ' + noPeriodo + ' lançamento(s) ' + emPeriodo + (rz.periodo ? ' (arquivo de ' + rz.periodo.de + ' a ' + rz.periodo.ate + ')' : '');
+      } else if (lugar.tipo === 'diario') {
+        // Livro diário (Dony, 22/09/2026: "ao invés de subir razão por razão, subir o diário"): um por ano, versões.
+        if (r.tipo !== 'diario') {
+          const lido = await diarioSemTitulo(r, arquivo);
+          if (lido === false) return false;
+          if (lido) { r.tipo = 'diario'; r.diario = lido; }
+        }
+        const d = r.diario;
+        if (r.tipo !== 'diario' || !d || !d.lancamentos.length) { await naoServe('um livro diário', r.tipo !== 'diario' && r.tipo !== 'desconhecido'); return false; }
+        const emp = app().empresas.find((e) => String(e.codigo) === String(codigo)) || {};
+        if (d.cnpj && emp.cnpj && String(d.cnpj).slice(0, 8) !== String(emp.cnpj).slice(0, 8)) {
+          const ok = await T.confirmar({ titulo: 'Esse diário é de outra empresa?',
+            texto: 'O CNPJ do diário (' + U.formatarCnpj(d.cnpj) + ') não é o de <b>' + T.esc(emp.nome) + '</b> (' + U.formatarCnpj(emp.cnpj) + ').',
+            botao: 'Guardar mesmo assim', perigo: true });
+          if (!ok) return false;
+        }
+        const ano = d.periodo.ate.slice(6, 10);
+        if (ano !== String(lugar.competencia).slice(0, 4)) {
+          await T.janela({ titulo: 'O diário é de outro ano',
+            corpo: '<p style="line-height:1.5">' + T.esc(arquivo.name) + ' vai de <b>' + T.esc(d.periodo.de + ' a ' + d.periodo.ate) + '</b>, mas este lugar é o do diário de <b>' +
+              T.esc(String(lugar.competencia).slice(0, 4)) + '</b>. Escolha o ano ' + T.esc(ano) + ' lá em cima e carregue de novo.</p>' });
+          return false;
+        }
+        if (!d.confere) {
+          const ok = await T.confirmar({ titulo: 'O diário não fecha',
+            texto: d.avisos.map((a) => T.esc(a)).join('<br>') + '<br><br>Os razões que saírem dele podem não bater com o balancete. Guardar assim mesmo?',
+            botao: 'Guardar assim mesmo', perigo: true });
+          if (!ok) return false;
+        }
+        const ativo = emUsoNoLugar(lugar);
+        if (!(ativo && ativo.hashDoConteudo === r.hash)) {
           jaEra = false;
-          const comparacao = ativo ? await compararComEmUso(ativo, 'razao', { conta }) : null;
-          if (ativo && typeof lugar.conferirTroca === 'function' && !(await lugar.conferirTroca({ tipo: 'razao', conta }, comparacao))) return false;
-          const extra = comparacao ? { comparacao } : {};
-          let g = await guardarContaDoRazao(codigo, r, conta, papel, lugar.competencia, extra);
-          if (g.jaExistia && g.meta.conta && (g.meta.conta.papel !== papel.papel || g.meta.conta.familia !== papel.familia)) {
-            // Já estava guardado com outro papel: guarda de novo com o papel deste lugar.
-            await arm.apagarArquivo(g.meta.id);
-            g = await guardarContaDoRazao(codigo, r, conta, papel, lugar.competencia, extra);
-          } else if (g.jaExistia && (!ativo || g.meta.id !== ativo.id)) {
-            // Uma versão antiga deste lugar carregada de novo: vira a versão nova (a mais nova é a usada).
-            g = await guardarContaDoRazao(codigo, r, conta, papel, lugar.competencia, Object.assign({ recarga: U.agoraISO() }, extra));
+          // O diário novo tem menos meses que o em uso: confirma (a versão nova passa a ser a usada).
+          const dia = (t) => { const x = U.lerData(t); return x ? x.numero : 0; };
+          if (ativo && ativo.periodo && (dia(d.periodo.de) > dia(ativo.periodo.de) || dia(d.periodo.ate) < dia(ativo.periodo.ate))) {
+            const ok = await T.confirmar({ titulo: 'O diário novo tem menos meses',
+              texto: 'O diário em uso vai de <b>' + T.esc(ativo.periodo.de + ' a ' + ativo.periodo.ate) + '</b>; o novo, de <b>' + T.esc(d.periodo.de + ' a ' + d.periodo.ate) + '</b>. ' +
+                'O novo passa a ser o usado (o anterior continua guardado). Continuar?',
+              botao: 'Usar o novo', perigo: true });
+            if (!ok) return false;
           }
+          const comparacao = ativo ? await compararComEmUso(ativo, 'diario', d) : null;
+          const extra = comparacao ? { comparacao } : {};
+          let g = await guardarDiario(codigo, r, lugar.competencia, extra);
+          if (g.jaExistia && (!ativo || g.meta.id !== ativo.id)) g = await guardarDiario(codigo, r, lugar.competencia, Object.assign({ recarga: U.agoraISO() }, extra));
           await versaoNova(g, ativo, comparacao);
         }
-        // A empresa passa a saber o papel destas contas.
-        if (Object.keys(lembrar).length) {
-          const cad = (await arm.empresas()).find((e) => String(e.codigo) === String(codigo)); // relido: outra pessoa pode ter mexido
-          const salvo = await arm.salvarEmpresa(Object.assign({}, cad, { papeisDeConta: Object.assign({}, cad.papeisDeConta || {}, lembrar) }));
-          const ix = app().empresas.findIndex((e) => String(e.codigo) === String(codigo));
-          if (ix >= 0) app().empresas[ix] = salvo;
-        }
-        resumo = (contas.length === 1 ? 'conta ' + contas[0].codigo : contas.length + ' contas (' + contas.map((c) => c.codigo).join(', ') + ')') +
-          ' · ' + noPeriodo + ' lançamento(s) ' + emPeriodo + (rz.periodo ? ' (arquivo de ' + rz.periodo.de + ' a ' + rz.periodo.ate + ')' : '');
+        resumo = d.lancamentos.length.toLocaleString('pt-BR') + ' lançamentos · ' + d.periodo.de + ' a ' + d.periodo.ate + (d.confere ? ' · débitos = créditos' : '');
       } else if (lugar.tipo === 'balancete') {
         // Balancete que o leitor geral não entendeu (ou em que a conta não fecha): as colunas guardadas na
         // empresa; senão pelo conteúdo ou indicadas por quem usa (Dony, 18/09/2026: "vários tipos de
@@ -563,18 +705,7 @@
         const fora = (r.financeiro.descartados || []).reduce((s, d) => s + (d.quantidade || 0), 0);
         if (r.financeiro.formato) resumo += ' · ' + (fora ? fora + ' linha(s) de fora — entram ' : '') + r.financeiro.formato;
       }
-      // Número da versão de cada arquivo novo.
-      let textoVersao = '';
-      if (novas.length) {
-        const metas = await arm.arquivos(codigo);
-        const partes = novas.map((n) => {
-          const qtd = versoesDoArquivo(metas, n.meta, lugar).length;
-          if (qtd < 2) return '';
-          return 'versão ' + qtd + ' (a anterior continua guardada' + (n.comparacao && n.comparacao.iguais !== undefined
-            ? ': ' + textoComparacao(n.comparacao, tipoDaComparacao(lugar)).replace(/<\/?b>/g, '') : '') + ')';
-        }).filter(Boolean);
-        textoVersao = partes.join('; ');
-      }
+      const textoVersao = await textoDasVersoes(codigo, lugar, novas);
       await arm.registrarNoLog({ codigo, acao: 'arquivo-no-lugar', alvo: (lugar.log || lugar.id) + '/' + U.anoMes(lugar.competencia),
         detalhe: arquivo.name + ' → ' + lugar.nome + (textoVersao ? ' · ' + textoVersao : '') });
       T.avisoRapido('✓ ' + primeiraMaiuscula(lugar.nome) + ': ' + arquivo.name + ' (' + resumo + ')' +
@@ -585,6 +716,175 @@
       T.avisoRapido('Não foi possível guardar ' + arquivo.name + ': ' + T.mensagemDeErro(e), 'erro');
       return false;
     }
+  }
+
+  // ------------------------------------------------------------------
+  // RAZÃO TIRADO DO LIVRO DIÁRIO — opcional (Dony, 22/09/2026: "ao invés de subir razão por razão, subir o diário:
+  // a conciliação de fornecedores já entende os lançamentos de fornecedores do diário" + "tem que ser um misto,
+  // optativo e não obrigatório: não muda as regras dos que já funcionam por razão"). As contas do lugar saem do diário
+  // guardado, com o saldo inicial do balancete, e ficam guardadas como um razão carregado (mesmas versões, comparação
+  // e papel da conta); o saldo do fim é conferido com o balancete do último mês, quando ele está carregado.
+  // ------------------------------------------------------------------
+  // O lugar do livro diário de um ano (competência = janeiro do ano).
+  function lugarDoDiario(ano, metas) {
+    const doAno = (metas || []).filter((m) => m.tipo === 'diario' && String(m.competencia).slice(0, 4) === String(ano))
+      .sort((a, b) => U.paraMs(b.enviadoEm) - U.paraMs(a.enviadoEm));
+    return { id: 'diario', parte: 'Contabilidade', titulo: 'Livro diário de ' + ano, sub: 'todas as contas, do 1º mês ao último', nome: 'livro diário de ' + ano,
+      log: 'diario', tipo: 'diario', competencia: ano + '-01-01', arquivos: doAno.length ? [doAno[0]] : [] };
+  }
+  function periodoDoLugar(lugar) {
+    const per = lugar.periodo || { de: null, ate: lugar.competencia };
+    return { de: per.de || null, ate: per.ate || lugar.competencia };
+  }
+  // Os diários em uso: o mais novo de cada ano.
+  function diariosEmUso(metas) {
+    const porAno = new Map();
+    (metas || []).filter((m) => m.tipo === 'diario' && m.periodo).forEach((m) => {
+      const a = String(m.competencia).slice(0, 4);
+      if (!porAno.has(a) || U.paraMs(m.enviadoEm) > U.paraMs(porAno.get(a).enviadoEm)) porAno.set(a, m);
+    });
+    return Array.from(porAno.values());
+  }
+  // O diário em uso que cobre o período do lugar (no "até o fim de", o razão começa no começo do diário).
+  function diarioDoLugar(metas, lugar) {
+    const p = periodoDoLugar(lugar);
+    const fim = U.fimDaCompetencia(p.ate), ini = p.de ? U.inicioDaCompetencia(p.de) : null;
+    if (!fim) return null;
+    return diariosEmUso(metas).find((m) => {
+      const a = U.lerData(m.periodo.de), b = U.lerData(m.periodo.ate);
+      return !!(a && b && b.numero >= fim.numero && a.numero <= fim.numero && (!ini || a.numero <= ini.numero));
+    }) || null;
+  }
+  // Os balancetes do período do diário (o mais novo de cada mês, do 1º mês ao mês depois do fim) que trazem o código
+  // reduzido (o diário usa esse código): o saldo inicial e a conferência saem deles.
+  async function balancetesDoDiario(metas, periodo) {
+    const de = U.competenciaDe(U.lerData(periodo.de)), ate = U.somarMeses(U.competenciaDe(U.lerData(periodo.ate)), 1);
+    const porMes = new Map();
+    (metas || []).filter((m) => m.tipo === 'balancete' && m.competencia >= de && m.competencia <= ate).forEach((m) => {
+      if (!porMes.has(m.competencia) || U.paraMs(m.enviadoEm) > U.paraMs(porMes.get(m.competencia).enviadoEm)) porMes.set(m.competencia, m);
+    });
+    const lista = [];
+    for (const m of Array.from(porMes.values()).sort((a, b) => a.competencia.localeCompare(b.competencia))) {
+      const c = await app().armazenamento.conteudoDoArquivo(m.id);
+      if (c && c.contas && c.contas.some((x) => String(x.reduzido || '').trim())) lista.push({ competencia: m.competencia, contas: c.contas, arquivo: m.arquivo });
+    }
+    return lista;
+  }
+
+  // Monta e guarda o razão das contas escolhidas nos lugares de razão (um lugar, ou todos os do quadro).
+  async function doDiario(codigo, lugares, op) {
+    const arm = app().armazenamento;
+    const MD = raiz.MotorDiario;
+    const metas = await arm.arquivos(codigo);
+    const alvos = (lugares || []).filter((l) => l.tipo === 'razao').map((lugar) => ({ lugar, meta: diarioDoLugar(metas, lugar) })).filter((a) => a.meta);
+    if (!alvos.length) { T.avisoRapido('Nenhum livro diário guardado cobre o período destes razões.', 'erro', 6000); return false; }
+    const md = alvos[0].meta;
+    const ano = String(md.competencia).slice(0, 4);
+    T.avisoRapido('Abrindo o livro diário…', null, 2500);
+    let diario, balancetes;
+    try {
+      diario = await arm.conteudoDoArquivo(md.id);
+      balancetes = await balancetesDoDiario(metas, md.periodo);
+    } catch (e) { T.avisoRapido('Não consegui abrir o livro diário: ' + T.mensagemDeErro(e), 'erro'); return false; }
+    const linkDiario = '<a href="#/empresa/' + encodeURIComponent(codigo) + '/diario/' + ano + '">📒 Livro diário</a>';
+    if (!balancetes.length) {
+      await T.janela({ titulo: 'Falta o saldo inicial das contas',
+        corpo: '<p style="line-height:1.5">O livro diário traz os débitos e os créditos, mas não o saldo com que cada conta começou. Carregue o <b>balancete de ' +
+          T.esc(U.nomeCompetencia(diario.meses[0].comp)) + '</b> (ou de qualquer mês do diário, com o código reduzido das contas) em ' + linkDiario +
+          ': o saldo inicial vem dele, e o programa confere o diário com o balancete.</p>' });
+      return false;
+    }
+    const plano = MD.planoDosBalancetes(balancetes);
+    const noDiario = new Set(diario.contas || []);
+    const detectadas = MD.contasDasConciliacoes(plano);
+    const emp = app().empresas.find((e) => String(e.codigo) === String(codigo)) || {};
+    const escolhidos = emp.papeisDeConta || {};
+    const papelDe = (red) => {
+      const e = escolhidos[red];
+      if (e && e.familia) return { familia: e.familia, papel: e.papel, escolhido: true };
+      const d = detectadas.find((c) => c.reduzido === red);
+      return d ? { familia: d.familia, papel: d.papel } : null;
+    };
+    const fimNome = (lugar) => U.nomeCompetencia(periodoDoLugar(lugar).ate);
+    // As contas de cada lugar: as do plano com o papel do lugar, as escolhidas antes para ele e as que ele já usa.
+    const grupos = alvos.map(({ lugar }) => {
+      const ids = [];
+      const somar = (red) => { red = String(red); if (ids.indexOf(red) < 0 && (plano.has(red) || noDiario.has(red))) ids.push(red); };
+      (lugar.arquivos || []).forEach((m) => { if (m.conta && m.conta.codigo) somar(m.conta.codigo); });
+      detectadas.filter((c) => c.familia === 'fornecedores' && c.papel === lugar.papel).forEach((c) => somar(c.reduzido));
+      Object.keys(escolhidos).forEach((k) => { const e = escolhidos[k]; if (e && e.familia === 'fornecedores' && e.papel === lugar.papel) somar(k); });
+      const contas = ids.map((red) => ({ red, rz: MD.razaoDaConta(diario, balancetes, red, periodoDoLugar(lugar)) }));
+      return { lugar, contas };
+    });
+    const linhaDaConta = (g, x, marcada) => {
+      const c = x.rz.conta;
+      const confere = x.rz.confereComBalancete;
+      const dc = (v) => T.htmlDC(v, v >= 0 ? 'D' : 'C');
+      return '<label class="item-aba conta-do-diario"><input type="' + (g.lugar.varias ? 'checkbox' : 'radio') + '" name="diario-' + T.esc(g.lugar.id) + '" value="' + T.esc(x.red) + '"' + (marcada ? ' checked' : '') + '> ' +
+        '<span><b>' + T.esc(x.red) + '</b> ' + T.esc(c.nome) + (c.classificacao ? ' <span class="suave pequeno">' + T.esc(c.classificacao) + '</span>' : '') +
+        '<br><span class="suave pequeno">' + c.lancamentos.length.toLocaleString('pt-BR') + ' lanç. · saldo inicial ' + dc(c.saldoAnterior) + ' → final ' + dc(c.saldoFinal) + '</span> ' +
+        (confere === true ? '<span class="selo ok-diario" title="Saldo inicial + débitos − créditos do diário = saldo do balancete">✓ bate com o balancete de ' + T.esc(fimNome(g.lugar)) + '</span>'
+          : confere === false ? '<span class="selo falta-diario">✗ o balancete de ' + T.esc(fimNome(g.lugar)) + ' diz ' + dc(c.saldoFinalDeclarado) + '</span>'
+            : '<span class="suave pequeno">· sem o balancete de ' + T.esc(fimNome(g.lugar)) + ' para conferir o saldo do fim</span>') + '</span></label>';
+    };
+    const corpo = '<p class="suave" style="margin-bottom:8px;line-height:1.5">' + T.esc(md.arquivo) + ' · ' + T.esc(md.periodo.de + ' a ' + md.periodo.ate) +
+      ' · saldo inicial do balancete de ' + T.esc(U.nomeCompetencia(balancetes[0].competencia)) + '. Marque as contas de cada lugar; cada uma fica guardada como um razão ' +
+      '(a versão anterior continua guardada, como ao carregar um razão).</p>' +
+      grupos.map((g) => {
+        const emUso = new Set((g.lugar.arquivos || []).map((m) => m.conta && String(m.conta.codigo)));
+        const primeira = g.contas.findIndex((x) => emUso.has(x.red)) >= 0 ? g.contas.findIndex((x) => emUso.has(x.red)) : 0;
+        return '<fieldset class="grupo-diario" data-grupo-diario="' + T.esc(g.lugar.id) + '"><legend>' + T.esc(g.lugar.titulo) + ' · ' + T.esc(g.lugar.nomePeriodo || fimNome(g.lugar)) + '</legend>' +
+          (g.contas.length ? g.contas.map((x, k) => linhaDaConta(g, x, g.lugar.varias ? (x.rz.conta.lancamentos.length > 0 || x.rz.conta.saldoAnterior !== 0) : k === primeira)).join('')
+            : '<p class="suave pequeno">O programa não achou no plano de contas nenhuma conta deste lugar: digite o código reduzido abaixo.</p>') +
+          '<label class="pequeno outra-conta">Outra conta (código reduzido; mais de uma, separe por vírgula): <input type="text" data-outra-conta="' + T.esc(g.lugar.id) + '" inputmode="numeric" placeholder="ex.: 148"></label>' +
+          '</fieldset>';
+      }).join('') + '<p class="falta pequeno" data-erro-diario hidden></p>';
+    const escolha = await T.janela({ titulo: 'Tirar do livro diário', larga: true, corpo,
+      botoes: [{ texto: 'Cancelar', valor: null }, { texto: 'Guardar os razões', tipo: 'primario', antes: (j) => {
+        const erro = j.querySelector('[data-erro-diario]');
+        const porLugar = [];
+        for (const g of grupos) {
+          const marcadas = Array.from(j.querySelectorAll('input[name="diario-' + g.lugar.id + '"]:checked')).map((x) => x.value);
+          const digitadas = String((j.querySelector('[data-outra-conta="' + g.lugar.id + '"]') || {}).value || '').split(/[^0-9]+/).filter(Boolean).map((x) => x.replace(/^0+(?=\d)/, ''));
+          const desconhecidas = digitadas.filter((x) => !plano.has(x) && !noDiario.has(x));
+          if (desconhecidas.length) { erro.hidden = false; erro.textContent = 'Não achei no diário nem no plano de contas: ' + desconhecidas.join(', ') + '.'; return false; }
+          let contas = marcadas.concat(digitadas.filter((x) => marcadas.indexOf(x) < 0));
+          if (!g.lugar.varias && contas.length > 1) { erro.hidden = false; erro.textContent = '"' + g.lugar.titulo + '" é de uma conta só: marque uma ou digite uma.'; return false; }
+          porLugar.push({ lugar: g.lugar, contas });
+        }
+        if (!porLugar.some((x) => x.contas.length)) { erro.hidden = false; erro.textContent = 'Marque pelo menos uma conta.'; return false; }
+        return porLugar;
+      } }],
+    });
+    if (!escolha) return false;
+    let algum = false;
+    const feitos = [];
+    try {
+      for (const { lugar, contas } of escolha) {
+        if (!contas.length) continue;
+        const p = periodoDoLugar(lugar);
+        const itens = contas.map((red) => {
+          const rz = MD.razaoDaConta(diario, balancetes, red, p);
+          const bytes = new TextEncoder().encode('﻿' + MD.csvDoRazao(rz));
+          const r = { nomeArquivo: 'Razão do diário - conta ' + red + ' - ' + rz.periodo.de.replace(/\//g, '-') + ' a ' + rz.periodo.ate.replace(/\//g, '-') + '.csv',
+            hash: U.hashBytes(bytes), bytes, razao: { periodo: rz.periodo, desenho: 'diario', empresa: diario.empresa, cnpj: diario.cnpj, periodoOrigem: 'diario' } };
+          return { r, conta: Object.assign({}, rz.conta, { papel: papelDe(red) }), extra: { origem: 'diario', diarioId: md.id, diarioArquivo: md.arquivo } };
+        });
+        const guardadas = await guardarContasNoLugar(codigo, lugar, itens);
+        if (!guardadas) break;
+        algum = true;
+        const textoVersao = await textoDasVersoes(codigo, lugar, guardadas.novas);
+        const resumo = (contas.length === 1 ? 'conta ' + contas[0] : contas.length + ' contas (' + contas.join(', ') + ')') + ' · ' + itens.reduce((s, x) => s + x.conta.lancamentos.length, 0) + ' lançamento(s) de ' + itens[0].r.razao.periodo.de + ' a ' + itens[0].r.razao.periodo.ate;
+        await arm.registrarNoLog({ codigo, acao: 'razao-do-diario', alvo: (lugar.log || lugar.id) + '/' + U.anoMes(lugar.competencia),
+          detalhe: md.arquivo + ' → ' + lugar.nome + ' · ' + resumo + (textoVersao ? ' · ' + textoVersao : '') });
+        feitos.push(primeiraMaiuscula(lugar.nome) + ': ' + resumo + (textoVersao ? ' — ' + textoVersao : guardadas.jaEra ? ' — já era este razão' : ''));
+      }
+      if (feitos.length) T.avisoRapido('✓ Tirado do diário — ' + feitos.join(' · '), 'ok', 10000);
+    } catch (e) {
+      T.avisoRapido('Não foi possível guardar o razão tirado do diário: ' + T.mensagemDeErro(e), 'erro');
+    }
+    if (algum && !(op && op.semRota)) app().mostrarRota();
+    return algum;
   }
 
   // Exclui UMA versão do lugar (a cópia vai para _apagados). Excluir a versão em uso volta para a
@@ -717,5 +1017,6 @@
       '<h3 class="titulo-comparacao">✎ Contas que mudaram <small>(' + c.mudaram.length + ')</small></h3>' + mudaram;
   }
 
-  raiz.TelaSubir = { painel, botao, ligar, ligarBotao, subir, apagar, verVersao, guardarContaDoRazao, guardarTitulos, guardarBalancete, doMesmoLugar, versoesDoArquivo, htmlComparacao, contagensDaComparacao };
+  raiz.TelaSubir = { painel, botao, ligar, ligarBotao, subir, apagar, verVersao, guardarContaDoRazao, guardarTitulos, guardarBalancete, guardarDiario, doMesmoLugar, versoesDoArquivo,
+    htmlComparacao, contagensDaComparacao, lugarDoDiario, diariosEmUso, diarioDoLugar, balancetesDoDiario, doDiario };
 })(self);

@@ -8,15 +8,16 @@
  */
 (function (raiz, fabrica) {
   if (typeof module === 'object' && module.exports) {
-    module.exports = fabrica(require('./util.js'), require('./ler-planilha.js'), require('./ler-razao.js'), require('./ler-financeiro.js'), require('./familias.js'), require('./ler-balancete.js'));
+    module.exports = fabrica(require('./util.js'), require('./ler-planilha.js'), require('./ler-razao.js'), require('./ler-financeiro.js'), require('./familias.js'), require('./ler-balancete.js'), require('./ler-diario.js'));
   } else {
-    raiz.Leitor = fabrica(raiz.Util, raiz.LerPlanilha, raiz.LerRazao, raiz.LerFinanceiro, raiz.Familias, raiz.LerBalancete);
+    raiz.Leitor = fabrica(raiz.Util, raiz.LerPlanilha, raiz.LerRazao, raiz.LerFinanceiro, raiz.Familias, raiz.LerBalancete, raiz.LerDiario);
   }
-})(typeof self !== 'undefined' ? self : this, function (Util, LerPlanilha, LerRazao, LerFinanceiro, Familias, LerBalancete) {
+})(typeof self !== 'undefined' ? self : this, function (Util, LerPlanilha, LerRazao, LerFinanceiro, Familias, LerBalancete, LerDiario) {
   'use strict';
 
   const NOMES_DOS_TIPOS = {
     razao: 'Razão contábil',
+    diario: 'Livro diário',
     financeiro_pagar: 'Contas a pagar em aberto',
     financeiro_receber: 'Contas a receber em aberto',
     financeiro_adiantamento: 'Adiantamentos a fornecedores em aberto',
@@ -49,6 +50,18 @@
     r.previa = previa(planilha.abas);
 
     // (saldo de abertura por fornecedor: formato a definir com o Dony — Parte 5.3)
+
+    // Livro diário (todas as contas, uma partida por linha): antes do razão, que confundiria a lista de lançamentos.
+    const recDiario = LerDiario ? LerDiario.reconhecer(planilha.abas, { nomeArquivo }) : { tipo: null };
+    if (recDiario.tipo === 'diario') {
+      const d = LerDiario.ler(planilha.abas, { nomeArquivo });
+      r.tipo = 'diario';
+      r.motivo = recDiario.motivo;
+      r.diario = d;
+      r.avisos = r.avisos.concat(d.avisos);
+      if (d.periodo) r.competencia = Util.competenciaDe(Util.lerData(d.periodo.de));
+      return fechar(r);
+    }
 
     const recRazao = LerRazao.reconhecer(planilha.abas);
     if (recRazao.tipo === 'razao') {
