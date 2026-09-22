@@ -858,6 +858,52 @@ table.apres.ajustes-sim td.txt { white-space: normal; }
 .aj-lado small { color: var(--texto-suave); }
 .aj-form .aj-valor { width: 170px; text-align: right; font-variant-numeric: tabular-nums; font-weight: 700; }
 .aj-efeito { margin: 0; font-size: 13px; min-height: 18px; color: var(--texto-suave); }
+/* ---------- Balanço, DRE e fluxo de caixa para assinar: folha A4 em pé, sóbria (preto no branco) ---------- */
+.dem { font-family: "Segoe UI", "DejaVu Sans", Arial, sans-serif; color: #111; }
+.dem-pagina { width: 210mm; min-height: 296mm; box-sizing: border-box; padding: 18mm 18mm 16mm; background: #fff; box-shadow: 0 3px 14px rgba(0, 0, 0, 0.22);
+  display: flex; flex-direction: column; font-size: 9.5pt; line-height: 1.35; flex: none; }
+.dem-cab { text-align: center; margin-bottom: 7mm; }
+.dem-empresa { font-size: 12pt; font-weight: 700; text-transform: uppercase; letter-spacing: 0.02em; }
+.dem-cnpj { font-size: 9.5pt; color: #333; margin-top: 1mm; }
+.dem-cab h2 { font-size: 13pt; margin: 5mm 0 1mm; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; color: #111; }
+.dem-sub { font-size: 9.5pt; color: #333; }
+.dem-tabela { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.dem-tabela th { font-size: 8.5pt; font-weight: 700; text-align: right; border-bottom: 0.4mm solid #111; padding: 1.2mm 1.5mm; vertical-align: bottom; line-height: 1.25; }
+.dem-tabela th:first-child { text-align: left; }
+.dem-tabela td { padding: 0.9mm 1.5mm; border-bottom: 0.15mm solid #e2e2e2; }
+.dem-tabela td.num { text-align: right; white-space: nowrap; width: 33mm; }
+.dem-tabela .neg { color: inherit; }
+.dem-tabela .zero { color: #888; }
+.dem-tabela tr.dem-secao td { font-weight: 700; padding-top: 3.5mm; border-bottom: 0.3mm solid #111; text-transform: uppercase; font-size: 9pt; letter-spacing: 0.03em; }
+.dem-tabela tr.dem-grupo td { font-weight: 700; }
+.dem-tabela tr.dem-conta td:first-child { padding-left: 6mm; }
+.dem-tabela tr.dem-subtotal td { font-weight: 700; border-top: 0.25mm solid #111; }
+.dem-tabela tr.dem-total td { font-weight: 700; border-top: 0.35mm solid #111; border-bottom: 0.9mm double #111; background: #f2f2f2; }
+.dem-assinaturas { margin-top: auto; padding-top: 12mm; break-inside: avoid; }
+.dem-local { text-align: right; margin: 0 0 17mm; }
+.dem-ass-linhas { display: grid; grid-template-columns: 1fr 1fr; gap: 14mm; }
+.dem-ass { text-align: center; font-size: 9pt; display: flex; flex-direction: column; gap: 0.6mm; }
+.dem-ass .dem-linha { border-top: 0.25mm solid #111; margin-bottom: 1.2mm; }
+.dem-ass .dem-falta { color: #b3261e; font-weight: 600; }
+@media print {
+  @page demonstracao { size: A4 portrait; margin: 14mm; }
+  body.imprimindo-demonstracao .conteudo > *:not(.apres-impressao) { display: none !important; }
+  body.imprimindo-demonstracao .apres-impressao { display: block !important; }
+  /* No papel: bloco comum (as assinaturas vêm logo depois da tabela; o "empurrar para o pé" da tela jogava elas para a
+     folha seguinte) e letra e espaços um pouco menores, para cada demonstração caber numa folha. */
+  body.imprimindo-demonstracao .dem-pagina { page: demonstracao; display: block; width: auto; min-height: 0; padding: 0; box-shadow: none; break-after: page; font-size: 8.8pt; line-height: 1.25; }
+  body.imprimindo-demonstracao .dem-cab { margin-bottom: 5mm; }
+  body.imprimindo-demonstracao .dem-cab h2 { margin: 3mm 0 1mm; }
+  body.imprimindo-demonstracao .dem-tabela td { padding: 0.55mm 1.5mm; }
+  body.imprimindo-demonstracao .dem-tabela tr.dem-secao td { padding-top: 2.2mm; }
+  body.imprimindo-demonstracao .dem-assinaturas { margin-top: 0; padding-top: 10mm; }
+  body.imprimindo-demonstracao .dem-local { margin-bottom: 13mm; }
+  body.imprimindo-demonstracao .dem-pagina:last-child { break-after: auto; }
+  body.imprimindo-demonstracao .dem-tabela tr { break-inside: avoid; }
+  body.imprimindo-demonstracao .dem-tabela thead { display: table-header-group; }
+  .dem, .dem * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+}
+
 /* ---------- Reclassificar arrastando: a alça ⠿ na conta e o subtotal que recebe (verde) ---------- */
 table.apres tr.analitica .arrastar { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; padding: 0; margin: 0 4px 0 -20px; border: 0; border-radius: 3px; background: transparent; color: #8a94a1; cursor: grab; opacity: 0; vertical-align: -3px; }
 table.apres tr.analitica:hover .arrastar, table.apres tr.analitica .arrastar:focus-visible, table.apres tr.sem-linha-conta .arrastar { opacity: 1; }

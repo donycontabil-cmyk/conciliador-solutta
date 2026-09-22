@@ -424,6 +424,26 @@
       return limpo;
     }
 
+    // Quem assina o balanço, a DRE e o fluxo de caixa (Dony, 22/09/2026: "emitir o balanço e a DRE para imprimir e assinar pro
+    // cliente"): { local, responsavel: { nome, cargo, cpf }, contador: { nome, crc, cpf } }; só texto, com tamanho máximo.
+    function limparAssinaturas(valor) {
+      if (!valor || typeof valor !== 'object') return null;
+      const texto = (x, n) => (typeof x === 'string' ? x.replace(/\s+/g, ' ').trim().slice(0, n) : '');
+      const pessoa = (p, campos) => {
+        const o = {};
+        campos.forEach(([k, n]) => { const t = texto(p && p[k], n); if (t) o[k] = t; });
+        return Object.keys(o).length ? o : null;
+      };
+      const limpo = {};
+      const local = texto(valor.local, 80);
+      if (local) limpo.local = local;
+      const responsavel = pessoa(valor.responsavel, [['nome', 100], ['cargo', 60], ['cpf', 20]]);
+      if (responsavel) limpo.responsavel = responsavel;
+      const contador = pessoa(valor.contador, [['nome', 100], ['crc', 30], ['cpf', 20]]);
+      if (contador) limpo.contador = contador;
+      return Object.keys(limpo).length ? limpo : null;
+    }
+
     async function salvarEmpresa(empresa) {
       exigirConexao();
       const codigo = validarCodigo(empresa && empresa.codigo);
@@ -472,6 +492,8 @@
       if (mapaDre) registro.mapaDre = mapaDre;
       const cor = empresa.corRelatorio !== undefined ? empresa.corRelatorio : (anterior && anterior.corRelatorio);
       if (typeof cor === 'string' && /^#[0-9a-fA-F]{6}$/.test(cor)) registro.corRelatorio = cor.toLowerCase();
+      const assinaturas = limparAssinaturas(empresa.assinaturas !== undefined ? empresa.assinaturas : (anterior && anterior.assinaturas));
+      if (assinaturas) registro.assinaturas = assinaturas;
       if (i >= 0) lista[i] = registro; else lista.push(registro);
       await gravar(raiz, 'empresas.json', JSON.stringify(lista, null, 2));
       await pastaDaEmpresa(codigo, true);

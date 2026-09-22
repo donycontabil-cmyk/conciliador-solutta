@@ -664,8 +664,8 @@
     const vPl = soma([vPlBalancete, resultadoDre]);
     linhas.push({ id: 'pl', rotulo: 'PATRIMÔNIO LÍQUIDO', tipo: 'total', nivel: 1, valores: vPl });
     if (cb.pl) {
-      linhas.push(daConta(cb.pl, -1, 2, { tipo: 'grupo', rotulo: cb.pl.titulo + ' (no balancete)' }));
-      filhas(cb.pl.conta).forEach((c3) => linhas.push(daConta(c3, -1, 3)));
+      linhas.push(daConta(cb.pl, -1, 2, { tipo: 'grupo', rotulo: cb.pl.titulo + ' (no balancete)', grupoPl: true }));
+      filhas(cb.pl.conta).forEach((c3) => linhas.push(daConta(c3, -1, 3, { doPl: true })));
     }
     linhas.push({ id: 'resultado', rotulo: 'Resultado do exercício (pela DRE, desde o último encerramento)', tipo: 'resultado', nivel: 2, valores: resultadoDre });
     const vTotal = soma([vPassivo, vPl]);
@@ -1038,6 +1038,181 @@
   }
 
   // ------------------------------------------------------------------
+  // DEMONSTRAÇÕES PARA ASSINAR (Dony, 22/09/2026: "emitir o balanço e a DRE direto do sistema para imprimir e assinar pro
+  // cliente" + "e já cria também o fluxo de caixa, do modo mais simples — eu acho que é o indireto"). Para o mês k (a
+  // data-base; posição em rel.meses):
+  //  - BALANÇO PATRIMONIAL no fim do mês: ativo, passivo e patrimônio líquido (com o resultado do exercício que ainda não
+  //    foi encerrado, pela DRE) e os totais, que têm que fechar;
+  //  - DRE do período: do começo do ano até o mês (ou só o mês), com as linhas da DRE da empresa;
+  //  - FLUXO DE CAIXA pelo MÉTODO INDIRETO no mesmo período: o lucro, mais a depreciação, mais a variação de cada grupo do
+  //    balanço entre o começo do período (o saldo anterior do primeiro mês) e o fim (o saldo do mês): no ativo, o aumento
+  //    consome caixa; no passivo, gera. Operacional = circulante; investimento = não circulante do ativo; financiamento =
+  //    empréstimos, não circulante do passivo e o PL fora o lucro. A soma dá a variação do disponível (a conferência).
+  // O período é seguido: com um mês faltando no meio, começa depois dele (e avisa). Com o ano anterior (op.comparar): o
+  // balanço do fim do ano anterior (o último mês com balancete dele) e a DRE dos mesmos meses do ano anterior.
+  // op: { k, soMes (a DRE só do mês), comparar }.
+  // ------------------------------------------------------------------
+  const ultimoDia = (ano, mes) => new Date(ano, mes, 0).getDate();
+  const dataDoFim = (ano, mes) => String(ultimoDia(ano, mes)).padStart(2, '0') + '/' + String(mes).padStart(2, '0') + '/' + ano;
+  const dataDoComeco = (ano, mes) => '01/' + String(mes).padStart(2, '0') + '/' + ano;
+  // Nome da conta para a demonstração: o nome do plano (em geral em maiúsculas) com só a primeira letra grande; as siglas
+  // (ICMS, PIS, INSS...) continuam em maiúsculas.
+  const SIGLAS = new Set(['ICMS', 'PIS', 'COFINS', 'INSS', 'FGTS', 'IRPJ', 'CSLL', 'IRRF', 'ISS', 'ISSQN', 'IPI', 'IOF', 'IPTU', 'IPVA', 'PAT', 'CPC', 'LTDA', 'S/A', 'SA', 'ME', 'EPP', 'IFRS', 'CP', 'LP', 'PL', 'RH', 'TI', 'DAS', 'SIMPLES']);
+  function nomeDaDemonstracao(t) {
+    const s = String(t || '').replace(/\s+/g, ' ').trim();
+    if (!s || s !== s.toUpperCase()) return s;
+    return s.split(' ').map((p, i) => {
+      const limpo = p.replace(/[^A-Za-zÀ-ÿ/]/g, '');
+      if (SIGLAS.has(limpo) || /\d/.test(p)) return p;
+      const minusc = p.toLowerCase();
+      return i === 0 ? minusc.charAt(0).toUpperCase() + minusc.slice(1) : minusc;
+    }).join(' ');
+  }
+  // O nome no meio da frase ("aumento de impostos a recuperar"): só a primeira letra fica pequena, e a sigla não muda.
+  const noMeioDaFrase = (s) => (/^[A-ZÀ-Ý]{2,}\b/.test(s) ? s : s.charAt(0).toLowerCase() + s.slice(1));
+  // Grupos do passivo circulante que são financiamento (e não operação) no fluxo de caixa.
+  const DE_FINANCIAMENTO = /EMPRESTIMO|FINANCIAMENTO|DEBENTURE|ARRENDAMENTO|LEASING|MUTUO|DIVIDENDO|LUCROS A DISTRIBUIR|JUROS SOBRE (O )?CAPITAL/;
+  const IMOBILIZADO = /IMOBILIZ|INTANGIV|DIFERIDO/;
+
+  function demonstracoes(rel, anterior, op) {
+    const opc = op || {};
+    const k = opc.k;
+    const m = rel.meses[k];
+    if (!m || !m.tem) return null;
+    const ano = rel.ano;
+    const avisos = [];
+    // O período: os meses seguidos (com balancete) que terminam no mês; ou só o mês.
+    let ini = k;
+    if (!opc.soMes) while (ini > 0 && rel.meses[ini - 1].tem) ini--;
+    const ks = [];
+    for (let i = ini; i <= k; i++) ks.push(i);
+    const falta = !opc.soMes && ini > 0 ? rel.meses[ini - 1].rotulo : null;
+    if (falta) avisos.push('Falta o balancete de ' + falta + ': a DRE e o fluxo de caixa vão de ' + rel.meses[ini].rotulo + ' a ' + m.rotulo + '.');
+    else if (!opc.soMes && rel.meses[ini].mes !== 1) avisos.push('O primeiro balancete do ano é de ' + rel.meses[ini].rotulo + ': a DRE e o fluxo de caixa começam nele (sem janeiro, não é o ano todo).');
+    const periodo = { de: dataDoComeco(ano, rel.meses[ini].mes), ate: dataDoFim(ano, m.mes) };
+    // O ano anterior: o balanço do último mês com balancete; a DRE dos mesmos meses.
+    const comAnt = !!(opc.comparar && anterior);
+    const jFim = comAnt ? anterior.meses.map((x, j) => (x.tem ? j : -1)).filter((j) => j >= 0).pop() : undefined;
+    const ksAnt = comAnt ? ks.map((kk) => mesNoOutroAno(rel, kk, anterior)).filter((j) => j >= 0) : [];
+    const ant = comAnt ? {
+      data: jFim === undefined ? '' : dataDoFim(anterior.ano, anterior.meses[jFim].mes),
+      periodo: ksAnt.length ? { de: dataDoComeco(anterior.ano, anterior.meses[ksAnt[0]].mes), ate: dataDoFim(anterior.ano, anterior.meses[ksAnt[ksAnt.length - 1]].mes) } : null,
+    } : null;
+    if (comAnt && ksAnt.length < ks.length) avisos.push(anterior.ano + ' não tem balancete de todos os meses do período: a DRE de ' + anterior.ano + ' fica só com ' + ksAnt.length + ' mês(es).');
+
+    // ---------- Balanço patrimonial no fim do mês (e do ano anterior)
+    const juntasBal = mesclar(rel.balanco.linhas, comAnt ? anterior.balanco.linhas : [], (l) => l.id || 'c:' + l.conta);
+    const bal = [];
+    let totalAtivo = null, totalAtivoAnt = null;
+    juntasBal.forEach(({ a, b }) => {
+      const base = a || b;
+      const valor = a ? a.valores[k] : 0;
+      const valorAnt = comAnt ? (b && jFim !== undefined ? b.valores[jFim] : 0) : null;
+      if (base.id === 'ativo') { bal.push({ tipo: 'secao', rotulo: 'ATIVO' }); totalAtivo = valor; totalAtivoAnt = valorAnt; return; }
+      if (base.id === 'passivo') { bal.push({ tipo: 'total', id: 'totalAtivo', rotulo: 'TOTAL DO ATIVO', valor: totalAtivo, anterior: totalAtivoAnt }, { tipo: 'secao', rotulo: 'PASSIVO' }); return; }
+      if (base.id === 'pl') { bal.push({ tipo: 'grupo', nivel: 2, id: 'pl', rotulo: 'Patrimônio líquido', valor, anterior: valorAnt }); return; }
+      if (base.grupoPl) return;
+      if (base.id === 'resultado') { bal.push({ tipo: 'conta', nivel: 3, id: 'resultado', rotulo: 'Resultado do exercício', valor, anterior: valorAnt }); return; }
+      if (base.id === 'totalPassivoPl') { bal.push({ tipo: 'total', id: 'totalPassivoPl', rotulo: 'TOTAL DO PASSIVO E DO PATRIMÔNIO LÍQUIDO', valor, anterior: valorAnt }); return; }
+      bal.push({ tipo: base.tipo === 'grupo' ? 'grupo' : 'conta', nivel: base.nivel, conta: base.conta, rotulo: nomeDaDemonstracao(base.rotulo), valor, anterior: valorAnt });
+    });
+    // Grupo com uma conta só embaixo que se divide em várias (ex.: passivo circulante > obrigações correntes > fornecedores,
+    // empréstimos...): no lugar dela vão as de baixo, com o detalhe que interessa na demonstração.
+    const plano = planoJunto([rel.contas].concat(comAnt ? [anterior.contas] : []));
+    const saldoDaConta = (r, conta, j, sinal) => { const l = r.mensal.linhas.find((x) => x.conta === conta); return l ? sinal * (l.valores[j] || 0) : 0; };
+    let sinal = 1;
+    for (let i = 0; i < bal.length; i++) {
+      const g = bal[i];
+      if (g.tipo === 'secao') sinal = g.rotulo === 'PASSIVO' ? -1 : 1;
+      if (g.tipo !== 'grupo' || !g.conta) continue;
+      let fim = i + 1;
+      while (fim < bal.length && bal[fim].tipo === 'conta' && !bal[fim].id) fim++;
+      if (fim - i - 1 !== 1) continue;
+      const netas = plano.filter((c) => c.pai === bal[i + 1].conta);
+      if (netas.length < 2) continue;
+      bal.splice(i + 1, 1, ...netas.map((c) => ({ tipo: 'conta', nivel: 3, conta: c.conta, rotulo: nomeDaDemonstracao(c.titulo), valor: saldoDaConta(rel, c.conta, k, sinal),
+        anterior: comAnt ? (jFim === undefined ? 0 : saldoDaConta(anterior, c.conta, jFim, sinal)) : null })));
+    }
+    const totalPl = (bal.find((l) => l.id === 'totalPassivoPl') || {});
+    const difBal = (totalAtivo || 0) - (totalPl.valor || 0);
+    const difBalAnt = comAnt ? (totalAtivoAnt || 0) - (totalPl.anterior || 0) : 0;
+    if (Math.abs(difBal) > 1) avisos.push('O balanço de ' + m.rotulo + ' não fecha: o ativo é ' + Util.formatarCentavos(totalAtivo) + ' e o passivo mais o patrimônio líquido, ' + Util.formatarCentavos(totalPl.valor) + '. Confira antes de imprimir.');
+    if (comAnt && Math.abs(difBalAnt) > 1) avisos.push('O balanço de ' + anterior.ano + ' não fecha (diferença de ' + Util.formatarCentavos(difBalAnt) + ').');
+
+    // ---------- DRE do período (e dos mesmos meses do ano anterior)
+    const linhasDre = (r) => r.dre.mensal.linhas.filter((l) => semAcumulado(l) && l.tipo !== 'analitica' && l.id !== 'ebitda');
+    const dre = mesclar(linhasDre(rel), comAnt ? linhasDre(anterior) : [], (l) => l.id).map(({ a, b }) => {
+      const base = a || b;
+      return { id: base.id, tipo: base.tipo, rotulo: base.rotulo, categoria: base.categoria, destaque: !!base.destaque, semLinha: !!base.semLinha,
+        valor: a ? somaNos(a.valores, ks) || 0 : 0, anterior: comAnt ? (b ? somaNos(b.valores, ksAnt) || 0 : 0) : null };
+    });
+    const sem = dre.find((l) => l.semLinha && (l.valor || l.anterior));
+    if (sem) avisos.push('Há valor em "Outras contas de resultado" (sem linha na DRE): arraste as contas para a linha certa na aba DRE antes de imprimir.');
+
+    // ---------- Fluxo de caixa (método indireto) no período
+    const cb = contasDoBalanco(rel.contas);
+    let dfc = null;
+    if (!cb.ac || !cb.disponivel) avisos.push('Não achei o ' + (!cb.ac ? 'ativo circulante' : 'disponível (caixa e bancos)') + ' no plano de contas: sem ele não dá para montar o fluxo de caixa.');
+    else {
+      const saldos = (rotulo, campo) => { const mapa = new Map(); rel.base.forEach((x) => { if (x.mes === rotulo) mapa.set(x.conta, x[campo]); }); return mapa; };
+      const abertura = saldos(rel.meses[ini].rotulo, 'saldoAnterior'), fechamento = saldos(m.rotulo, 'saldoAtual');
+      const delta = (c) => (fechamento.get(c.conta) || 0) - (abertura.get(c.conta) || 0);
+      const porConta = new Map(rel.contas.map((c) => [c.conta, c]));
+      const filhasDe = (c) => (c ? rel.contas.filter((x) => x.pai === c.conta) : []);
+      const contem = (c, alvo) => { let x = alvo; while (x && x.pai) { if (x.pai === c.conta) return true; x = porConta.get(x.pai); } return false; };
+      // Os grupos de baixo de uma conta, abrindo o que contém o disponível (o disponível não entra: ele é o caixa).
+      const gruposSem = (pai, fora) => [].concat(...filhasDe(pai).map((c) => (c.conta === fora.conta ? [] : contem(c, fora) ? gruposSem(c, fora) : [c])));
+      // Um grupo só, que se divide em várias contas: vão as de baixo (ex.: obrigações correntes > fornecedores, empréstimos...).
+      const abrirUnico = (lista) => { let l = lista; while (l.length === 1 && filhasDe(l[0]).length >= 2) l = filhasDe(l[0]); return l; };
+      const nome = (c) => nomeDaDemonstracao(c.titulo);
+      const soma = (vs) => vs.reduce((s, v) => s + v, 0);
+      const serie = (id) => (rel.dre.mensal.linhas.find((l) => l.id === id) || {}).valores || [];
+      const lucro = somaNos(serie('lucroLiquido'), ks) || 0;
+      const depreciacao = -(somaNos(serie('depreciacao'), ks) || 0);
+      const operacionais = [], investimentos = [], financiamentos = [];
+      const linha = (lista, rotulo, valor, conta) => { lista.push({ rotulo, valor, conta: conta || null }); };
+      // Ativo circulante (fora o disponível): operacional.
+      abrirUnico(gruposSem(cb.ac, cb.disponivel)).forEach((c) => linha(operacionais, '(Aumento) redução de ' + noMeioDaFrase(nome(c)), -delta(c), c.conta));
+      // Passivo circulante: operacional, fora empréstimos, financiamentos e dividendos.
+      abrirUnico(filhasDe(cb.pc)).forEach((c) => {
+        const fin = DE_FINANCIAMENTO.test(nomeNormal(c.titulo));
+        linha(fin ? financiamentos : operacionais, 'Aumento (redução) de ' + noMeioDaFrase(nome(c)) + (fin ? ' (curto prazo)' : ''), -delta(c), c.conta);
+      });
+      // Ativo não circulante: investimento (imobilizado e intangível numa linha, com a depreciação somada de volta).
+      const naoCirc = abrirUnico(filhasDe(cb.anc));
+      const imob = naoCirc.filter((c) => IMOBILIZADO.test(nomeNormal(c.titulo)));
+      naoCirc.filter((c) => imob.indexOf(c) < 0).forEach((c) => linha(investimentos, '(Aumento) redução de ' + noMeioDaFrase(nome(c)), -delta(c), c.conta));
+      if (imob.length || depreciacao) linha(investimentos, 'Aquisição de imobilizado e intangível (líquida de baixas)', -(soma(imob.map(delta)) + depreciacao));
+      // Passivo não circulante: financiamento.
+      abrirUnico(filhasDe(cb.pnc)).forEach((c) => linha(financiamentos, 'Aumento (redução) de ' + noMeioDaFrase(nome(c)) + ' (longo prazo)', -delta(c), c.conta));
+      // Outros grupos do ativo e do passivo (planos com o realizável ou o exigível a longo prazo direto no 1º nível).
+      const usados = new Set([cb.ac, cb.anc, cb.pc, cb.pnc, cb.pl].filter(Boolean).map((c) => c.conta));
+      filhasDe(cb.ativo).filter((c) => !usados.has(c.conta)).forEach((c) => linha(investimentos, '(Aumento) redução de ' + noMeioDaFrase(nome(c)), -delta(c), c.conta));
+      filhasDe(cb.passivo).filter((c) => !usados.has(c.conta)).forEach((c) => linha(financiamentos, 'Aumento (redução) de ' + noMeioDaFrase(nome(c)), -delta(c), c.conta));
+      // O patrimônio líquido fora o lucro do período: aumento de capital, distribuição de lucros e ajustes.
+      const doResultado = rel.contas.filter((c) => c.nivel === 1 && !patrimonial(c.conta));
+      const resultadoAberto = (mapa) => -soma(doResultado.map((c) => mapa.get(c.conta) || 0));
+      const plTotal = (mapa) => (cb.pl ? -(mapa.get(cb.pl.conta) || 0) : 0) + resultadoAberto(mapa);
+      linha(financiamentos, 'Outras variações do patrimônio líquido (capital, distribuição de lucros e ajustes)', plTotal(fechamento) - plTotal(abertura) - lucro);
+      const tira0 = (lista) => lista.filter((l) => Math.round(l.valor));
+      const totOp = lucro + depreciacao + soma(operacionais.map((l) => l.valor));
+      const totInv = soma(investimentos.map((l) => l.valor)), totFin = soma(financiamentos.map((l) => l.valor));
+      const caixaInicio = abertura.get(cb.disponivel.conta) || 0, caixaFim = fechamento.get(cb.disponivel.conta) || 0;
+      const aumento = totOp + totInv + totFin;
+      const diferenca = caixaFim - caixaInicio - aumento;
+      if (Math.abs(diferenca) > 1) avisos.push('O fluxo de caixa não fecha com o disponível por ' + Util.formatarCentavos(diferenca) + ' (o balancete de ' + m.rotulo + ' ou de ' + rel.meses[ini].rotulo + ' pode não estar fechando).');
+      dfc = { lucro, depreciacao, operacionais: tira0(operacionais), investimentos: tira0(investimentos), financiamentos: tira0(financiamentos),
+        totalOperacional: totOp, totalInvestimento: totInv, totalFinanciamento: totFin, aumento, caixaInicio, caixaFim, diferenca, confere: Math.abs(diferenca) <= 1,
+        dataInicio: dataDoFim(rel.meses[ini].mes === 1 ? ano - 1 : ano, rel.meses[ini].mes === 1 ? 12 : rel.meses[ini].mes - 1), disponivel: cb.disponivel.conta + ' ' + cb.disponivel.titulo };
+    }
+    return {
+      k, mes: m, data: dataDoFim(ano, m.mes), periodo, meses: ks, soMes: !!opc.soMes, falta, anterior: ant,
+      balanco: { linhas: bal, totalAtivo, totalPassivoPl: totalPl.valor, fecha: Math.abs(difBal) <= 1, diferenca: difBal, fechaAnterior: !comAnt || Math.abs(difBalAnt) <= 1 },
+      dre, dfc, avisos,
+    };
+  }
+
+  // ------------------------------------------------------------------
   // DRE SIMULAÇÃO (Dony, 21/09/2026: "ela vai pegar o ano real de 26 e, os meses seguintes, os mesmos valores do
   // ano anterior; e eu quero ter a condição de digitar um percentual de evolução — por exemplo, digitar 10% a mais
   // para tudo, e ele ajusta 10% a mais para tudo nessa simulação").
@@ -1199,6 +1374,6 @@
     return { tipo: 'balancete', iguais: la.length - sairam.length, entraram, sairam, mudaram, qtdAntes: la.length, qtdDepois: ld.length, antes: totais(la), depois: totais(ld) };
   }
 
-  return { montar, compararBalancetes, indicadores, comparativo, simulacao, INDICADORES, contasDoBalanco, MODELO_DRE, FORA_DA_DRE, PARAMETROS, AJUSTES_MODELO, CONTA_PAT_MODELO, PREMISSAS, rotuloMes, compararContas, valorUsado,
+  return { montar, compararBalancetes, indicadores, comparativo, simulacao, demonstracoes, nomeDaDemonstracao, noMeioDaFrase, INDICADORES, contasDoBalanco, MODELO_DRE, FORA_DA_DRE, PARAMETROS, AJUSTES_MODELO, CONTA_PAT_MODELO, PREMISSAS, rotuloMes, compararContas, valorUsado,
     LINHAS_DO_MAPA, sugerirMapaDre, mapaDoModelo, reclassificarConta, planoJunto, linhaNoMapa, linhaDoModelo, avaliarModelo, linhasSugeridas, nomeNormal };
 });

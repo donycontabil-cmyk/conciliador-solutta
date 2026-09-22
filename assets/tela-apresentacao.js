@@ -36,23 +36,36 @@
     { id: 'balancete-mensal', titulo: 'Balancete mensal' },
     { id: 'balancete-trimestral', titulo: 'Balancete trimestral' },
     { id: 'lalur', titulo: 'LALUR trimestral' },
-    { id: 'cliente', titulo: '📄 Relatório do cliente' },
+    { id: 'cliente', titulo: 'Relatório do cliente' },
+    { id: 'bp-assinatura', titulo: 'Balanço para assinatura' },
+    { id: 'dre-assinatura', titulo: 'DRE para assinatura' },
+    { id: 'dfc', titulo: 'Fluxo de caixa' },
   ];
   // As DREs num botão só (Dony, 22/09/2026: "como a gente já tem mais de 3 DREs, eu quero poder clicar em DRE e escolher:
   // DRE mensal, trimestral ou simulação"): na barra fica "DRE" e, com uma delas aberta, a escolha aparece embaixo.
   const GRUPO_DRE = ['dre-mensal', 'dre-trimestral', 'simulacao'];
+  // Os relatórios num botão só (Dony, 22/09/2026: "você vai colocar assim: relatórios — o relatório do cliente, DRE para
+  // assinatura, balanço para assinatura, e já cria também o fluxo de caixa"). Cada grupo lembra a última aba aberta.
+  const GRUPO_RELATORIOS = ['cliente', 'bp-assinatura', 'dre-assinatura', 'dfc'];
+  const GRUPOS_DE_ABAS = [
+    { id: 'dre', abas: GRUPO_DRE, rotulo: 'DRE', dica: 'DRE mensal, trimestral ou simulação', ultima: 'ultimaDre' },
+    { id: 'rel', abas: GRUPO_RELATORIOS, rotulo: '📄 Relatórios', dica: 'Relatório do cliente, balanço e DRE para assinatura e fluxo de caixa', ultima: 'ultimoRelatorio' },
+  ];
+  const grupoDaAba = (id) => GRUPOS_DE_ABAS.find((g) => g.abas.indexOf(id) >= 0) || null;
   const REGRAS = { movimento: 'Movimento do mês (conta de resultado)', 'aumento-credor': 'Aumento do saldo credor (conta patrimonial)' };
   const CHAVE_PREF = 'conciliador-solutta.apresentacao';
 
   // Estado da tela (continua entre redesenhos).
   const E = { codigo: null, ano: null, emp: null, rel: null, registro: null, config: {}, lugares: [], metas: [],
     aba: 'dre-mensal', avah: true, nivel: 5, semZeradas: false, abertos: new Set(), selecao: null, marcarLalur: false, balancetes: [], fila: null, clienteMes: null, cacheCliente: null, ultimoCliente: null, casas: 2, milhar: false,
-    dreEdicao: null, balancetesAnt: [], relAnt: null, ultimaDre: 'dre-mensal' };
+    dreEdicao: null, balancetesAnt: [], relAnt: null, ultimaDre: 'dre-mensal', ultimoRelatorio: 'cliente',
+    assinaturaMes: null, assinaturaSoMes: false, assinaturaComparar: false, assinaturaNivel: 3 };
   (function lerPreferencias() {
     try {
       const p = JSON.parse((raiz.localStorage && raiz.localStorage.getItem(CHAVE_PREF)) || '{}') || {};
       if (ABAS.some((a) => a.id === p.aba)) E.aba = p.aba;
       if (GRUPO_DRE.indexOf(p.ultimaDre) >= 0) E.ultimaDre = p.ultimaDre;
+      if (GRUPO_RELATORIOS.indexOf(p.ultimoRelatorio) >= 0) E.ultimoRelatorio = p.ultimoRelatorio;
       if (typeof p.avah === 'boolean') E.avah = p.avah;
       if (p.nivel >= 1 && p.nivel <= 9) E.nivel = p.nivel;
       if (typeof p.semZeradas === 'boolean') E.semZeradas = p.semZeradas;
@@ -61,7 +74,7 @@
     } catch (e) { /* sem preferências guardadas */ }
   })();
   function guardarPreferencias() {
-    try { raiz.localStorage.setItem(CHAVE_PREF, JSON.stringify({ aba: E.aba, ultimaDre: E.ultimaDre, avah: E.avah, nivel: E.nivel, semZeradas: E.semZeradas, casas: E.casas, milhar: E.milhar })); } catch (e) { /* navegador sem armazenamento */ }
+    try { raiz.localStorage.setItem(CHAVE_PREF, JSON.stringify({ aba: E.aba, ultimaDre: E.ultimaDre, ultimoRelatorio: E.ultimoRelatorio, avah: E.avah, nivel: E.nivel, semZeradas: E.semZeradas, casas: E.casas, milhar: E.milhar })); } catch (e) { /* navegador sem armazenamento */ }
   }
 
   // ------------------------------------------------------------------
@@ -213,7 +226,7 @@
       (E.anos.length > 1 ? '<select class="apres-campo" id="apres-ano" title="Ano do relatório (para subir os balancetes de outro ano, escolha o ano aqui)">' +
         E.anos.map((a) => '<option value="' + a + '"' + (a === E.ano ? ' selected' : '') + '>' + a + (E.anosComBalancete.indexOf(a) < 0 ? ' · sem balancete' : '') + '</option>').join('') + '</select>' : '') +
       raiz.TelaSubir.botao(chave) +
-      (semBalancete ? '' : '<button type="button" class="botao" data-aba="cliente" title="As folhas para mandar ao cliente, com o logo da empresa">📄 Relatório do cliente</button>' +
+      (semBalancete ? '' : '<button type="button" class="botao" data-aba-grupo="rel" title="O relatório do cliente, o balanço e a DRE para assinatura e o fluxo de caixa">📄 Relatórios</button>' +
         '<button type="button" class="botao" id="apres-excel" title="As mesmas abas da planilha modelo">⬇ Excel</button>' +
         '<button type="button" class="botao primario" id="apres-imprimir" title="Na janela de impressão, escolha a impressora ou “Salvar como PDF”">🖨 Imprimir / PDF</button>') +
       '</div></div>' +
@@ -244,18 +257,22 @@
 
   // A barra de abas: as DREs viram um botão "DRE"; com uma DRE aberta, a escolha entre as três aparece embaixo.
   function barraDeAbas() {
-    const naDre = GRUPO_DRE.indexOf(E.aba) >= 0;
-    const principais = ABAS.filter((a) => GRUPO_DRE.indexOf(a.id) < 0 || a.id === GRUPO_DRE[0]).map((a) => (a.id === GRUPO_DRE[0]
-      ? '<button type="button" role="tab" data-aba-dre="1" class="' + (naDre ? 'ativa' : '') + '" aria-expanded="' + naDre + '" title="DRE mensal, trimestral ou simulação">DRE <span class="aba-seta">▾</span></button>'
-      : '<button type="button" role="tab" data-aba="' + a.id + '" class="' + (E.aba === a.id ? 'ativa' : '') + '">' + a.titulo + '</button>')).join('');
-    const sub = !naDre ? '' : '<div class="subabas nao-imprimir" role="tablist" aria-label="Qual DRE">' +
-      GRUPO_DRE.map((id) => '<button type="button" role="tab" data-aba="' + id + '" class="' + (E.aba === id ? 'ativa' : '') + '">' + ABAS.find((a) => a.id === id).titulo + '</button>').join('') + '</div>';
+    const ativo = grupoDaAba(E.aba);
+    const principais = ABAS.filter((a) => { const g = grupoDaAba(a.id); return !g || g.abas[0] === a.id; }).map((a) => {
+      const g = grupoDaAba(a.id);
+      if (!g) return '<button type="button" role="tab" data-aba="' + a.id + '" class="' + (E.aba === a.id ? 'ativa' : '') + '">' + a.titulo + '</button>';
+      return '<button type="button" role="tab" data-aba-grupo="' + g.id + '" class="' + (ativo === g ? 'ativa' : '') + '" aria-expanded="' + (ativo === g) + '" title="' + g.dica + '">' + g.rotulo +
+        ' <span class="aba-seta">▾</span></button>';
+    }).join('');
+    const sub = !ativo ? '' : '<div class="subabas nao-imprimir" role="tablist" aria-label="' + T.esc(ativo.dica) + '">' +
+      ativo.abas.map((id) => '<button type="button" role="tab" data-aba="' + id + '" class="' + (E.aba === id ? 'ativa' : '') + '">' + ABAS.find((a) => a.id === id).titulo + '</button>').join('') + '</div>';
     return '<div class="abas nao-imprimir" role="tablist">' + principais + '</div>' + sub;
   }
-  // Troca de aba (lembra a última DRE, para o botão DRE voltar nela).
+  // Troca de aba (cada grupo lembra a última aba, para o botão dele voltar nela).
   function irParaAba(el, id) {
     E.aba = id;
-    if (GRUPO_DRE.indexOf(id) >= 0) E.ultimaDre = id;
+    const g = grupoDaAba(id);
+    if (g) E[g.ultima] = id;
     guardarPreferencias();
     redesenharConteudo(el);
   }
@@ -289,7 +306,7 @@
       return '<span class="suave pequeno">Balanço pelo saldo do fim do mês; resultado pelo movimento do mês. <b>Período</b>: resultado somado nos meses escolhidos e balanço do último mês. ' +
         '▲▼ = mudança sobre a coluna anterior (verde melhora, vermelho piora).</span>';
     }
-    if (E.aba === 'cliente') return '';
+    if (GRUPO_RELATORIOS.indexOf(E.aba) >= 0) return '';
     if (E.aba === 'comparativo') {
       if (dreFechada()) return '';
       return '<button type="button" class="botao pequeno" data-opcao="abrir-tudo">＋ Abrir todas as contas</button>' +
@@ -428,6 +445,7 @@
     if (aba === 'comparativo') return dreFechada() ? (impressao ? '' : tituloSecao('Comparativo com ' + (E.ano - 1), '') + avisoDreFechada('O comparativo fica fechado')) : secaoComparativo(op);
     if (aba === 'simulacao') return dreFechada() ? (impressao ? '' : tituloSecao('DRE simulação', '') + avisoDreFechada('A simulação fica fechada')) : secaoSimulacao(op);
     if (aba === 'cliente') return dreFechada() ? (impressao ? '' : avisoDreFechada('O relatório do cliente fica fechado')) : secaoCliente(op);
+    if (DOCUMENTOS[aba]) return dreFechada() ? (impressao ? '' : avisoDreFechada('O balanço, a DRE e o fluxo de caixa para assinar ficam fechados')) : secaoDocumento(aba, op);
     if (/^dre-/.test(aba) && dreFechada() && impressao) return '';
     if (/^dre-/.test(aba) && (dreFechada() || E.dreEdicao) && !impressao) return secaoLinhasDre();
     if (aba === 'dre-mensal') return secaoDre(dreMensalVisivel(), 'DRE CPC 51 mensal detalhada', op, ficamNaDre('mensal'));
@@ -853,7 +871,15 @@
     el.addEventListener('click', async (ev) => {
       const aba = ev.target.closest('[data-aba]');
       if (aba) { irParaAba(el, aba.getAttribute('data-aba')); return; }
-      if (ev.target.closest('[data-aba-dre]')) { irParaAba(el, GRUPO_DRE.indexOf(E.ultimaDre) >= 0 ? E.ultimaDre : GRUPO_DRE[0]); return; }
+      const botaoGrupo = ev.target.closest('[data-aba-grupo]');
+      if (botaoGrupo) { const g = GRUPOS_DE_ABAS.find((x) => x.id === botaoGrupo.getAttribute('data-aba-grupo')); if (g) irParaAba(el, g.abas.indexOf(E[g.ultima]) >= 0 ? E[g.ultima] : g.abas[0]); return; }
+      // Balanço, DRE e fluxo de caixa para assinar: período, detalhe, assinaturas e impressão.
+      const dcPeriodo = ev.target.closest('button[data-dc-periodo]');
+      if (dcPeriodo) { E.assinaturaSoMes = dcPeriodo.getAttribute('data-dc-periodo') === 'mes'; redesenharFolha(el); return; }
+      const dcNivel = ev.target.closest('button[data-dc-nivel]');
+      if (dcNivel) { E.assinaturaNivel = Number(dcNivel.getAttribute('data-dc-nivel')); redesenharFolha(el); return; }
+      const dc = ev.target.closest('button[data-dc]');
+      if (dc) { if (dc.getAttribute('data-dc') === 'assinaturas') await editarAssinaturas(el); else await imprimirDocumentos(el, DOCUMENTOS[E.aba]); return; }
       const nivel = ev.target.closest('[data-nivel]');
       if (nivel) { E.nivel = Number(nivel.getAttribute('data-nivel')); guardarPreferencias(); redesenharConteudo(el); return; }
       // Painel dos meses: um mês aparece ou some; os atalhos escolhem vários de uma vez.
@@ -981,6 +1007,8 @@
       const rot = ev.target.closest('input[data-dre-rotulo]');
       if (rot && E.dreEdicao) { E.dreEdicao.rotulos[rot.getAttribute('data-dre-rotulo')] = rot.value.replace(/\s+/g, ' ').trim(); redesenharFolha(el); return; }
       if (ev.target.id === 'rc-mes') { E.clienteMes = ev.target.value; redesenharFolha(el); return; }
+      if (ev.target.id === 'dc-mes') { E.assinaturaMes = ev.target.value; redesenharFolha(el); return; }
+      if (ev.target.id === 'dc-comparar') { E.assinaturaComparar = ev.target.checked; redesenharFolha(el); return; }
       if (ev.target.id === 'rc-cor') { mudarCorCliente(el, ev.target.value); return; }
       if (ev.target.id === 'rc-arquivo-logo') { trocarLogo(el, ev.target.files && ev.target.files[0]); ev.target.value = ''; return; }
       if (ev.target.id === 'sim-percentual') { aplicarPercentual(el, ev.target.value); return; }
@@ -1541,6 +1569,186 @@
   }
 
   // ------------------------------------------------------------------
+  // BALANÇO, DRE E FLUXO DE CAIXA PARA ASSINAR (Dony, 22/09/2026: "emitir o balanço e a DRE direto do sistema pra poder
+  // imprimir e assinar pro cliente" + "dentro do relatório do cliente: relatórios — o relatório do cliente, DRE para
+  // assinatura, balanço para assinatura e o fluxo de caixa, do modo mais simples, o indireto"). Folha A4 em pé, sóbria: o
+  // nome e o CNPJ da empresa, a demonstração e, no fim, o local e a data e as linhas de assinatura do responsável e do
+  // contador (guardados no cadastro da empresa: emp.assinaturas). As contas vêm do motor (demonstracoes).
+  // ------------------------------------------------------------------
+  const DOCUMENTOS = { 'bp-assinatura': 'balanco', 'dre-assinatura': 'dre', dfc: 'dfc' };
+  const NOME_DOCUMENTO = { balanco: 'Balanço patrimonial', dre: 'DRE', dfc: 'Fluxo de caixa' };
+  const CHAVE_CONTADOR = 'conciliador-solutta.contador';
+  function mesDaAssinatura() {
+    const ms = E.rel.meses.filter((m) => m.tem);
+    return ms.some((m) => m.comp === E.assinaturaMes) ? E.assinaturaMes : (ms.length ? ms[ms.length - 1].comp : null);
+  }
+  function demonstracoesVisiveis() {
+    const k = E.rel.meses.findIndex((m) => m.comp === mesDaAssinatura());
+    if (k < 0) return null;
+    const comparar = !!E.assinaturaComparar && E.balancetesAnt.length > 0;
+    return motor().demonstracoes(E.rel, comparar ? relAnterior() : null, { k, soMes: !!E.assinaturaSoMes, comparar });
+  }
+  // "31/08/2026" → "31 de agosto de 2026".
+  function dataPorExtenso(br) {
+    const p = String(br || '').split('/');
+    return p.length === 3 ? Number(p[0]) + ' de ' + MESES_LONGOS[Number(p[1]) - 1].toLowerCase() + ' de ' + p[2] : br;
+  }
+  const hojeBr = () => { const d = new Date(); return String(d.getDate()).padStart(2, '0') + '/' + String(d.getMonth() + 1).padStart(2, '0') + '/' + d.getFullYear(); };
+  const periodoEmDuasLinhas = (p) => (p ? T.esc(p.de) + '<br>a ' + T.esc(p.ate) : '—');
+  // As linhas de assinatura (na prévia, o que falta aparece em vermelho; no papel, só a linha).
+  function blocoAssinaturas(editavel) {
+    const a = E.emp.assinaturas || {};
+    const r = a.responsavel || {}, c = a.contador || {};
+    const pessoa = (p, papel, falta) => '<div class="dem-ass"><div class="dem-linha"></div>' +
+      (p.nome ? '<b>' + T.esc(p.nome) + '</b>' : editavel ? '<b class="dem-falta">' + falta + '</b>' : '<b>&nbsp;</b>') +
+      '<span>' + T.esc(papel) + '</span>' + (p.cpf ? '<span>CPF ' + T.esc(p.cpf) + '</span>' : '') + '</div>';
+    return '<div class="dem-assinaturas"><p class="dem-local">' + T.esc((a.local ? a.local + ', ' : '') + dataPorExtenso(hojeBr())) + '.</p><div class="dem-ass-linhas">' +
+      pessoa(r, r.cargo || 'Responsável pela empresa', 'Nome do responsável: clique em ✎ Assinaturas') +
+      pessoa(c, 'Contador' + (c.crc ? ' · CRC ' + c.crc : ''), 'Nome do contador: clique em ✎ Assinaturas') + '</div></div>';
+  }
+  // Uma folha (balanço, DRE ou fluxo de caixa) para a data escolhida.
+  function paginaDocumento(qual, d, editavel) {
+    const emp = E.emp;
+    const comAnt = !!d.anterior && qual !== 'dfc';
+    const zero = (l) => !Math.round(l.valor || 0) && !Math.round(l.anterior || 0);
+    const cel = (l) => '<td class="num">' + dinheiro(l.valor) + '</td>' + (comAnt ? '<td class="num">' + dinheiro(l.anterior) + '</td>' : '');
+    const nCol = comAnt ? 3 : 2;
+    const secaoDoc = (t) => '<tr class="dem-secao"><td colspan="' + nCol + '">' + T.esc(t) + '</td></tr>';
+    const linha = (cls, rotulo, l) => '<tr class="' + cls + '"><td>' + T.esc(rotulo) + '</td>' + cel(l) + '</tr>';
+    let titulo, sub, cab, corpo;
+    const valores = valoresEm().replace(/^valores/, 'Valores');
+    if (qual === 'balanco') {
+      titulo = 'Balanço patrimonial';
+      sub = 'Levantado em ' + dataPorExtenso(d.data) + ' · ' + valores;
+      cab = '<th>&nbsp;</th><th class="num">' + T.esc(d.data) + '</th>' + (comAnt ? '<th class="num">' + T.esc(d.anterior.data || '—') + '</th>' : '');
+      corpo = d.balanco.linhas.filter((l) => l.tipo === 'secao' || l.tipo === 'total' || (!zero(l) && !(l.tipo === 'conta' && E.assinaturaNivel === 2))).map((l) => {
+        if (l.tipo === 'secao') return secaoDoc(l.rotulo);
+        return linha(l.tipo === 'total' ? 'dem-total' : l.tipo === 'grupo' ? 'dem-grupo' : 'dem-conta', l.rotulo, l);
+      }).join('');
+    } else if (qual === 'dre') {
+      const exercicio = d.periodo.de.slice(0, 5) === '01/01' && d.periodo.ate.slice(0, 5) === '31/12';
+      titulo = 'Demonstração do resultado do ' + (exercicio ? 'exercício' : 'período');
+      sub = 'Período de ' + d.periodo.de + ' a ' + d.periodo.ate + ' · ' + valores;
+      cab = '<th>&nbsp;</th><th class="num">' + periodoEmDuasLinhas(d.periodo) + '</th>' + (comAnt ? '<th class="num">' + periodoEmDuasLinhas(d.anterior.periodo) + '</th>' : '');
+      const SEM_FAIXA = { 'Subtotal CPC 51': true, Subtotal: true, Resultado: true };
+      let categoria = null;
+      corpo = d.dre.filter((l) => l.id === 'lucroLiquido' || !zero(l)).map((l) => {
+        let faixa = '';
+        if (l.categoria !== categoria) { categoria = l.categoria; if (!SEM_FAIXA[categoria]) faixa = secaoDoc(categoria); }
+        return faixa + linha(l.tipo !== 'total' ? 'dem-conta' : l.id === 'lucroLiquido' ? 'dem-total' : 'dem-subtotal', l.rotulo, l);
+      }).join('');
+    } else {
+      const f = d.dfc;
+      titulo = 'Demonstração dos fluxos de caixa — método indireto';
+      sub = 'Período de ' + d.periodo.de + ' a ' + d.periodo.ate + ' · ' + valores;
+      cab = '<th>&nbsp;</th><th class="num">' + periodoEmDuasLinhas(d.periodo) + '</th>';
+      const v = (x) => ({ valor: x, anterior: null });
+      const lista = (ls) => ls.map((l) => linha('dem-conta', l.rotulo, v(l.valor))).join('');
+      corpo = secaoDoc('Atividades operacionais') + linha('dem-conta', 'Lucro (prejuízo) líquido do período', v(f.lucro)) +
+        (Math.round(f.depreciacao) ? linha('dem-conta', 'Depreciação e amortização', v(f.depreciacao)) : '') + lista(f.operacionais) +
+        linha('dem-subtotal', 'Caixa líquido gerado (consumido) nas atividades operacionais', v(f.totalOperacional)) +
+        secaoDoc('Atividades de investimento') + lista(f.investimentos) + linha('dem-subtotal', 'Caixa líquido gerado (consumido) nas atividades de investimento', v(f.totalInvestimento)) +
+        secaoDoc('Atividades de financiamento') + lista(f.financiamentos) + linha('dem-subtotal', 'Caixa líquido gerado (consumido) nas atividades de financiamento', v(f.totalFinanciamento)) +
+        linha('dem-total', 'Aumento (redução) líquido de caixa e equivalentes', v(f.aumento)) +
+        linha('dem-conta', 'Caixa e equivalentes no início do período (' + f.dataInicio + ')', v(f.caixaInicio)) +
+        linha('dem-conta', 'Caixa e equivalentes no fim do período (' + d.data + ')', v(f.caixaFim));
+    }
+    return '<div class="dem dem-pagina"><div class="dem-cab"><div class="dem-empresa">' + T.esc(emp.nome) + '</div>' +
+      (emp.cnpj ? '<div class="dem-cnpj">CNPJ ' + T.esc(U.formatarCnpj(emp.cnpj)) + '</div>' : '') +
+      '<h2>' + T.esc(titulo) + '</h2><div class="dem-sub">' + T.esc(sub) + '</div></div>' +
+      '<table class="dem-tabela"><thead><tr>' + cab + '</tr></thead><tbody>' + corpo + '</tbody></table>' + blocoAssinaturas(editavel) + '</div>';
+  }
+  function barraDocumento(qual) {
+    const ms = E.rel.meses.filter((m) => m.tem);
+    const comp = mesDaAssinatura();
+    const seg = (ativo, atributo, texto, dica) => '<button type="button" class="seg' + (ativo ? ' ativo' : '') + '" ' + atributo + (dica ? ' title="' + dica + '"' : '') + ' aria-pressed="' + ativo + '">' + texto + '</button>';
+    return '<div class="rc-barra nao-imprimir">' +
+      '<label>' + (qual === 'balanco' ? 'Balanço no fim de' : 'Até o fim de') + ' <select class="apres-campo" id="dc-mes">' +
+      ms.map((m) => '<option value="' + m.comp + '"' + (m.comp === comp ? ' selected' : '') + '>' + T.esc(m.rotulo) + '</option>').join('') + '</select></label>' +
+      (qual === 'balanco'
+        ? '<span class="grupo-seg"><span class="seg-rotulo">Detalhe</span>' + seg(E.assinaturaNivel === 2, 'data-dc-nivel="2"', 'Grupos', 'Circulante, não circulante e patrimônio líquido') +
+          seg(E.assinaturaNivel !== 2, 'data-dc-nivel="3"', 'Contas', 'Também as contas de cada grupo') + '</span>'
+        : '<span class="grupo-seg"><span class="seg-rotulo">Período</span>' + seg(!E.assinaturaSoMes, 'data-dc-periodo="ano"', 'Do começo do ano até o mês') + seg(!!E.assinaturaSoMes, 'data-dc-periodo="mes"', 'Só o mês') + '</span>') +
+      (qual !== 'dfc' && E.balancetesAnt.length ? '<label class="caixa-opcao" title="' + (qual === 'balanco' ? 'Ao lado, o balanço do fim de ' + (E.ano - 1) : 'Ao lado, os mesmos meses de ' + (E.ano - 1)) + '"><input type="checkbox" id="dc-comparar"' +
+        (E.assinaturaComparar ? ' checked' : '') + '> Comparar com ' + (E.ano - 1) + '</label>' : '') +
+      '<button type="button" class="botao pequeno" data-dc="assinaturas" title="O local e quem assina: o responsável pela empresa e o contador (fica guardado na empresa)">✎ Assinaturas</button>' +
+      '<span class="rc-direita"><button type="button" class="botao primario" data-dc="imprimir" title="Na janela de impressão, escolha a impressora ou “Salvar como PDF”">🖨 Imprimir / salvar PDF</button></span></div>';
+  }
+  function secaoDocumento(aba, op) {
+    const qual = DOCUMENTOS[aba];
+    const d = demonstracoesVisiveis();
+    if (!d) return '<p class="suave">Carregue os balancetes para montar as demonstrações.</p>';
+    if (qual === 'dfc' && !d.dfc) return (op && op.impressao) ? '' : barraDocumento(qual) + '<div class="aviso ambar"><span class="icone-aviso">⚠️</span><div>' + d.avisos.map((a) => T.esc(a)).join('<br>') + '</div></div>';
+    if (op && op.impressao) return paginaDocumento(qual, d, false);
+    const avisos = d.avisos.length ? '<div class="aviso ambar nao-imprimir" style="margin:0 0 10px"><span class="icone-aviso">⚠️</span><div>' + d.avisos.map((a) => T.esc(a)).join('<br>') + '</div></div>' : '';
+    const conf = qual === 'balanco' ? (d.balanco.fecha ? '✓ O balanço fecha: total do ativo = total do passivo e do patrimônio líquido (' + U.formatarCentavos(d.balanco.totalAtivo) + '). O resultado do exercício é o lucro da DRE que ainda não foi encerrado no balancete.' : '')
+      : qual === 'dre' ? '✓ É a DRE mensal somada nos meses do período (' + T.esc(d.periodo.de) + ' a ' + T.esc(d.periodo.ate) + '), com as linhas da DRE da empresa.'
+        : d.dfc.confere ? '✓ O fluxo de caixa fecha com o disponível (' + T.esc(d.dfc.disponivel) + '): o caixa do fim (' + U.formatarCentavos(d.dfc.caixaFim) + ') menos o do começo (' +
+          U.formatarCentavos(d.dfc.caixaInicio) + ') é o aumento (redução) do período. No ativo, o aumento de um grupo consome caixa; no passivo, gera.' : '';
+    const semNome = !((E.emp.assinaturas || {}).responsavel || {}).nome;
+    return barraDocumento(qual) + avisos + (conf ? '<p class="rc-ajuda nao-imprimir">' + conf + '</p>' : '') +
+      (semNome ? '<p class="rc-ajuda nao-imprimir">Para sair com os nomes embaixo das linhas de assinatura, clique em <b>✎ Assinaturas</b> (fica guardado na empresa).</p>' : '') +
+      '<div class="rc-previa">' + paginaDocumento(qual, d, true) + '</div>';
+  }
+  // ✎ Assinaturas: o local e quem assina (o responsável pela empresa e o contador), guardados no cadastro da empresa.
+  async function editarAssinaturas(el) {
+    const a = E.emp.assinaturas || {};
+    let contadorLembrado = {};
+    try { contadorLembrado = JSON.parse((raiz.localStorage && raiz.localStorage.getItem(CHAVE_CONTADOR)) || '{}') || {}; } catch (e) { /* sem o contador guardado no navegador */ }
+    const r = a.responsavel || {}, c = a.contador || (contadorLembrado.nome ? contadorLembrado : {});
+    const campo = (id, rotulo, valor, dica, largo) => '<label>' + rotulo + '<input class="apres-campo" id="' + id + '" value="' + T.esc(valor || '') + '"' + (dica ? ' placeholder="' + T.esc(dica) + '"' : '') +
+      (largo ? '' : ' style="max-width:240px"') + ' maxlength="100"></label>';
+    const res = await T.janela({
+      titulo: 'Assinaturas do balanço, da DRE e do fluxo de caixa', naoFecharFora: true,
+      corpo: '<div class="aj-form">' + campo('as-local', 'Local (cidade)', a.local, 'ex.: São Paulo', true) +
+        '<p class="suave pequeno" style="margin:4px 0 0"><b>Responsável pela empresa</b></p>' + campo('as-r-nome', 'Nome', r.nome, '', true) +
+        campo('as-r-cargo', 'Cargo', r.cargo || 'Sócio administrador', '') + campo('as-r-cpf', 'CPF', r.cpf, '000.000.000-00') +
+        '<p class="suave pequeno" style="margin:4px 0 0"><b>Contador</b></p>' + campo('as-c-nome', 'Nome', c.nome, '', true) + campo('as-c-crc', 'CRC', c.crc, 'ex.: 1SP000000/O-0') + campo('as-c-cpf', 'CPF (se quiser)', c.cpf, '') +
+        '</div><p class="suave pequeno" style="margin:10px 0 0">Fica guardado no cadastro desta empresa e sai embaixo das linhas de assinatura. A data é a do dia em que imprimir.</p>',
+      botoes: [{ texto: 'Cancelar', valor: null }, { texto: 'Guardar', tipo: 'primario', antes: (j) => {
+        const v = (id) => j.querySelector('#' + id).value.replace(/\s+/g, ' ').trim();
+        return { local: v('as-local'), responsavel: { nome: v('as-r-nome'), cargo: v('as-r-cargo'), cpf: v('as-r-cpf') }, contador: { nome: v('as-c-nome'), crc: v('as-c-crc'), cpf: v('as-c-cpf') } };
+      } }],
+    });
+    if (!res) return;
+    try { raiz.localStorage.setItem(CHAVE_CONTADOR, JSON.stringify(res.contador)); } catch (e) { /* navegador sem armazenamento */ }
+    if (await salvarEmpresaCliente({ assinaturas: res }, 'Assinaturas guardadas na empresa.')) redesenharFolha(el);
+  }
+  // Imprimir: as folhas escolhidas (a da aba já vem marcada), uma por página, A4 em pé.
+  async function imprimirDocumentos(el, qual) {
+    const d = demonstracoesVisiveis();
+    if (!d) return;
+    const escolha = await T.janela({
+      titulo: 'Imprimir ou salvar em PDF',
+      corpo: '<p class="suave pequeno" style="margin:0 0 8px">Cada demonstração sai numa folha A4 em pé, com as linhas de assinatura. Data: ' + T.esc(qual === 'balanco' ? d.data : d.periodo.de + ' a ' + d.periodo.ate) + '.</p>' +
+        ['balanco', 'dre', 'dfc'].map((q) => '<label class="item-aba"><input type="checkbox" value="' + q + '"' + (q === qual ? ' checked' : '') + (q === 'dfc' && !d.dfc ? ' disabled' : '') + '> ' +
+          NOME_DOCUMENTO[q] + (q === 'dfc' && !d.dfc ? ' (não dá para montar: veja o aviso na aba)' : '') + '</label>').join(''),
+      botoes: [{ texto: 'Cancelar', valor: null }, { texto: '🖨 Imprimir', tipo: 'primario', antes: (j) => {
+        const lista = Array.from(j.querySelectorAll('input[type=checkbox]:checked')).map((x) => x.value);
+        return lista.length ? lista : false;
+      } }],
+    });
+    if (!escolha) return;
+    const problemas = [];
+    if (escolha.indexOf('balanco') >= 0 && !d.balanco.fecha) problemas.push('o balanço não fecha (diferença de ' + U.formatarCentavos(d.balanco.diferenca) + ')');
+    if (escolha.indexOf('dfc') >= 0 && d.dfc && !d.dfc.confere) problemas.push('o fluxo de caixa não fecha com o disponível (diferença de ' + U.formatarCentavos(d.dfc.diferenca) + ')');
+    if (problemas.length) {
+      const seguir = await T.janela({ titulo: 'Conferir antes de imprimir', corpo: '<p style="margin:0">Atenção: ' + T.esc(problemas.join('; ')) + '. Imprimir assim mesmo?</p>',
+        botoes: [{ texto: 'Não imprimir', valor: null }, { texto: 'Imprimir assim mesmo', tipo: 'perigo', valor: true }] });
+      if (!seguir) return;
+    }
+    const alvo = document.getElementById('apres-impressao');
+    alvo.innerHTML = escolha.map((q) => paginaDocumento(q, d, false)).join('');
+    document.body.classList.add('imprimindo-demonstracao');
+    const antes = document.title;
+    document.title = escolha.map((q) => NOME_DOCUMENTO[q]).join(' e ') + ' ' + E.emp.nome + ' ' + d.data.replace(/\//g, '-');
+    const fim = () => { document.body.classList.remove('imprimindo-demonstracao'); alvo.innerHTML = ''; document.title = antes; raiz.removeEventListener('afterprint', fim); };
+    raiz.addEventListener('afterprint', fim);
+    setTimeout(() => raiz.print(), 60);
+    app().armazenamento.registrarNoLog({ codigo: E.codigo, acao: 'apresentacao-demonstracoes-impressas', alvo: 'apresentacao/' + E.ano, detalhe: escolha.join(', ') + ' · ' + d.data }).catch(() => {});
+  }
+
+  // ------------------------------------------------------------------
   // Relatório para o cliente (Dony, 18/09/2026: "um imprimir relatório para o cliente, desta forma aí,
   // mostrando as variações; e um lugar em que eu coloque o logo da empresa"). As folhas vêm do
   // relatorio-cliente.js; aqui ficam a prévia, os textos reescritos, o logo, a cor e a impressão.
@@ -1840,7 +2048,7 @@
       titulo: 'Imprimir ou salvar em PDF',
       corpo: '<p class="suave pequeno" style="margin:0 0 8px">Escolha as partes. Cada uma começa numa folha nova, deitada. O balancete sai até o nível e com as opções que estão na tela.' +
         (dreFechada() ? ' <b>A DRE e os indicadores ficam de fora até as linhas da DRE desta empresa serem conferidas.</b>' : '') + '</p>' +
-        ABAS.filter((a) => a.id !== 'cliente' && !(dreFechada() && (/^dre-/.test(a.id) || a.id === 'indicadores' || a.id === 'comparativo' || a.id === 'simulacao')) &&
+        ABAS.filter((a) => GRUPO_RELATORIOS.indexOf(a.id) < 0 && !(dreFechada() && (/^dre-/.test(a.id) || a.id === 'indicadores' || a.id === 'comparativo' || a.id === 'simulacao')) &&
           !((a.id === 'comparativo' || a.id === 'simulacao') && !E.balancetesAnt.length))
           // A simulação (uma projeção) só vai para o papel quando quem imprime marca.
           .map((a) => '<label class="item-aba"><input type="checkbox" value="' + a.id + '"' + (/^balancete/.test(a.id) || a.id === 'simulacao' ? '' : ' checked') + '> ' + a.titulo + '</label>').join('') +
