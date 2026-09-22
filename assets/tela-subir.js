@@ -431,7 +431,7 @@
 
   // Razão com várias contas: qual (ou quais, no lugar de várias contas) é deste lugar.
   function escolherContas(r, lugar) {
-    const doPapel = (c) => c.papel && c.papel.familia === 'fornecedores' && c.papel.papel === lugar.papel;
+    const doPapel = (c) => c.papel && c.papel.familia === (lugar.familia || 'fornecedores') && c.papel.papel === lugar.papel;
     const primeira = Math.max(0, r.contas.findIndex(doPapel));
     return T.janela({
       titulo: (lugar.varias ? 'Quais contas deste razão vão para "' : 'Qual conta deste razão vai para "') + lugar.titulo + '"?',
@@ -493,7 +493,7 @@
   // conta, extra (campos a mais no registro) }]. Devolve { novas, jaEra } ou null (desistiu na conferência da troca).
   async function guardarContasNoLugar(codigo, lugar, itens) {
     const arm = app().armazenamento;
-    const papel = { familia: 'fornecedores', papel: lugar.papel };
+    const papel = { familia: lugar.familia || 'fornecedores', papel: lugar.papel };
     const lembrar = {};
     const novas = [];
     let jaEra = true;
@@ -577,7 +577,7 @@
         // Papel escolhido antes para esta empresa: ajuda a achar a conta num razão de várias.
         const escolhidos = emp.papeisDeConta || {};
         r.contas.forEach((c) => { const e = escolhidos[c.codigo]; if (e && e.familia) c.papel = { familia: e.familia, papel: e.papel, regra: 'escolhido para esta empresa', banco: null, escolhido: true }; });
-        const doPapel = r.contas.filter((c) => c.papel && c.papel.familia === 'fornecedores' && c.papel.papel === lugar.papel);
+        const doPapel = r.contas.filter((c) => c.papel && c.papel.familia === (lugar.familia || 'fornecedores') && c.papel.papel === lugar.papel);
         const contas = r.contas.length === 1 ? [r.contas[0]] : doPapel.length === 1 ? doPapel : await escolherContas(r, lugar);
         if (!contas || !contas.length) return false;
         // Tem lançamento no período (ou até o fim do mês)?
@@ -796,7 +796,7 @@
   }
 
   // A escolha das contas, guardada na empresa por papel: { fornecedores_principal: [...], fornecedores_adiantamento: [...] }.
-  const chaveDoPapel = (lugar) => 'fornecedores_' + lugar.papel;
+  const chaveDoPapel = (lugar) => (lugar.familia || 'fornecedores') + '_' + lugar.papel;
   function contasEscolhidas(emp, lugar) {
     const x = emp && emp.contasDoDiario && emp.contasDoDiario[chaveDoPapel(lugar)];
     return Array.isArray(x) && x.length ? x.map(String) : null;
@@ -841,8 +841,8 @@
       const somar = (red) => { red = String(red); if (ids.indexOf(red) < 0 && existe(red)) ids.push(red); };
       (salvas || []).forEach(somar);
       (lugar.arquivos || []).forEach((m) => { if (m.conta && m.conta.codigo) somar(m.conta.codigo); });
-      detectadas.filter((c) => c.familia === 'fornecedores' && c.papel === lugar.papel).forEach((c) => somar(c.reduzido));
-      Object.keys(escolhidos).forEach((k) => { const e = escolhidos[k]; if (e && e.familia === 'fornecedores' && e.papel === lugar.papel) somar(k); });
+      detectadas.filter((c) => c.familia === (lugar.familia || 'fornecedores') && c.papel === lugar.papel).forEach((c) => somar(c.reduzido));
+      Object.keys(escolhidos).forEach((k) => { const e = escolhidos[k]; if (e && e.familia === (lugar.familia || 'fornecedores') && e.papel === lugar.papel) somar(k); });
       const carregadas = new Set((lugar.arquivos || []).filter((m) => m.conta && m.origem !== 'diario').map((m) => String(m.conta.codigo)));
       const contas = ids.map((red) => ({ red, rz: MD.razaoDaConta(diario, balancetes, red, periodoDeGuardar(lugar)), carregada: carregadas.has(red) }));
       // Marcadas: a escolha guardada; sem ela, as achadas com movimento ou saldo (no lugar de uma conta só, a em uso ou a primeira).

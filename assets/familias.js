@@ -96,8 +96,12 @@
   // Famílias e passos. Estado "construido" diz o que já funciona nesta etapa.
   const FAMILIAS = [
     {
-      id: 'fornecedores', titulo: 'Fornecedores', icone: '📦',
+      id: 'fornecedores', titulo: 'Fornecedores', icone: '📦', tipoChecklist: 'fornecedor_checklist',
       texto: 'Fornecedores a pagar, adiantamentos a fornecedores e o contas a pagar do financeiro.',
+      // A natureza da conta principal da família: em fornecedores o que AUMENTA o saldo é o crédito; em clientes, o débito.
+      natureza: 'fornecedores',
+      contas: { principal: 'fornecedores', adiantamento: 'adiantamento a fornecedores' },
+      tipoFinanceiro: { principal: 'financeiro_pagar', adiantamento: 'financeiro_adiantamento' },
       checklist: [
         { id: 'bancos', texto: 'Conferi que todos os bancos foram conciliados (extrato × contabilidade de cada conta bancária da competência).' },
         { id: 'notas', texto: 'Conferi que todas as notas fiscais de entrada subiram (livro fiscal × contabilidade).' },
@@ -137,10 +141,42 @@
           construido: true, semChecklist: true },
       ],
     },
+    // Clientes (Dony, 22/09/2026): "quero que clientes, contas a receber, tenha o mesmo menu e todas as conciliações que
+    // fornecedores têm. Só muda a conta, e a diferença é que uma a natureza é credora e a outra é devedora."
+    // Os mesmos passos, com o razão de clientes no lugar do de fornecedores: em clientes o que AUMENTA o saldo é o
+    // DÉBITO (a nota de venda) e o que diminui é o crédito (o recebimento); no adiantamento de clientes é o contrário.
     {
-      id: 'clientes', titulo: 'Clientes · contas a receber', icone: '🧾',
-      texto: 'O espelho de Fornecedores: clientes, adiantamentos de clientes e contas a receber.',
-      passos: [], construido: false, etapa: 3,
+      id: 'clientes', titulo: 'Clientes · contas a receber', icone: '🧾', tipoChecklist: 'cliente_checklist',
+      texto: 'Clientes a receber, adiantamentos de clientes e o contas a receber do financeiro.',
+      natureza: 'clientes',
+      contas: { principal: 'clientes', adiantamento: 'adiantamento de clientes' },
+      tipoFinanceiro: { principal: 'financeiro_receber', adiantamento: 'financeiro_adiantamento_cliente' },
+      checklist: [
+        { id: 'bancos', texto: 'Conferi que todos os bancos foram conciliados (extrato × contabilidade de cada conta bancária da competência).' },
+        { id: 'notas', texto: 'Conferi que todas as notas fiscais de saída subiram (livro fiscal × contabilidade).' },
+      ],
+      passos: [
+        { id: 'passo1', numero: '①', tipo: 'cliente_adiantamento', titulo: 'Clientes × Adiantamento de clientes',
+          texto: 'Mata o que bate dentro de cada razão e sugere as reclassificações entre clientes e adiantamento de clientes.',
+          precisa: [{ papel: 'principal', texto: 'Razão de clientes' }, { papel: 'adiantamento', texto: 'Razão de adiantamento de clientes' }],
+          opcional: [{ tipo: 'financeiro_receber', texto: 'Contas a receber em aberto (ajuda a reconhecer nomes)' }],
+          construido: true },
+        { id: 'passo13', numero: '1.3', tipo: 'cliente_razao_limpo', titulo: 'Razão limpo: o que compõe os saldos',
+          texto: 'Depois do ①, só o que fica em aberto em cada conta: em clientes, as notas a receber; no adiantamento, os recebimentos sem nota. Por cliente ou por lançamento, para imprimir ou baixar em Excel.',
+          construido: true, semChecklist: true, dependeDe: 'passo1' },
+        { id: 'passo2', numero: '②', tipo: 'adiantamento_cliente_financeiro', titulo: 'Adiantamento de clientes × financeiro',
+          texto: 'Aging de adiantamentos de clientes do mês passado + movimento do razão de adiantamento do mês = a contabilidade; a sobra bate com o aging do mês.',
+          precisa: [{ papel: 'aging_anterior', texto: 'Aging de adiantamentos de clientes do mês passado' }, { papel: 'aging_atual', texto: 'Aging de adiantamentos de clientes do mês' }, { papel: 'razao_adiantamento', texto: 'Razão de adiantamento de clientes do mês' }],
+          construido: true, semChecklist: true },
+        { id: 'passo3', numero: '③', tipo: 'cliente_receber', titulo: 'Clientes × contas a receber (aging)',
+          texto: 'Aging do mês passado + movimento do razão do mês = a contabilidade; a sobra bate com o aging do mês. Cliente por cliente.',
+          precisa: [{ papel: 'aging_anterior', texto: 'Aging (contas a receber) do mês passado' }, { papel: 'aging_atual', texto: 'Aging (contas a receber) do mês' }, { papel: 'razao_clientes', texto: 'Razão de clientes do mês' }],
+          construido: true, semChecklist: true },
+        { id: 'passo4', numero: '④', tipo: 'cliente_somente_razao', titulo: 'Clientes · somente razão',
+          texto: 'O razão de clientes (ou o livro diário) contra ele mesmo: casa débito com crédito de cada cliente e mostra tudo o que ficou em aberto a débito e a crédito — para achar distorções dentro do razão.',
+          precisa: [{ papel: 'principal', texto: 'Razão de clientes (ou o livro diário)' }],
+          construido: true, semChecklist: true },
+      ],
     },
     {
       id: 'financeiro', titulo: 'Financeiro', icone: '🏦',

@@ -22,11 +22,15 @@
     const detalhes = [emp.cnpj ? 'CNPJ ' + U.formatarCnpj(emp.cnpj) : null, emp.regime, emp.atividade, emp.grupo ? 'Grupo ' + emp.grupo : null].filter(Boolean);
 
     const cartoes = raiz.Familias.FAMILIAS.map((f) => {
-      if (f.id === 'fornecedores') {
-        const ultima = competencias[0];
-        return '<a class="cartao familia" href="#/empresa/' + encodeURIComponent(codigo) + '/fornecedores' + (ultima ? '/' + ultima : '') + '">' +
+      // Família com passos prontos (Fornecedores e Clientes): abre com o último mês que tem arquivo dela.
+      if ((f.passos || []).some((p) => p.construido)) {
+        const fin = f.tipoFinanceiro || {};
+        const daFamilia = arquivos.filter((a) => (a.conta && a.conta.familia === f.id) || a.tipo === fin.principal || a.tipo === fin.adiantamento);
+        const meses = Array.from(new Set(daFamilia.map((a) => U.anoMes(a.competencia)))).sort().reverse();
+        const ultima = meses[0];
+        return '<a class="cartao familia" href="#/empresa/' + encodeURIComponent(codigo) + '/' + f.id + (ultima ? '/' + ultima : '') + '">' +
           '<div class="icone">' + f.icone + '</div><h2>' + T.esc(f.titulo) + '</h2><p class="suave" style="line-height:1.5">' + T.esc(f.texto) + '</p>' +
-          '<div class="rodape"><span class="suave pequeno">' + (deFornecedores.length ? deFornecedores.length + ' arquivo(s)' + (ultima ? ' · último mês: ' + U.nomeCompetencia(ultima + '-01') : '') : 'nenhum arquivo ainda') + '</span>' +
+          '<div class="rodape"><span class="suave pequeno">' + (daFamilia.length ? daFamilia.length + ' arquivo(s)' + (ultima ? ' · último mês: ' + U.nomeCompetencia(ultima + '-01') : '') : 'nenhum arquivo ainda') + '</span>' +
           '<span class="botao primario pequeno">Abrir →</span></div></a>';
       }
       return '<div class="cartao familia" title="Chega na Etapa ' + f.etapa + ' do plano">' +

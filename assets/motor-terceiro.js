@@ -48,9 +48,12 @@
   //  - adiantamento a fornecedores (ativo): o adiantamento é DÉBITO e a compensação é CRÉDITO.
   // O resto (Parte A, Parte B, regras, IDs) é o mesmo: "nota" e "baixa" são só os papéis de quem
   // aumenta e de quem diminui o saldo.
+  // Em que lado o saldo AUMENTA: crédito em fornecedores e no adiantamento de clientes (passivo); débito no
+  // adiantamento a fornecedores e em clientes (ativo) — Dony, 22/09/2026: "a natureza de uma é credora e a da outra é devedora".
+  function aumentaNoDebito(natureza) { return natureza === 'adiantamento' || natureza === 'clientes'; }
   function ladosDoRazao(natureza, l) {
-    const adiantamento = natureza === 'adiantamento';
-    return { aumento: adiantamento ? (l.debito || 0) : (l.credito || 0), reducao: adiantamento ? (l.credito || 0) : (l.debito || 0) };
+    const porDebito = aumentaNoDebito(natureza);
+    return { aumento: porDebito ? (l.debito || 0) : (l.credito || 0), reducao: porDebito ? (l.credito || 0) : (l.debito || 0) };
   }
 
   // Débito ou crédito de um valor da conciliação A × B (Dony, 16/09/2026: "coloca a natureza do
@@ -60,7 +63,7 @@
   function ladoDC(valor, natureza) {
     const v = Number(valor) || 0;
     if (!v) return '';
-    return (v > 0) === (natureza === 'adiantamento') ? 'D' : 'C';
+    return (v > 0) === aumentaNoDebito(natureza) ? 'D' : 'C';
   }
 
   // Documento comparável dos dois lados: só os dígitos, sem zeros à esquerda ("011719" = "11719").
@@ -952,8 +955,71 @@
     };
   }
 
+  // ------------------------------------------------------------------
+  // CONCILIAÇÃO LIVRE (Dony, 22/09/2026: "eu quero poder criar conciliações sem ter que ficar pedindo para você criar:
+  // selecionar a conta que estou conciliando e escolher com quem — com um relatório novo, ou com outro razão, outra
+  // conta, e fazer um cruzamento entre elas").
+  // A Parte A é uma conta (os lançamentos do razão ou do livro diário); a Parte B é OUTRA CONTA ou um RELATÓRIO.
+  // O sinal de cada lado diz o que SOMA nele: 'D' (débito − crédito) ou 'C' (crédito − débito). Entre duas contas, a
+  // regra escolhida ao criar: 'contrapartida' (o débito de uma casa com o crédito da outra — o sinal de B é o contrário
+  // do de A) ou 'mesmo-valor' (os dois lados no mesmo sinal). O relatório entra pelo valor do título.
+  // Os itens saem no MESMO desenho dos do ③ (itensAB): o ⚡, a conciliação à mão, a lista com ID e o Excel são os mesmos.
+  // entrada: { A: { conta, lancamentos, sinal }, B: { conta, lancamentos, sinal, regra } | { titulos }, decisoes: { donos } }
+  // ------------------------------------------------------------------
+  function contrario(sinal) { return sinal === 'C' ? 'D' : 'C'; }
+  function valorNoSinal(l, sinal) { return sinal === 'C' ? (l.credito || 0) - (l.debito || 0) : (l.debito || 0) - (l.credito || 0); }
+  function itensLivres(entrada) {
+    const dec = entrada.decisoes || {};
+    const A = entrada.A || { lancamentos: [] };
+    const B = entrada.B || {};
+    const sinalA = A.sinal === 'C' ? 'C' : 'D';
+    const sinalB = B.sinal === 'D' || B.sinal === 'C' ? B.sinal : (B.regra === 'mesmo-valor' ? sinalA : contrario(sinalA));
+    const titulos = B.titulos || null;
+    // A régua de nomes vê os dois lados juntos (o mesmo fornecedor tem a mesma chave dos dois lados).
+    const linhas = [];
+    const ocorr = new Map();
+    const paraRegua = (lado, conta, lancs) => (lancs || []).map((l, i) => {
+      const base = lado + '|' + (conta && conta.codigo ? conta.codigo : '') + '|' + l.data + '|' + String(l.historico || '').slice(0, 120) + '|' + (l.debito || 0) + '|' + (l.credito || 0);
+      const n = ocorr.get(base) || 0; ocorr.set(base, n + 1);
+      const x = { i, lado, digital: base + '|' + n, conta: String((conta && conta.codigo) || ''), dc: (l.credito || 0) > 0 ? 'C' : 'D',
+        dia: Util.montarData(l.dia, l.mes, l.ano).numero, debito: l.debito || 0, credito: l.credito || 0, historico: l.historico || '',
+        fornecedorDeclarado: l.fornecedorDeclarado || (l.fornecedor ? { nome: l.fornecedor, cnpj: l.cnpj || '' } : { nome: fornecedorDoHistorico(l.historico) }) };
+      linhas.push(x);
+      return x;
+    });
+    const linhasA = paraRegua('A', A.conta, A.lancamentos);
+    const linhasB = titulos ? [] : paraRegua('B', B.conta, B.lancamentos);
+    const cadastro = (titulos || []).map((t) => ({ nome: t.nome, cnpj: t.cnpj }));
+    const nomes = MotorNomes.resolver(linhas, { donos: dec.donos || {}, titulos: cadastro });
+    const porId = new Map();
+    const itens = { A: [], B: [] };
+    const guardar = (x) => {
+      let id = x.id, n = 1;
+      while (porId.has(id)) id = x.id + '~' + (n++);
+      x.id = id;
+      porId.set(id, x);
+      itens[x.lado].push(x);
+      return x;
+    };
+    const doRazao = (lista, lancs, lado, sinal, prefixo) => lista.forEach((l) => {
+      const lc = lancs[l.i];
+      const d = nomes.porLinha.get(l.digital);
+      guardar({ id: prefixo + ':' + Util.hash8(l.digital), lado, fonte: 'conta', conta: l.conta, doc: documentoDaLinha(lc), parcela: lc.parcela || '',
+        chave: d.chave, nome: d.nome, cnpj: lc.cnpj || '', data: lc.data, ordem: l.dia, historico: lc.historico || '', valor: valorNoSinal(lc, sinal), linha: l.i });
+    });
+    doRazao(linhasA, A.lancamentos || [], 'A', sinalA, 'LA');
+    if (titulos) {
+      const ids = idsDeTitulos(titulos, 'LB');
+      titulos.forEach((t, i) => guardar({ id: ids[i], lado: 'B', fonte: 'relatorio', doc: normalizarDocumento(t.documento), parcela: t.parcela || '',
+        chave: chaveDoTitulo(t), nome: t.nome, cnpj: t.cnpj || '', data: t.vencimento || '', ordem: 0, historico: '', valor: t.valor }));
+    } else {
+      doRazao(linhasB, B.lancamentos || [], 'B', sinalB, 'LB');
+    }
+    return { A: itens.A, B: itens.B, porId, legado: new Map(), sinalA, sinalB, fornecedores: nomes.fornecedores };
+  }
+
   return {
-    calcular, fornecedorDoHistorico, documentoDoHistorico, chaveDoTitulo,
+    calcular, fornecedorDoHistorico, documentoDoHistorico, chaveDoTitulo, itensLivres, valorNoSinal, aumentaNoDebito,
     normalizarDocumento, documentoDaLinha, itensAB, conciliarAutomatico, emAbertoAB, tipoAB, proximoIdAB, REGRAS_AB,
     compararPorDocumento, arrumarGruposAB, relatorioAB, pendenciasAB, saldoInicialAB, idsDeTitulos, COMO_AB, nomeComparavel, ladosDoRazao,
     conciliarPorValor, valorRedondo, ehPorValor, ladoDC,

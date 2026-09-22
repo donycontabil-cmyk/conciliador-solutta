@@ -24,21 +24,35 @@
   const DATA = (de) => ({ tipo: 'data', de });
   const NUM = (de) => ({ tipo: 'numero', de });
   const COMO = { '1x1': 'um com um', '1xN': 'um pagamento, várias notas', 'Nx1': 'uma nota, vários pagamentos', zerou: 'o resto do fornecedor zerou', 'mesmo-dia': 'mesmo dia, sem fornecedor' };
-  const MOSTRAR = [['', 'Em aberto'], ['credito', 'Em aberto a crédito'], ['debito', 'Em aberto a débito'],
-    ['dois-lados', 'Em aberto dos fornecedores com os dois lados'], ['conciliados', 'Conciliados'], ['todos', 'Todos']];
+  function mostrarOpcoes() {
+    const r = rotulos();
+    return [['', 'Em aberto'], ['credito', r.aumento], ['debito', r.reducao],
+      ['dois-lados', 'Em aberto dos ' + r.pessoas + ' com os dois lados'], ['conciliados', 'Conciliados'], ['todos', 'Todos']];
+  }
 
   let P = null; // estado da tela aberta
 
   // Os lugares do ④: o razão de fornecedores e o contas a pagar (opcional, ajuda a reconhecer os nomes) do ①.
-  function lugaresDoPasso4(comp, arqs) { return raiz.TelaPasso1.lugaresDoPasso1(comp, arqs).filter((l) => l.id !== 'A'); }
-  function chaveDoPainel(codigo, comp) { return codigo + '|passo4|' + comp; }
+  function lugaresDoPasso4(comp, arqs, familiaId) { return raiz.TelaPasso1.lugaresDoPasso1(comp, arqs, familiaId).filter((l) => l.id !== 'A'); }
+  function chaveDoPainel(codigo, comp, familiaId) { return codigo + '|passo4|' + (familiaId || 'fornecedores') + '|' + comp; }
+  // A família aberta: em fornecedores o saldo aumenta no CRÉDITO (a nota); em clientes, no DÉBITO (a venda).
+  function fam() { return (P && P.fam) || raiz.Familias.familia('fornecedores'); }
+  const cliente = () => fam().id === 'clientes';
+  // Os dois lados em aberto, com o nome certo em cada família.
+  function rotulos() {
+    const c = cliente();
+    return { aumento: 'A ' + (c ? 'débito' : 'crédito') + ' em aberto', aumentoSub: c ? 'nota sem recebimento' : 'nota sem pagamento',
+      reducao: 'A ' + (c ? 'crédito' : 'débito') + ' em aberto', reducaoSub: c ? 'recebimento sem nota' : 'pagamento sem nota',
+      pessoa: c ? 'cliente' : 'fornecedor', pessoas: c ? 'clientes' : 'fornecedores' };
+  }
 
   // ------------------------------------------------------------------
   // Abrir
   // ------------------------------------------------------------------
-  async function mostrar(el, codigo, anoMes, conferir) {
+  async function mostrar(el, codigo, anoMes, conferir, familiaId) {
     const comp = anoMes + '-01';
-    const voltar = '#/empresa/' + encodeURIComponent(codigo) + '/fornecedores/' + anoMes;
+    const familia = raiz.TelaFamilia.familiaDe(familiaId);
+    const voltar = '#/empresa/' + encodeURIComponent(codigo) + '/' + familia.id + '/' + anoMes;
     const emp = app().empresas.find((e) => String(e.codigo) === String(codigo));
     if (!emp) { el.innerHTML = '<div class="aviso ambar">Empresa não cadastrada. <a href="#/">Voltar</a></div>'; return; }
     T.carregando(el, 'Abrindo o Passo ④ de ' + U.nomeCompetencia(comp) + '…');
@@ -48,21 +62,22 @@
     let metas = await arm.arquivos(codigo);
     if (conferir && !conferir()) return;
     let sinc = { estado: 'erro', mudou: false };
-    try { sinc = await S.sincronizarDoDiario(codigo, lugaresDoPasso4(comp, raiz.TelaFamilia.arquivosDoPasso1(metas, comp))); } catch (e) { T.avisoRapido('Livro diário: ' + T.mensagemDeErro(e), 'erro', 8000); }
+    try { sinc = await S.sincronizarDoDiario(codigo, lugaresDoPasso4(comp, raiz.TelaFamilia.arquivosDoPasso1(metas, comp, familia.id), familia.id)); } catch (e) { T.avisoRapido('Livro diário: ' + T.mensagemDeErro(e), 'erro', 8000); }
     if (conferir && !conferir()) return;
     if (sinc.mudou) metas = await arm.arquivos(codigo);
-    const arqs = raiz.TelaFamilia.arquivosDoPasso1(metas, comp);
-    const cabecalho = '<a class="voltar" href="' + voltar + '">← Fornecedores · ' + U.nomeCompetencia(comp) + '</a>' +
-      '<div class="cabecalho"><div class="titulos"><h1>Passo ④ · Fornecedores · somente razão</h1>' +
+    const arqs = raiz.TelaFamilia.arquivosDoPasso1(metas, comp, familia.id);
+    const curto = familia.titulo.replace(/ ·.*$/, '');
+    const cabecalho = '<a class="voltar" href="' + voltar + '">← ' + T.esc(curto) + ' · ' + U.nomeCompetencia(comp) + '</a>' +
+      '<div class="cabecalho"><div class="titulos"><h1>Passo ④ · ' + T.esc(curto) + ' · somente razão</h1>' +
       '<p class="suave">' + T.esc(emp.codigo + ' · ' + emp.nome) + ' · ' + U.nomeCompetencia(comp) + '</p></div></div>';
     if (!arqs.F.length) {
       const doDiario = sinc.prep ? (sinc.prep.ok ? (sinc.estado === 'escolher' ? S.cartaoDaEscolha(sinc.prep) : '')
         : '<div class="aviso ambar" style="margin-bottom:12px"><span class="icone-aviso">📒</span><div>' + S.textoSemDiario(codigo, sinc.prep, comp) + '</div></div>') : '';
       const extras = [S.lugarDoBalanceteDoDiario(sinc.prep)].filter(Boolean);
-      const lugares = lugaresDoPasso4(comp, arqs).concat(extras);
-      el.innerHTML = cabecalho + (doDiario || '<div class="aviso info" style="margin-bottom:12px"><span class="icone-aviso">📁</span><div><b>Suba o razão de fornecedores</b> ' +
+      const lugares = lugaresDoPasso4(comp, arqs, familia.id).concat(extras);
+      el.innerHTML = cabecalho + (doDiario || '<div class="aviso info" style="margin-bottom:12px"><span class="icone-aviso">📁</span><div><b>Suba o razão de ' + T.esc(familia.contas.principal) + '</b> ' +
         '(o mesmo do Passo ①: o que subir aqui vale lá, e o contrário também) — ou guarde o livro diário e escolha as contas.</div></div>') +
-        S.painel({ chave: chaveDoPainel(codigo, comp), titulo: 'Arquivos do passo', resumo: U.nomeCompetencia(comp), fixo: true, lugares, metas: arqs.metas });
+        S.painel({ chave: chaveDoPainel(codigo, comp, familia.id), titulo: 'Arquivos do passo', resumo: U.nomeCompetencia(comp), fixo: true, lugares, metas: arqs.metas });
       S.ligar(el.querySelector('.arquivos-passo'), codigo, lugares);
       S.ligarCartaoDaEscolha(el.querySelector('.escolha-diario'), codigo, sinc.prep);
       return;
@@ -73,8 +88,8 @@
     if (conferir && !conferir()) return;
     const fonte = (x) => ({ arquivoId: x.meta.id, conta: x.conteudo.conta, saldoAnterior: x.conteudo.conta.saldoAnterior,
       saldoFinal: x.conteudo.conta.saldoFinalDeclarado, lancamentos: x.conteudo.conta.lancamentos, periodo: x.conteudo.periodo });
-    const r = M().somenteRazao({ competencia: comp, contas: { F: F.map(fonte) }, titulos: pagar ? pagar.conteudo.titulos : [] });
-    P = { codigo, comp, emp, voltar, arqs, F, pagar, r, cabecalho, abertos: new Set(),
+    const r = M().somenteRazao({ natureza: familia.natureza, competencia: comp, contas: { F: F.map(fonte) }, titulos: pagar ? pagar.conteudo.titulos : [] });
+    P = { codigo, comp, emp, voltar, arqs, F, pagar, r, cabecalho, fam: familia, abertos: new Set(),
       filtros: { busca: '', mostrar: '', doc: '', forn: '', valor: '', data: '', dc: '' } };
     numerarBatidas();
     el.innerHTML = '<div class="tela-passo4"></div>';
@@ -101,7 +116,7 @@
   // ------------------------------------------------------------------
   const nomeDe = (l) => (l.dono.chave === SEM() ? 'Sem fornecedor' : l.dono.nome);
   const docDe = (l) => String(l.nota || l.numero || '');
-  const dcDe = (v) => (v >= 0 ? 'C' : 'D'); // lado F: crédito − débito, positivo = a empresa deve (crédito)
+  const dcDe = (v) => raiz.MotorTerceiro.ladoDC(v || 1, fam().natureza); // o + é o lado que aumenta o saldo da conta
   const tdDC = (v) => T.tdValorDC(v, dcDe(v));
   const textoDC = (v) => T.valorDC(v, dcDe(v));
   const filtro = (n) => P.filtros[n] || '';
@@ -185,22 +200,22 @@
   function desenhar() {
     const r = P.r, t = r.totais;
     const contaTxt = P.F.map((x) => T.esc(x.conteudo.conta.codigo + ' ' + x.conteudo.conta.nome) + ' <span class="suave">(' + x.conteudo.conta.lancamentos.length.toLocaleString('pt-BR') + ' lanç.)</span>').join(', ');
-    const lugares = lugaresDoPasso4(P.comp, P.arqs);
+    const lugares = lugaresDoPasso4(P.comp, P.arqs, P.fam.id);
     P.el.innerHTML = P.cabecalho.replace('</p></div></div>', () => '</p><p class="suave pequeno">Fornecedores: ' + contaTxt + (P.pagar ? ' · Contas a pagar: ' + P.pagar.meta.titulos + ' títulos (ajuda a reconhecer nomes)' : '') + '</p>' +
       raiz.TelaPasso1.linhaDoDiario(lugares) + '</div>' +
       '<div class="linha-flex"><button type="button" class="botao" data-acao="excel" title="As listas em Excel: resumo, lançamentos com ID, conciliações e por fornecedor">⬇ Excel</button>' +
-      raiz.TelaSubir.botao(chaveDoPainel(P.codigo, P.comp)) + '</div></div>') +
-      raiz.TelaSubir.painel({ chave: chaveDoPainel(P.codigo, P.comp), titulo: 'Arquivos do passo', resumo: U.nomeCompetencia(P.comp), fixo: false, lugares, metas: P.arqs.metas }) +
+      raiz.TelaSubir.botao(chaveDoPainel(P.codigo, P.comp, P.fam.id)) + '</div></div>') +
+      raiz.TelaSubir.painel({ chave: chaveDoPainel(P.codigo, P.comp, P.fam.id), titulo: 'Arquivos do passo', resumo: U.nomeCompetencia(P.comp), fixo: false, lugares, metas: P.arqs.metas }) +
       '<div id="p4-avisos"></div>' +
       '<div class="grade-4" style="margin-top:14px">' +
         '<div class="cartao resumo"><div class="rotulo">Linhas do razão</div><div class="grande">' + t.linhas.toLocaleString('pt-BR') + '</div>' +
           '<div class="detalhe"><span><b>' + t.bateram.toLocaleString('pt-BR') + '</b> conciliadas em ' + t.batidas.toLocaleString('pt-BR') + ' conciliações</span><span>até ' + T.esc(U.fimDaCompetencia(P.comp).texto) +
           (r.foraDaCompetencia ? ' · ' + r.foraDaCompetencia + ' depois do mês ficam fora' : '') + '</span></div></div>' +
-        '<div class="cartao resumo"><div class="rotulo">A crédito em aberto</div><div class="grande">' + T.moeda(t.credito.valor) + '</div>' +
-          '<div class="detalhe"><span><b>' + t.credito.qtd.toLocaleString('pt-BR') + '</b> lançamento(s) · nota sem pagamento</span></div></div>' +
-        '<div class="cartao resumo"><div class="rotulo">A débito em aberto</div><div class="grande">' + T.moeda(t.debito.valor) + '</div>' +
-          '<div class="detalhe"><span><b>' + t.debito.qtd.toLocaleString('pt-BR') + '</b> lançamento(s) · pagamento sem nota</span>' +
-          (t.fornecedoresComOsDoisLados ? '<span><b>' + t.fornecedoresComOsDoisLados + '</b> fornecedor(es) com débito e crédito em aberto</span>' : '') + '</div></div>' +
+        '<div class="cartao resumo"><div class="rotulo">' + T.esc(rotulos().aumento) + '</div><div class="grande">' + T.moeda(t.credito.valor) + '</div>' +
+          '<div class="detalhe"><span><b>' + t.credito.qtd.toLocaleString('pt-BR') + '</b> lançamento(s) · ' + T.esc(rotulos().aumentoSub) + '</span></div></div>' +
+        '<div class="cartao resumo"><div class="rotulo">' + T.esc(rotulos().reducao) + '</div><div class="grande">' + T.moeda(t.debito.valor) + '</div>' +
+          '<div class="detalhe"><span><b>' + t.debito.qtd.toLocaleString('pt-BR') + '</b> lançamento(s) · ' + T.esc(rotulos().reducaoSub) + '</span>' +
+          (t.fornecedoresComOsDoisLados ? '<span><b>' + t.fornecedoresComOsDoisLados + '</b> ' + T.esc(rotulos().pessoa) + '(s) com débito e crédito em aberto</span>' : '') + '</div></div>' +
         '<div class="cartao resumo"><div class="rotulo">Saldo do razão</div><div class="grande">' + T.htmlDC(t.saldoFinal, dcDe(t.saldoFinal)) + '</div>' +
           '<div class="detalhe"><span>saldo anterior ' + T.htmlDC(t.saldoAnterior, dcDe(t.saldoAnterior)) + '</span><span>+ crédito − débito em aberto</span></div></div>' +
       '</div>' +
@@ -221,13 +236,13 @@
     const partes = [];
     if (r.invariantes.ok) {
       partes.push('<div class="aviso verde"><span class="icone-aviso">✓</span><div><b>Conferido no centavo.</b> Cada conciliação soma zero; saldo anterior ' + T.esc(textoDC(t.saldoAnterior)) +
-        ' + crédito em aberto ' + T.esc(U.formatarCentavos(t.credito.valor)) + ' − débito em aberto ' + T.esc(U.formatarCentavos(t.debito.valor)) + ' = saldo do razão ' + T.esc(textoDC(t.saldoFinal)) + '.</div></div>');
+        ' + ' + T.esc(rotulos().aumento.toLowerCase()) + ' ' + T.esc(U.formatarCentavos(t.credito.valor)) + ' − ' + T.esc(rotulos().reducao.toLowerCase()) + ' ' + T.esc(U.formatarCentavos(t.debito.valor)) + ' = saldo do razão ' + T.esc(textoDC(t.saldoFinal)) + '.</div></div>');
     } else {
       partes.push('<div class="aviso vermelho"><span class="icone-aviso">⚠️</span><div><b>A conferência falhou.</b><ul class="pequeno">' + r.invariantes.falhas.slice(0, 10).map((f) => '<li>' + T.esc(f) + '</li>').join('') + '</ul></div></div>');
     }
     if (t.saldoAnterior) {
       partes.push('<div class="aviso ambar"><span class="icone-aviso">ℹ️</span><div><b>O razão começa com saldo anterior de ' + T.esc(textoDC(t.saldoAnterior)) + ', sem dizer de qual fornecedor.</b> ' +
-        'Pagamento do começo do período que quita nota de antes dele aparece a débito em aberto (a nota está no saldo anterior).</div></div>');
+        (cliente() ? 'Recebimento' : 'Pagamento') + ' do começo do período que quita nota de antes dele aparece em aberto do outro lado (a nota está no saldo anterior).</div></div>');
     }
     P.el.querySelector('#p4-avisos').innerHTML = partes.join('');
   }
@@ -236,8 +251,8 @@
     P.el.querySelector('#p4-filtros').innerHTML =
       '<input type="search" class="busca" data-filtro="busca" placeholder="Busca: documento, fornecedor, histórico, valor, data ou #ID" ' +
       'title="Vale para a lista e para as conciliações. A lista tem também os filtros de cada coluna." value="' + T.esc(filtro('busca')) + '">' +
-      '<select class="filtro" data-filtro="mostrar">' + MOSTRAR.map((o) => '<option value="' + o[0] + '"' + (filtro('mostrar') === o[0] ? ' selected' : '') + '>' + o[1] + '</option>').join('') + '</select>' +
-      '<span class="suave pequeno">Conciliado = débito e crédito do mesmo fornecedor que se anulam, dentro do próprio razão.</span>';
+      '<select class="filtro" data-filtro="mostrar">' + mostrarOpcoes().map((o) => '<option value="' + o[0] + '"' + (filtro('mostrar') === o[0] ? ' selected' : '') + '>' + o[1] + '</option>').join('') + '</select>' +
+      '<span class="suave pequeno">Conciliado = débito e crédito do mesmo ' + rotulos().pessoa + ' que se anulam, dentro do próprio razão.</span>';
   }
 
   const CAMPOS = ['doc', 'forn', 'valor', 'data', 'dc'];
@@ -262,11 +277,11 @@
   function desenharParte() {
     const lista = linhasDaLista();
     const total = lista.reduce((s, l) => s + l.valor, 0);
-    const rot = { todos: 'lançamento(s)', conciliados: 'conciliado(s)', credito: 'em aberto a crédito', debito: 'em aberto a débito',
-      'dois-lados': 'em aberto de fornecedor com os dois lados' }[filtro('mostrar')] || 'em aberto';
+    const rot = { todos: 'lançamento(s)', conciliados: 'conciliado(s)', credito: rotulos().aumento.toLowerCase(), debito: rotulos().reducao.toLowerCase(),
+      'dois-lados': 'em aberto de ' + rotulos().pessoa + ' com os dois lados' }[filtro('mostrar')] || 'em aberto';
     const filtrado = CAMPOS.some((n) => filtro(n)) || filtro('busca');
     P.el.querySelector('#p4-parte').innerHTML = '<div class="cartao corpo coluna-ab"><div class="linha-flex" style="margin-bottom:6px">' +
-      '<h3 style="flex:1">Parte A · o razão de fornecedores</h3>' +
+      '<h3 style="flex:1">Parte A · o razão de ' + T.esc(fam().contas.principal) + '</h3>' +
       '<span class="pilula azul" title="Soma da lista com os filtros de agora">' + textoDC(total) + '</span></div>' +
       '<p class="suave pequeno" style="margin:0 0 8px">' + P.F.map((x) => T.esc(x.conteudo.conta.codigo)).join(', ') + ' · ' + lista.length.toLocaleString('pt-BR') + ' ' + rot +
       (filtrado ? ' <b>(filtrado)</b>' : '') + ' · de ' + P.r.totais.linhas.toLocaleString('pt-BR') + ' lançamentos</p>' +
@@ -275,13 +290,13 @@
       alta: true, porPagina: 200,
       ordem: { id: 'p4-linhas', colunas: [TXT(docDe), TXT((l) => (l.dono.chave === SEM() ? '' : l.dono.nome)), DATA((l) => l.data), VALOR((l) => l.valor),
         NUM((l) => { const b = P.batidaDaLinha.get(l.i); return b ? P.numeroDaBatida.get(b.id) : null; })] },
-      cabecalho: '<th>Documento</th><th>Fornecedor</th><th>Data · conta</th><th class="num" title="Sem sinal: D = débito · C = crédito">Valor · D/C</th><th>ID</th>',
+      cabecalho: '<th>Documento</th><th>' + (cliente() ? 'Cliente' : 'Fornecedor') + '</th><th>Data · conta</th><th class="num" title="Sem sinal: D = débito · C = crédito">Valor · D/C</th><th>ID</th>',
       linhas: lista, vazio: 'Nada nesta lista com estes filtros.',
       linha: (l) => {
         const b = P.batidaDaLinha.get(l.i);
         const n = b ? P.numeroDaBatida.get(b.id) : null;
         return '<tr' + (b && P.abertos.has(b.id) ? ' class="destaque"' : '') + '><td class="num"><b>' + T.nome(docDe(l)) + '</b></td>' +
-          '<td class="nome">' + (l.dono.chave === SEM() ? '<span class="falta">sem fornecedor</span>' : T.esc(l.dono.nome)) +
+          '<td class="nome">' + (l.dono.chave === SEM() ? '<span class="falta">sem ' + rotulos().pessoa + '</span>' : T.esc(l.dono.nome)) +
           (l.historico ? '<br><span class="suave pequeno">' + T.esc(l.historico.slice(0, 80)) + '</span>' : '') + '</td>' +
           '<td class="num">' + T.esc(l.data || '—') + '<br><span class="pequeno suave" title="' + T.esc(l.contaNome || '') + '">conta ' + T.esc(l.conta) + '</span></td>' +
           tdDC(l.valor) +
@@ -308,7 +323,7 @@
       alta: false, porPagina: 100,
       ordem: { id: 'p4-batidas', colunas: [null, NUM((x) => P.numeroDaBatida.get(x.id)), TXT((x) => x.como), TXT((x) => docDe(P.primeiraDaBatida(x))), TXT((x) => nomeDe(P.primeiraDaBatida(x))),
         DATA((x) => P.primeiraDaBatida(x).data), VALOR((x) => x.valor), NUM((x) => x.linhas.length)] },
-      cabecalho: '<th style="width:24px"></th><th>ID</th><th>Como</th><th>Documento</th><th>Fornecedor</th><th title="A data mais antiga dos lançamentos">Data</th><th class="num">Valor</th><th>Lançamentos</th>',
+      cabecalho: '<th style="width:24px"></th><th>ID</th><th>Como</th><th>Documento</th><th>' + (cliente() ? 'Cliente' : 'Fornecedor') + '</th><th title="A data mais antiga dos lançamentos">Data</th><th class="num">Valor</th><th>Lançamentos</th>',
       linhas: lista, vazio: 'Nenhuma conciliação com este filtro.',
       linha: (x) => {
         const n = P.numeroDaBatida.get(x.id);
@@ -335,14 +350,14 @@
     const r = P.r;
     const lista = r.porFornecedor.slice().sort((a, b) => (b.osDoisLados ? 1 : 0) - (a.osDoisLados ? 1 : 0) || Math.abs(b.saldo) - Math.abs(a.saldo));
     P.el.querySelector('#p4-fornecedores').innerHTML = '<details class="cartao corpo" style="margin-top:18px"' + (P.fornecedoresAberto ? ' open' : '') + ' id="p4-det-forn">' +
-      '<summary><b>Por fornecedor</b> · o que ficou em aberto de cada um (' + lista.length.toLocaleString('pt-BR') + ')' +
+      '<summary><b>Por ' + T.esc(rotulos().pessoa) + '</b> · o que ficou em aberto de cada um (' + lista.length.toLocaleString('pt-BR') + ')' +
       (r.totais.fornecedoresComOsDoisLados ? ' · <span class="selo suspeita">' + r.totais.fornecedoresComOsDoisLados + ' com débito e crédito em aberto</span>' : '') + '</summary>' +
       '<p class="suave pequeno" style="margin:8px 0">Os que têm os dois lados em aberto vêm primeiro: é onde o pagamento não casou com a nota. Clique no nome para filtrar a lista de cima.</p>' +
       '<div id="p4-tab-forn"></div></details>';
     T.tabelaPaginada(P.el.querySelector('#p4-tab-forn'), {
       alta: true, porPagina: 200,
       ordem: { id: 'p4-fornecedores', colunas: [TXT((g) => g.nome), NUM((g) => g.qtdCredito), VALOR((g) => g.credito), NUM((g) => g.qtdDebito), VALOR((g) => g.debito), VALOR((g) => g.saldo)] },
-      cabecalho: '<th>Fornecedor</th><th class="num">Lanç. a crédito</th><th class="num">A crédito</th><th class="num">Lanç. a débito</th><th class="num">A débito</th><th class="num">Saldo em aberto</th>',
+      cabecalho: '<th>' + (cliente() ? 'Cliente' : 'Fornecedor') + '</th><th class="num">Lanç. ' + (cliente() ? 'a débito' : 'a crédito') + '</th><th class="num">' + (cliente() ? 'A débito' : 'A crédito') + '</th><th class="num">Lanç. ' + (cliente() ? 'a crédito' : 'a débito') + '</th><th class="num">' + (cliente() ? 'A crédito' : 'A débito') + '</th><th class="num">Saldo em aberto</th>',
       linhas: lista, vazio: 'Nada em aberto.',
       linha: (g) => '<tr class="' + (g.osDoisLados ? 'destaque-dois-lados' : '') + '"><td class="nome">' +
         (g.chave === SEM() ? '<span class="falta">sem fornecedor</span>' : '<button type="button" class="lapis forte" data-filtrar-forn="' + T.esc(g.nome) + '" title="Filtrar a lista de cima por este fornecedor">' + T.esc(g.nome) + '</button>') +
@@ -363,7 +378,7 @@
   function ligar() { ligarCampos(); }
   // Os campos nascem a cada desenho (o quadro de arquivos, a busca e os filtros das colunas).
   function ligarCampos() {
-    raiz.TelaSubir.ligar(P.el.querySelector('.arquivos-passo'), P.codigo, lugaresDoPasso4(P.comp, P.arqs));
+    raiz.TelaSubir.ligar(P.el.querySelector('.arquivos-passo'), P.codigo, lugaresDoPasso4(P.comp, P.arqs, P.fam.id));
     raiz.TelaSubir.ligarBotao(P.el.querySelector('[data-abrir-arquivos]'));
     P.el.querySelectorAll('[data-filtro]').forEach((campo) => {
       const nome = campo.getAttribute('data-filtro');
@@ -394,7 +409,7 @@
       if (!acao) return;
       const a = acao.getAttribute('data-acao');
       if (a === 'excel') baixarExcel();
-      if (a === 'trocar-contas') await raiz.TelaSubir.doDiario(P.codigo, lugaresDoPasso4(P.comp, P.arqs));
+      if (a === 'trocar-contas') await raiz.TelaSubir.doDiario(P.codigo, lugaresDoPasso4(P.comp, P.arqs, P.fam.id));
     });
     P.el.addEventListener('toggle', (ev) => { if (ev.target && ev.target.id === 'p4-det-forn') P.fornecedoresAberto = ev.target.open; }, true);
   }

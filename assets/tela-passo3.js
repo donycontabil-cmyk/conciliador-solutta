@@ -34,24 +34,50 @@
 
   // O que muda entre os passos A × B. "aumento"/"reducao" são os nomes, na tela, de quem aumenta
   // e de quem diminui o saldo da conta (o motor chama de nota e baixa; ver MotorTerceiro.ladosDoRazao).
+  // Em CLIENTES é o espelho (Dony, 22/09/2026: "só muda a conta, e a natureza de uma é credora e a da outra é devedora"):
+  // a nota de venda aumenta a conta no DÉBITO e o recebimento diminui no crédito; no adiantamento de clientes (passivo) é o contrário.
   const PASSOS_AB = {
-    passo3: {
-      id: 'passo3', numero: '③', tipo: 'fornecedor_pagar', titulo: 'Fornecedores × contas a pagar',
-      natureza: 'fornecedores', tipoFinanceiro: 'financeiro_pagar', papelRazao: 'principal',
-      nomeAging: 'aging (contas a pagar)', nomeRazao: 'razão de fornecedores',
-      aumento: 'nota', reducao: 'baixa', aumentos: 'notas', reducoes: 'baixas', ladoAumento: 'créditos', ladoReducao: 'débitos',
-      avisoAntes: 'baixa com data antes da nota', avisoCurto: 'baixa antes da nota',
+    fornecedores: {
+      passo3: {
+        id: 'passo3', numero: '③', tipo: 'fornecedor_pagar', titulo: 'Fornecedores × contas a pagar', familia: 'fornecedores',
+        natureza: 'fornecedores', tipoFinanceiro: 'financeiro_pagar', papelRazao: 'principal',
+        nomeAging: 'aging (contas a pagar)', nomeRazao: 'razão de fornecedores',
+        aumento: 'nota', reducao: 'baixa', aumentos: 'notas', reducoes: 'baixas', ladoAumento: 'créditos', ladoReducao: 'débitos',
+        avisoAntes: 'baixa com data antes da nota', avisoCurto: 'baixa antes da nota',
+      },
+      passo2: {
+        id: 'passo2', numero: '②', tipo: 'adiantamento_financeiro', titulo: 'Adiantamento × financeiro', familia: 'fornecedores',
+        natureza: 'adiantamento', tipoFinanceiro: 'financeiro_adiantamento', papelRazao: 'adiantamento',
+        nomeAging: 'aging de adiantamentos', nomeRazao: 'razão de adiantamento a fornecedores',
+        aumento: 'adiantamento', reducao: 'compensação', aumentos: 'adiantamentos', reducoes: 'compensações', ladoAumento: 'débitos', ladoReducao: 'créditos',
+        avisoAntes: 'compensação com data antes do adiantamento', avisoCurto: 'compensação antes do adiantamento',
+      },
     },
-    passo2: {
-      id: 'passo2', numero: '②', tipo: 'adiantamento_financeiro', titulo: 'Adiantamento × financeiro',
-      natureza: 'adiantamento', tipoFinanceiro: 'financeiro_adiantamento', papelRazao: 'adiantamento',
-      nomeAging: 'aging de adiantamentos', nomeRazao: 'razão de adiantamento a fornecedores',
-      aumento: 'adiantamento', reducao: 'compensação', aumentos: 'adiantamentos', reducoes: 'compensações', ladoAumento: 'débitos', ladoReducao: 'créditos',
-      avisoAntes: 'compensação com data antes do adiantamento', avisoCurto: 'compensação antes do adiantamento',
+    clientes: {
+      passo3: {
+        id: 'passo3', numero: '③', tipo: 'cliente_receber', titulo: 'Clientes × contas a receber', familia: 'clientes',
+        natureza: 'clientes', tipoFinanceiro: 'financeiro_receber', papelRazao: 'principal',
+        nomeAging: 'aging (contas a receber)', nomeRazao: 'razão de clientes',
+        aumento: 'nota', reducao: 'recebimento', aumentos: 'notas', reducoes: 'recebimentos', ladoAumento: 'débitos', ladoReducao: 'créditos',
+        avisoAntes: 'recebimento com data antes da nota', avisoCurto: 'recebimento antes da nota',
+      },
+      passo2: {
+        id: 'passo2', numero: '②', tipo: 'adiantamento_cliente_financeiro', titulo: 'Adiantamento de clientes × financeiro', familia: 'clientes',
+        natureza: 'adiantamento_cliente', tipoFinanceiro: 'financeiro_adiantamento_cliente', papelRazao: 'adiantamento',
+        nomeAging: 'aging de adiantamentos de clientes', nomeRazao: 'razão de adiantamento de clientes',
+        aumento: 'adiantamento', reducao: 'compensação', aumentos: 'adiantamentos', reducoes: 'compensações', ladoAumento: 'créditos', ladoReducao: 'débitos',
+        avisoAntes: 'compensação com data antes do adiantamento', avisoCurto: 'compensação antes do adiantamento',
+      },
     },
   };
-  function configDoPasso(passoId) { return PASSOS_AB[passoId] || PASSOS_AB.passo3; }
+  function configDoPasso(passoId, familiaId) {
+    const daFamilia = PASSOS_AB[familiaId || 'fornecedores'] || PASSOS_AB.fornecedores;
+    return daFamilia[passoId] || daFamilia.passo3;
+  }
   function primeiraMaiuscula(s) { return String(s).charAt(0).toUpperCase() + String(s).slice(1); }
+  // "fornecedor" ou "cliente", conforme a família do passo aberto (Dony, 22/09/2026).
+  function pessoa() { return E && E.cfg && E.cfg.familia === 'clientes' ? 'cliente' : 'fornecedor'; }
+  function pessoas() { return pessoa() + 's'; }
   // Natureza (D/C) no lugar do sinal (Dony, 16/09/2026: "só pelo valor positivo ou negativo me atrapalha").
   function dc(v) { return M.ladoDC(v, E.cfg.natureza); }
   function textoDC(v) { return T.valorDC(v, dc(v)); }   // "1.236,55 C"
@@ -69,7 +95,7 @@
   // Usado pela tela e pelo relatório (tela-relatorio3.js). Devolve null se a rota mudou no meio.
   // opcoes: { passo: 'passo3' | 'passo2', semAnterior }
   async function carregarDados(codigo, anoMes, conferir, opcoes) {
-    const cfg = configDoPasso(opcoes && opcoes.passo);
+    const cfg = configDoPasso(opcoes && opcoes.passo, opcoes && opcoes.familia);
     const arm = app().armazenamento;
     const emp = app().empresas.find((e) => String(e.codigo) === String(codigo));
     const comp = anoMes + '-01';
@@ -82,7 +108,7 @@
     const d = registro.decisoes || {};
     const periodoDe = inicioDoPeriodo(d.periodoDe, comp);
     const metas = await arm.arquivos(codigo);
-    const arqs = arquivosDoPasso(metas, comp, cfg.id, { de: periodoDe });
+    const arqs = arquivosDoPasso(metas, comp, cfg.id, { de: periodoDe, familia: cfg.familia });
     if (conferir && !conferir()) return null;
     const falta = [];
     if (!arqs.agingAnterior) falta.push('o ' + cfg.nomeAging + ' de ' + U.nomeCompetencia(arqs.compAnterior));
@@ -284,12 +310,12 @@
     return { competencia: compAnt, pendencias: M.pendenciasAB(dadosAnt.itens, dadosAnt.decisoes.conciliacoesAB, compAnt), registro: reg, calculado: true };
   }
 
-  async function mostrar(el, codigo, anoMes, conferir, passoId) {
-    const cfg = configDoPasso(passoId);
+  async function mostrar(el, codigo, anoMes, conferir, passoId, familiaId) {
+    const cfg = configDoPasso(passoId, familiaId);
     const comp = anoMes + '-01';
-    const voltar = '#/empresa/' + encodeURIComponent(codigo) + '/fornecedores/' + anoMes;
+    const voltar = '#/empresa/' + encodeURIComponent(codigo) + '/' + cfg.familia + '/' + anoMes;
     T.carregando(el, 'Abrindo o Passo ' + cfg.numero + ' de ' + U.nomeCompetencia(comp) + '…');
-    const dados = await carregarDados(codigo, anoMes, conferir, { passo: cfg.id });
+    const dados = await carregarDados(codigo, anoMes, conferir, { passo: cfg.id, familia: cfg.familia });
     if (!dados) return;
     if (dados.erro) { el.innerHTML = '<div class="aviso ambar">' + T.esc(dados.erro) + ' <a href="#/">Voltar</a></div>'; return; }
     if (dados.falta) {
@@ -340,12 +366,12 @@
   //    razão de vários meses guardado em outra competência que cobre o mês inteiro.
   //  ③: contas a pagar + razão de fornecedores · ②: aging de adiantamentos + razão de adiantamento.
   function arquivosDoPasso(metas, comp, passoId, opcoes) {
-    const cfg = configDoPasso(passoId);
+    const cfg = configDoPasso(passoId, opcoes && opcoes.familia);
     const de = inicioDoPeriodo(opcoes && opcoes.de, comp);
     const compAnterior = U.somarMeses(de || comp, -1);
     const maisNovo = (lista) => lista.slice().sort((a, b) => U.paraMs(b.enviadoEm) - U.paraMs(a.enviadoEm))[0] || null;
     const agings = (c) => metas.filter((m) => m.tipo === cfg.tipoFinanceiro && m.competencia === c);
-    const daConta = (m) => m.tipo === 'razao' && m.conta && m.conta.familia === 'fornecedores' && m.conta.papel === cfg.papelRazao;
+    const daConta = (m) => m.tipo === 'razao' && m.conta && m.conta.familia === cfg.familia && m.conta.papel === cfg.papelRazao;
     const inicio = U.inicioDaCompetencia(comp), fim = U.fimDaCompetencia(comp);
     const cobre = (m) => {
       const a = m.periodo && U.lerData(m.periodo.de), b = m.periodo && U.lerData(m.periodo.ate);
@@ -560,7 +586,7 @@
       '<div class="linha-flex" style="gap:12px"><span class="guardado" id="guardado" title="Cada decisão é gravada na hora">' + (E.guardadoEm ? 'guardado às ' + U.horaLocal(E.guardadoEm) : 'nenhuma decisão tomada ainda') + '</span>' +
       // Arquivos em cima à direita (Dony, 15/09/2026: "um lugar de carregar novos arquivos" e excluir).
       raiz.TelaSubir.botao(chaveDoPainel(contextoDoPainel())) +
-      '<a class="botao pequeno" href="#/empresa/' + encodeURIComponent(E.codigo) + '/fornecedores/' + U.anoMes(E.comp) + '/' + E.cfg.id + '-relatorio" title="Relatório da conciliação para imprimir, salvar em PDF ou baixar em Excel">📄 Relatório</a>' +
+      '<a class="botao pequeno" href="#/empresa/' + encodeURIComponent(E.codigo) + '/' + E.cfg.familia + '/' + U.anoMes(E.comp) + '/' + E.cfg.id + '-relatorio" title="Relatório da conciliação para imprimir, salvar em PDF ou baixar em Excel">📄 Relatório</a>' +
       '<button type="button" class="botao pequeno perigo" data-acao="limpar-conciliacao" title="Apagar tudo o que foi feito neste passo num mês e começar do zero">🧹 Limpar conciliação</button></div></div>' +
       painel +
       desenharPonte() +
@@ -626,8 +652,8 @@
   const ABAS = () => [
     { id: 'ab', titulo: 'Conciliar A × B' },
     { id: 'diferencas', titulo: 'Diferenças' },
-    { id: 'fornecedores', titulo: 'Por fornecedor' },
-    { id: 'sem', titulo: 'Sem fornecedor' },
+    { id: 'fornecedores', titulo: 'Por ' + (pessoa()) },
+    { id: 'sem', titulo: 'Sem ' + (pessoa()) },
     { id: 'razao', titulo: 'Razão completo' },
     { id: 'agingAnt', titulo: 'Aging ' + E.entrada.mesAnterior },
     { id: 'agingAtu', titulo: 'Aging ' + E.entrada.mesAtual },
@@ -890,7 +916,7 @@
     const algum = CAMPOS_LADO.some((n) => filtro(lado + '.' + n));
     return '<div class="filtros-lado">' +
       campo('doc', 'Documento', 'Número do documento, ou parte dele. Mais de um: 107, 207') +
-      campo('forn', 'Fornecedor', 'Nome do fornecedor, ou pedaço do histórico. Mais de um: POSTO CENTRAL, SILVA') +
+      campo('forn', primeiraMaiuscula(pessoa()), 'Nome do ' + pessoa() + ', ou pedaço do histórico. Mais de um: POSTO CENTRAL, SILVA') +
       campo('valor', 'Valor', 'Valor (1.236,55), parte dele, ou faixa: 100 a 500 — com ou sem sinal. Mais de um: 791,43; 5.105,88') +
       campo('data', 'Data', 'Data (08/07/2026), parte dela (07/2026), ou faixa: 01/07 a 15/07. Mais de uma: 08/07; 22/07') +
       '<select data-filtro="' + lado + '.dc" class="' + (filtro(lado + '.dc') ? 'ativo' : '') + '" title="Só os débitos ou só os créditos">' +
@@ -964,7 +990,7 @@
       .concat(ultima ? [['atualizacao', 'Da última atualização de arquivo']] : [])
       .concat([['todos', 'Todos']]);
     E.el.querySelector('#filtros').innerHTML =
-      '<input type="search" class="busca" data-filtro="busca" placeholder="Busca nos dois lados: documento, fornecedor, valor, data ou #ID" title="Vale para a Parte A, a Parte B e a lista de conciliações. Cada parte tem também os seus filtros." value="' + T.esc(busca) + '">' +
+      '<input type="search" class="busca" data-filtro="busca" placeholder="Busca nos dois lados: documento, ' + pessoa() + ', valor, data ou #ID" title="Vale para a Parte A, a Parte B e a lista de conciliações. Cada parte tem também os seus filtros." value="' + T.esc(busca) + '">' +
       '<select class="filtro" data-filtro="mostrar">' + opcoes.map((o) => '<option value="' + o[0] + '"' + (mostrar === o[0] ? ' selected' : '') + '>' + o[1] + '</option>').join('') + '</select>' +
       '<label class="linha-flex" style="gap:6px"><input type="checkbox" id="ab-anterior"' + (E.incluirAnterior ? ' checked' : '') + '> <span class="pequeno">Parte A = aging ' + T.esc(E.entrada.mesAnterior) + (E.itens.continuacao ? ' + pendências' : '') + ' + razão</span></label>' +
       '<span class="suave pequeno">(desmarque para <b>só o razão</b>)</span>';
@@ -1082,7 +1108,7 @@
         (xs.length > LIM ? '<p class="suave pequeno">… e mais ' + (xs.length - LIM) + '.</p>' : '') : '<p class="suave pequeno">Nenhum.</p>');
     const mudA = new Set((a.mudaram || []).map((p) => p.antes.id)), mudD = new Set((a.mudaram || []).map((p) => p.depois.id));
     const entraram = (a.entraram || []).filter((x) => !mudD.has(x.id)), sairam = (a.sairam || []).filter((x) => !mudA.has(x.id));
-    const cabGrupo = '<th>ID</th><th>Como</th><th>Documento</th><th>Fornecedor</th><th class="num">Parte A</th><th class="num">Parte B</th>';
+    const cabGrupo = '<th>ID</th><th>Como</th><th>Documento</th><th>' + primeiraMaiuscula(pessoa()) + '</th><th class="num">Parte A</th><th class="num">Parte B</th>';
     const tdsGrupo = (g) => '<td class="num">' + verId(g.id) + '</td><td><span class="selo ' + seloDaRegra(g) + '">' + T.esc(COMO_AB[g.regra] || g.regra) + '</span></td>' +
       '<td class="num">' + T.nome(g.documento) + '</td><td class="nome">' + T.nome(g.nome) + (g.obs ? '<br><span class="suave pequeno">✎ ' + T.esc(g.obs) + '</span>' : '') + '</td>' +
       tdDC(g.valorA) + tdDC(g.valorB);
@@ -1239,7 +1265,7 @@
       alta: true, porPagina: 200,
       ordem: { id: 'ab-itens-' + lado, fixo: (x) => !!(E.fixos && E.fixos.has(x.id)), colunas: [null, TXT((x) => x.doc), TXT((x) => (x.chave === SEM ? '' : x.nome)),
         DATA((x) => x.data), VALOR((x) => x.valor), NUM((x) => { const g = E.idDoItem.get(x.id); return g ? g.id : null; })] },
-      cabecalho: '<th class="caixa"><input type="checkbox" data-marca-todos="' + lado + '" title="Marcar todos os em aberto desta lista (com os filtros de agora)"></th><th>Documento</th><th>Fornecedor</th><th>Data · origem</th><th class="num" title="Sem sinal: D = débito · C = crédito">Valor · D/C</th><th>ID</th>',
+      cabecalho: '<th class="caixa"><input type="checkbox" data-marca-todos="' + lado + '" title="Marcar todos os em aberto desta lista (com os filtros de agora)"></th><th>Documento</th><th>' + primeiraMaiuscula(pessoa()) + '</th><th>Data · origem</th><th class="num" title="Sem sinal: D = débito · C = crédito">Valor · D/C</th><th>ID</th>',
       linhas: itens, vazio: 'Nada nesta lista.',
       linha: (x) => {
         const g = E.idDoItem.get(x.id);
@@ -1317,7 +1343,7 @@
       alta: false, porPagina: 100,
       ordem: { id: 'ab-lista', colunas: [null, NUM((g) => g.id), TXT((g) => TIPO_AB[g.tipo]), TXT((g) => COMO_AB[g.regra] || g.regra), TXT((g) => g.documento), TXT((g) => g.nome),
         DATA(dataDoGrupo), VALOR((g) => g.valorA), VALOR((g) => g.valorB), NUM((g) => g.a.length + g.b.length), NUM((g) => U.paraMs(g.quando) || null), null] },
-      cabecalho: '<th style="width:24px"></th><th>ID</th><th>Tipo</th><th>Como</th><th>Documento</th><th>Fornecedor</th><th title="A data mais antiga dos itens da conciliação">Data</th><th class="num">Parte A</th><th class="num">Parte B</th><th>Itens</th><th>Quem · quando</th><th></th>',
+      cabecalho: '<th style="width:24px"></th><th>ID</th><th>Tipo</th><th>Como</th><th>Documento</th><th>' + primeiraMaiuscula(pessoa()) + '</th><th title="A data mais antiga dos itens da conciliação">Data</th><th class="num">Parte A</th><th class="num">Parte B</th><th>Itens</th><th>Quem · quando</th><th></th>',
       linhas: lista, vazio: 'Nenhuma conciliação com este filtro.',
       linha: (g) => {
         const aberto = E.abertosAB.has(g.id);
@@ -1618,7 +1644,7 @@
     T.tabelaPaginada(alvo.querySelector('#tab'), {
       ordem: { id: 'ab-fornecedores', colunas: [null, TXT((f) => f.nome), TXT((f) => f.cnpj), VALOR((f) => f.anterior), VALOR((f) => f.notas), VALOR((f) => f.baixas),
         VALOR((f) => f.movimento), VALOR((f) => f.esperado), VALOR((f) => f.atual), VALOR((f) => f.diferenca), TXT((f) => (SIT[f.situacao] || [0, f.situacao])[1]), null] },
-      cabecalho: '<th style="width:24px"></th><th>Fornecedor</th><th>CNPJ</th><th class="num">' + T.esc(E.entrada.mesAnterior) + '</th><th class="num">' + primeiraMaiuscula(E.cfg.aumentos) + '</th><th class="num">' + primeiraMaiuscula(E.cfg.reducoes) + '</th><th class="num">Movim.</th><th class="num">Esperado</th><th class="num">' + T.esc(E.entrada.mesAtual) + '</th><th class="num">Diferença</th><th>Situação</th><th></th>',
+      cabecalho: '<th style="width:24px"></th><th>' + primeiraMaiuscula(pessoa()) + '</th><th>CNPJ</th><th class="num">' + T.esc(E.entrada.mesAnterior) + '</th><th class="num">' + primeiraMaiuscula(E.cfg.aumentos) + '</th><th class="num">' + primeiraMaiuscula(E.cfg.reducoes) + '</th><th class="num">Movim.</th><th class="num">Esperado</th><th class="num">' + T.esc(E.entrada.mesAtual) + '</th><th class="num">Diferença</th><th>Situação</th><th></th>',
       linhas: lista, porPagina: 200,
       vazio: soDiferencas ? 'Tudo batendo — nenhuma diferença. 🎉' : 'Nenhum fornecedor com estes filtros.',
       linha: (f) => {
@@ -1687,7 +1713,7 @@
     T.tabelaPaginada(alvo.querySelector('#tab'), {
       ordem: { id: 'ab-razao', colunas: [DATA((l) => lancs[l.i].data), TXT((l) => M.documentoDaLinha(lancs[l.i])), TXT((l) => lancs[l.i].historico),
         TXT((l) => { const d = E.r.porLinha.get(l.digital); return d.chave === SEM ? '' : d.nome; }), VALOR((l) => valorDaLinha(lancs[l.i])), VALOR((l) => valorDaLinha(lancs[l.i])), null] },
-      cabecalho: '<th>Data</th><th>NF/Doc</th><th class="historico">Histórico</th><th>Fornecedor</th>' + cabecalhoRazao(false) + '<th></th>',
+      cabecalho: '<th>Data</th><th>NF/Doc</th><th class="historico">Histórico</th><th>' + primeiraMaiuscula(pessoa()) + '</th>' + cabecalhoRazao(false) + '<th></th>',
       linhas: lista, porPagina: 300, vazio: 'Nenhuma linha.',
       linha: (l) => { const d = E.r.porLinha.get(l.digital); const lc = lancs[l.i]; return '<tr><td class="num">' + T.esc(lc.data) + '</td><td>' + T.nome(M.documentoDaLinha(lc)) + '</td>' +
         '<td class="historico">' + T.esc(lc.historico) + '</td><td class="nome">' + (d.chave === SEM ? '<span class="falta">sem fornecedor</span>' : T.esc(d.nome)) +
@@ -1703,7 +1729,7 @@
     alvo.innerHTML = '<p class="suave pequeno" style="margin:0 0 8px">Aging de ' + T.esc(mes) + ': ' + lista.length + ' título(s) em aberto · R$ ' + textoDC(total) + '.</p><div id="tab"></div>';
     T.tabelaPaginada(alvo.querySelector('#tab'), {
       ordem: { id: 'ab-aging', colunas: [TXT((x) => x.nome), TXT((x) => x.cnpj), DATA((x) => x.vencimento), TXT((x) => x.documento), VALOR((x) => x.valor)] },
-      cabecalho: '<th>Fornecedor</th><th>CNPJ</th><th>Vencimento</th><th>Documento</th><th class="num">Valor · D/C</th>',
+      cabecalho: '<th>' + primeiraMaiuscula(pessoa()) + '</th><th>CNPJ</th><th>Vencimento</th><th>Documento</th><th class="num">Valor · D/C</th>',
       linhas: lista, porPagina: 300, vazio: 'Nenhum título.',
       linha: (t) => '<tr><td class="nome">' + T.esc(t.nome) + '</td><td class="num">' + (t.cnpj ? U.formatarCnpj(t.cnpj) : '—') + '</td>' +
         '<td class="num">' + T.esc(t.vencimento || '—') + '</td><td>' + T.nome(t.documento) + '</td>' + tdDC(t.valor) + '</tr>',

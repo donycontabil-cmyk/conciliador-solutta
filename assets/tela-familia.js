@@ -12,19 +12,26 @@
 
   function app() { return raiz.App; }
 
-  function idChecklist(codigo, comp) { return 'F-' + codigo + '-fornecedor_checklist-' + U.anoMes(comp); }
-  function idPasso1(codigo, comp) { return 'F-' + codigo + '-fornecedor_adiantamento-' + U.anoMes(comp); }
+  // Cada família tem os seus tipos (Dony, 22/09/2026: "clientes tem que ter o mesmo menu e todas as conciliações de
+  // fornecedores; só muda a conta, e a natureza de uma é credora e a da outra é devedora").
+  function familiaDe(familiaId) { return F.familia(familiaId || 'fornecedores') || F.familia('fornecedores'); }
+  function tipoDoPasso(fam, passoId) { const p = (fam.passos || []).find((x) => x.id === passoId); return p ? p.tipo : ''; }
+  function idChecklist(codigo, comp, familiaId) { return 'F-' + codigo + '-' + familiaDe(familiaId).tipoChecklist + '-' + U.anoMes(comp); }
+  function idPasso1(codigo, comp, familiaId) { return 'F-' + codigo + '-' + tipoDoPasso(familiaDe(familiaId), 'passo1') + '-' + U.anoMes(comp); }
 
-  function daFamilia(meta) {
-    return (meta.tipo === 'razao' && meta.conta && meta.conta.familia === 'fornecedores') || meta.tipo === 'financeiro_pagar' || meta.tipo === 'financeiro_adiantamento';
+  function daFamilia(meta, familiaId) {
+    const fam = familiaDe(familiaId);
+    const fin = fam.tipoFinanceiro || {};
+    return (meta.tipo === 'razao' && meta.conta && meta.conta.familia === fam.id) || meta.tipo === fin.principal || meta.tipo === fin.adiantamento;
   }
 
   // O arquivo que vale para cada papel na competência: a versão mais nova.
-  function arquivosDoPasso1(metas, comp) {
+  function arquivosDoPasso1(metas, comp, familiaId) {
+    const fam = familiaDe(familiaId);
     const doMes = metas.filter((m) => m.competencia === comp);
     const maisNovo = (lista) => lista.slice().sort((a, b) => U.paraMs(b.enviadoEm) - U.paraMs(a.enviadoEm))[0] || null;
-    const principal = doMes.filter((m) => m.tipo === 'razao' && m.conta && m.conta.familia === 'fornecedores' && m.conta.papel === 'principal');
-    const adiant = doMes.filter((m) => m.tipo === 'razao' && m.conta && m.conta.familia === 'fornecedores' && m.conta.papel === 'adiantamento');
+    const principal = doMes.filter((m) => m.tipo === 'razao' && m.conta && m.conta.familia === fam.id && m.conta.papel === 'principal');
+    const adiant = doMes.filter((m) => m.tipo === 'razao' && m.conta && m.conta.familia === fam.id && m.conta.papel === 'adiantamento');
     // Uma conta pode ter mais de um arquivo (versões): vale o mais novo de cada conta.
     const porConta = (lista) => {
       const mapa = new Map();
@@ -37,7 +44,7 @@
     return {
       F: porConta(principal),
       A: porConta(adiant),
-      pagar: maisNovo(doMes.filter((m) => m.tipo === 'financeiro_pagar')),
+      pagar: maisNovo(doMes.filter((m) => m.tipo === (fam.tipoFinanceiro || {}).principal)),
       metas, // todos os arquivos (as versões anteriores de cada lugar)
     };
   }
@@ -47,8 +54,8 @@
       registro.decisoes.notas && registro.decisoes.notas.ok);
   }
 
-  function competenciaPadrao(metas) {
-    const comps = Array.from(new Set(metas.filter(daFamilia).map((m) => m.competencia))).sort().reverse();
+  function competenciaPadrao(metas, familiaId) {
+    const comps = Array.from(new Set(metas.filter((m) => daFamilia(m, familiaId)).map((m) => m.competencia))).sort().reverse();
     // O livro diário (22/09/2026): o último mês que ele cobre também conta (sem ele, a tela abria num mês sem razão).
     const fimDoDiario = (raiz.TelaSubir ? raiz.TelaSubir.diariosEmUso(metas) : []).map((m) => { const d = U.lerData(m.periodo.ate); return d ? U.competenciaDe(d) : null; })
       .filter(Boolean).sort().reverse()[0];
@@ -59,10 +66,10 @@
 
   // O livro diário no mês: o diário em uso que cobre a competência e as contas escolhidas para cada papel (os passos
   // tiram delas o razão sozinhos). null sem diário que cubra o mês.
-  function diarioDoMes(metas, comp, emp) {
+  function diarioDoMes(metas, comp, emp, familiaId) {
     const S = raiz.TelaSubir;
     if (!S) return null;
-    const lugar = (papel) => ({ tipo: 'razao', papel, competencia: comp, periodo: { de: null, ate: comp } });
+    const lugar = (papel) => ({ tipo: 'razao', familia: familiaDe(familiaId).id, papel, competencia: comp, periodo: { de: null, ate: comp } });
     const md = S.diarioDoLugar(metas, lugar('principal'));
     return md ? { md, F: S.contasEscolhidas(emp, lugar('principal')), A: S.contasEscolhidas(emp, lugar('adiantamento')) } : null;
   }
@@ -75,7 +82,7 @@
       return;
     }
     const fam = F.familia(familiaId);
-    if (!fam || familiaId !== 'fornecedores') {
+    if (!fam || !(fam.passos || []).some((p) => p.construido)) {
       el.innerHTML = '<a class="voltar" href="#/empresa/' + encodeURIComponent(codigo) + '">← ' + T.esc(emp.nome) + '</a>' +
         '<div class="aviso info"><span class="icone-aviso">🛠️</span><div><b>' + T.esc(fam ? fam.titulo : familiaId) + '</b> está em construção' +
         (fam && fam.etapa ? ' (Etapa ' + fam.etapa + ' do plano)' : '') + '.</div></div>';
@@ -83,7 +90,7 @@
     }
     const metas = await arm.arquivos(codigo);
     if (!anoMes) {
-      app().ir('#/empresa/' + encodeURIComponent(codigo) + '/fornecedores/' + competenciaPadrao(metas));
+      app().ir('#/empresa/' + encodeURIComponent(codigo) + '/' + fam.id + '/' + competenciaPadrao(metas, fam.id));
       return;
     }
     const comp = anoMes + '-01';
@@ -91,16 +98,16 @@
     const todasConcs = await arm.conciliacoes(codigo);
     if (conferir && !conferir()) return;
 
-    const checklist = concs.find((c) => c.id === idChecklist(codigo, comp)) || null;
-    const passo1 = concs.find((c) => c.id === idPasso1(codigo, comp)) || null;
+    const checklist = concs.find((c) => c.id === idChecklist(codigo, comp, fam.id)) || null;
+    const passo1 = concs.find((c) => c.id === idPasso1(codigo, comp, fam.id)) || null;
     const completo = checklistCompleto(checklist);
-    const fechadaAntes = todasConcs.some((c) => c.tipo === 'fornecedor_adiantamento' && c.situacao === 'fechada' && c.competencia < comp);
-    const arqs = arquivosDoPasso1(metas, comp);
-    const base = '#/empresa/' + encodeURIComponent(codigo) + '/fornecedores/';
+    const fechadaAntes = todasConcs.some((c) => c.tipo === tipoDoPasso(fam, 'passo1') && c.situacao === 'fechada' && c.competencia < comp);
+    const arqs = arquivosDoPasso1(metas, comp, fam.id);
+    const base = '#/empresa/' + encodeURIComponent(codigo) + '/' + fam.id + '/';
 
     el.innerHTML =
       '<a class="voltar" href="#/empresa/' + encodeURIComponent(codigo) + '">← ' + T.esc(emp.nome) + '</a>' +
-      '<div class="cabecalho"><div class="titulos"><h1>Fornecedores · ' + U.nomeCompetencia(comp) + '</h1>' +
+      '<div class="cabecalho"><div class="titulos"><h1>' + T.esc(fam.titulo.replace(/ ·.*$/, '')) + ' · ' + U.nomeCompetencia(comp) + '</h1>' +
       '<p class="suave">' + T.esc(emp.codigo + ' · ' + emp.nome) + '</p></div>' +
       '<div class="linha-flex">' +
       (fechadaAntes
@@ -120,16 +127,17 @@
     // Passos no modelo "Conciliar A × B" (③ contas a pagar e ② adiantamentos): arquivos e registro de cada um.
     const ab = {};
     if (raiz.TelaPasso3) {
-      for (const id of Object.keys(raiz.TelaPasso3.PASSOS_AB)) {
-        const cfg = raiz.TelaPasso3.configDoPasso(id);
+      for (const id of ['passo3', 'passo2']) {
+        if (!(fam.passos || []).some((p) => p.id === id && p.construido)) continue;
+        const cfg = raiz.TelaPasso3.configDoPasso(id, fam.id);
         const registro = concs.find((c) => c.id === 'F-' + codigo + '-' + cfg.tipo + '-' + U.anoMes(comp)) || null;
         // O período escolhido dentro do passo fica no registro dele.
-        ab[id] = { cfg, registro, arqs: raiz.TelaPasso3.arquivosDoPasso(metas, comp, id, { de: registro && registro.decisoes && registro.decisoes.periodoDe }) };
+        ab[id] = { cfg, registro, arqs: raiz.TelaPasso3.arquivosDoPasso(metas, comp, id, { de: registro && registro.decisoes && registro.decisoes.periodoDe, familia: fam.id }) };
       }
     }
     const inativos = passosInativos(emp, fam);
     desenharChecklist(el.querySelector('#checklist'), codigo, comp, checklist, fam, inativos);
-    desenharPassos(el.querySelector('#passos'), codigo, comp, fam, arqs, completo, passo1, ab, inativos, diarioDoMes(metas, comp, emp));
+    desenharPassos(el.querySelector('#passos'), codigo, comp, fam, arqs, completo, passo1, ab, inativos, diarioDoMes(metas, comp, emp, fam.id));
     desenharInativos(el.querySelector('#inativos'), fam, inativos);
     const alternar = (ev) => {
       const b = ev.target.closest('[data-inativar], [data-ativar]');
@@ -212,9 +220,9 @@
       try {
         // Reler antes de gravar: outra pessoa pode ter acabado de marcar o outro item.
         const arm = app().armazenamento;
-        const id = idChecklist(codigo, comp);
+        const id = idChecklist(codigo, comp, fam.id);
         const atual = (await arm.conciliacoes(codigo, comp)).find((c) => c.id === id) ||
-          { id, codigo, tipo: 'fornecedor_checklist', competencia: comp, situacao: 'andamento', arquivos: [], decisoes: { historico: [] }, resumo: {} };
+          { id, codigo, tipo: fam.tipoChecklist, competencia: comp, situacao: 'andamento', arquivos: [], decisoes: { historico: [] }, resumo: {} };
         const quem = app().usuario.nome;
         const quando = U.agoraISO();
         atual.decisoes = atual.decisoes || {};
@@ -251,18 +259,18 @@
           '<div class="acoes"><span class="pilula cinza">em construção · Etapa ' + p.etapa + '</span>' + botaoInativar(p) + '</div></div>';
       }
       if (p.id === 'passo13') return cartao13(p, base, completo, arqs, passo1);
-      if (p.id === 'passo4') return cartao4(p, base, arqs, diario);
+      if (p.id === 'passo4') return cartao4(p, base, arqs, diario, fam);
       if (ab[p.id]) return cartaoAB(p, codigo, comp, base, ab[p.id]);
       const temF = arqs.F.length > 0;
       const temA = arqs.A.length > 0;
       // Sem o razão, mas com o livro diário: o razão sai dele ao abrir o passo (com as contas escolhidas).
       const dF = !temF && !!diario, dA = !temA && !!diario;
       const itens = [
-        '<li>' + (temF || dF ? '<span class="ok">✓</span>' : '<span class="falta">✗</span>') + '<span>Razão de fornecedores' +
+        '<li>' + (temF || dF ? '<span class="ok">✓</span>' : '<span class="falta">✗</span>') + '<span>Razão de ' + T.esc(fam.contas.principal) + '' +
           (temF ? ' <span class="suave pequeno">(' + arqs.F.map((m) => T.esc(m.conta.codigo)).join(', ') + ')</span>' : dF ? ' ' + textoDoDiario(diario.F) : ' <span class="falta pequeno">falta</span>') + '</span></li>',
-        '<li>' + (temA || dA ? '<span class="ok">✓</span>' : '<span class="falta">✗</span>') + '<span>Razão de adiantamento a fornecedores' +
+        '<li>' + (temA || dA ? '<span class="ok">✓</span>' : '<span class="falta">✗</span>') + '<span>Razão de ' + T.esc(fam.contas.adiantamento) + '' +
           (temA ? ' <span class="suave pequeno">(' + arqs.A.map((m) => T.esc(m.conta.codigo)).join(', ') + ')</span>' : dA ? ' ' + textoDoDiario(diario.A) : ' <span class="falta pequeno">falta</span>') + '</span></li>',
-        '<li>' + (arqs.pagar ? '<span class="ok">✓</span>' : '<span class="fraco">·</span>') + '<span>Contas a pagar em aberto <span class="selo opcional">opcional</span></span></li>',
+        '<li>' + (arqs.pagar ? '<span class="ok">✓</span>' : '<span class="fraco">·</span>') + '<span>' + T.esc(fam.id === 'clientes' ? 'Contas a receber em aberto' : 'Contas a pagar em aberto') + ' <span class="selo opcional">opcional</span></span></li>',
       ];
       const temTudo = (temF || dF) && (temA || dA);
       let estado, pode = false, porque = '';
@@ -288,12 +296,12 @@
   }
 
   // ④ · Fornecedores · somente razão (Dony, 22/09/2026): o razão de fornecedores do ① (ou o livro diário) contra ele mesmo.
-  function cartao4(p, base, arqs, diario) {
+  function cartao4(p, base, arqs, diario, fam) {
     const temF = arqs.F.length > 0;
     const dF = !temF && !!diario;
     const pronto = temF || dF;
     const estado = pronto ? '<span class="pilula verde">pronto</span>' : '<span class="pilula ambar">falta arquivo</span>';
-    const item = '<li>' + (pronto ? '<span class="ok">✓</span>' : '<span class="falta">✗</span>') + '<span>Razão de fornecedores' +
+    const item = '<li>' + (pronto ? '<span class="ok">✓</span>' : '<span class="falta">✗</span>') + '<span>Razão de ' + T.esc(fam.contas.principal) + '' +
       (temF ? ' <span class="suave pequeno">(' + arqs.F.map((m) => T.esc(m.conta.codigo)).join(', ') + ')</span>' : dF ? ' ' + textoDoDiario(diario.F) : ' <span class="falta pequeno">falta</span>') + '</span></li>';
     const porque = !pronto ? 'Abra o passo e suba o razão de fornecedores (o mesmo do ①) — ou guarde o livro diário.' : dF && !diario.F ? 'Abra o passo e escolha as contas que saem do livro diário.' : '';
     return '<div class="cartao passo"><div class="linha-flex"><span class="numero">' + p.numero + '</span><h3 style="flex:1">' + T.esc(p.titulo) + '</h3>' + estado + '</div>' +
@@ -357,5 +365,5 @@
     return '<li>' + (tem ? '<span class="ok">✓</span>' : '<span class="falta">✗</span>') + '<span>' + T.esc(texto) + (tem ? '' : ' <span class="falta pequeno">falta</span>') + '</span></li>';
   }
 
-  raiz.TelaFamilia = { mostrar, arquivosDoPasso1, checklistCompleto, idChecklist, idPasso1 };
+  raiz.TelaFamilia = { mostrar, arquivosDoPasso1, checklistCompleto, idChecklist, idPasso1, familiaDe, tipoDoPasso, diarioDoMes, competenciaPadrao };
 })(self);

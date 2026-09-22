@@ -27,25 +27,26 @@
 
   let R = null; // estado desta tela
 
-  async function mostrar(el, codigo, anoMes, conferir) {
+  async function mostrar(el, codigo, anoMes, conferir, familiaId) {
     const comp = anoMes + '-01';
-    const familia = '#/empresa/' + encodeURIComponent(codigo) + '/fornecedores/' + anoMes;
+    const fam = raiz.TelaFamilia.familiaDe(familiaId);
+    const familia = '#/empresa/' + encodeURIComponent(codigo) + '/' + fam.id + '/' + anoMes;
     T.carregando(el, 'Montando o razão limpo de ' + U.nomeCompetencia(comp) + '…');
     // O mesmo razão do ①: com o livro diário e as contas escolhidas, ele sai do diário antes (só o que mudou).
-    if (!(await raiz.TelaPasso1.sincronizarComODiario(codigo, comp, conferir))) return;
-    const dados = await raiz.TelaPasso1.carregarDados(codigo, anoMes, conferir);
+    if (!(await raiz.TelaPasso1.sincronizarComODiario(codigo, comp, conferir, fam.id))) return;
+    const dados = await raiz.TelaPasso1.carregarDados(codigo, anoMes, conferir, fam.id);
     if (!dados) return;
     if (dados.erro) { el.innerHTML = '<div class="aviso ambar">' + T.esc(dados.erro) + ' <a href="#/">Voltar</a></div>'; return; }
     if (!dados.checklistOk || dados.falta) {
       el.innerHTML = '<a class="voltar" href="' + familia + '">← Fornecedores · ' + U.nomeCompetencia(comp) + '</a>' +
         '<div class="aviso ambar"><span class="icone-aviso">📄</span><div><b>O razão limpo sai do Passo ①</b>, e o ① de ' + U.nomeCompetencia(comp) + ' ainda não está pronto: ' +
-        (dados.checklistOk ? 'falta ' + [dados.arqs.F.length ? '' : 'o razão de fornecedores', dados.arqs.A.length ? '' : 'o razão de adiantamento a fornecedores'].filter(Boolean).join(' e ') + '.'
+        (dados.checklistOk ? 'falta ' + [dados.arqs.F.length ? '' : 'o razão de ' + fam.contas.principal, dados.arqs.A.length ? '' : 'o razão de ' + fam.contas.adiantamento].filter(Boolean).join(' e ') + '.'
           : 'falta marcar o checklist "Antes de conciliar".') +
         ' <a href="' + familia + '/passo1">Abrir o Passo ①</a></div></div>';
       return;
     }
     const r = M.calcularPasso1(Object.assign({}, dados.entrada, { decisoes: dados.decisoes }), {});
-    R = { el, codigo, comp, anoMes, emp: dados.emp, familia, passo1: familia + '/passo1', registro: dados.registro, arquivos: dados.arquivos,
+    R = { el, codigo, comp, anoMes, emp: dados.emp, fam, familia, passo1: familia + '/passo1', registro: dados.registro, arquivos: dados.arquivos,
       r, c: M.composicao(r), opcoes: lerOpcoes(), emitido: U.agoraISO() };
     desenhar();
   }

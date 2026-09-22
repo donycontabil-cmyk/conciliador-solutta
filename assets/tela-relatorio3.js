@@ -26,12 +26,12 @@
 
   let R = null; // estado desta tela
 
-  async function mostrar(el, codigo, anoMes, conferir, passoId) {
-    const cfg = raiz.TelaPasso3.configDoPasso(passoId);
+  async function mostrar(el, codigo, anoMes, conferir, passoId, familiaId) {
+    const cfg = raiz.TelaPasso3.configDoPasso(passoId, familiaId);
     const comp = anoMes + '-01';
-    const voltar = '#/empresa/' + encodeURIComponent(codigo) + '/fornecedores/' + anoMes + '/' + cfg.id;
+    const voltar = '#/empresa/' + encodeURIComponent(codigo) + '/' + cfg.familia + '/' + anoMes + '/' + cfg.id;
     T.carregando(el, 'Montando o relatório de ' + U.nomeCompetencia(comp) + '…');
-    const dados = await raiz.TelaPasso3.carregarDados(codigo, anoMes, conferir, { passo: cfg.id });
+    const dados = await raiz.TelaPasso3.carregarDados(codigo, anoMes, conferir, { passo: cfg.id, familia: cfg.familia });
     if (!dados) return;
     if (dados.erro) { el.innerHTML = '<div class="aviso ambar">' + T.esc(dados.erro) + ' <a href="#/">Voltar</a></div>'; return; }
     if (dados.falta) {

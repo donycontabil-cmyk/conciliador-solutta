@@ -120,6 +120,8 @@
         T.esc(r.codigo) + (emp ? ' · ' + T.esc(emp.nome) : '') + '<span class="sub">famílias de conciliação</span></a>');
       partes.push('<a href="#/empresa/' + encodeURIComponent(r.codigo) + '/fornecedores' + (r.anoMes ? '/' + r.anoMes : '') + '" class="' +
         (r.familia === 'fornecedores' ? 'ativo' : '') + '">📦 Fornecedores<span class="sub">checklist e passos</span></a>');
+      partes.push('<a href="#/empresa/' + encodeURIComponent(r.codigo) + '/clientes' + (r.anoMes ? '/' + r.anoMes : '') + '" class="' +
+        (r.familia === 'clientes' ? 'ativo' : '') + '">🧾 Clientes<span class="sub">checklist e passos</span></a>');
       partes.push('<a href="#/empresa/' + encodeURIComponent(r.codigo) + '/apresentacao' + (r.ano ? '/' + r.ano : '') + '" class="' +
         (r.nome === 'apresentacao' ? 'ativo' : '') + '">📊 Apresentação<span class="sub">balancetes, DRE e LALUR</span></a>');
       partes.push('<a href="#/empresa/' + encodeURIComponent(r.codigo) + '/diario' + (r.ano ? '/' + r.ano : '') + '" class="' +
@@ -192,14 +194,14 @@
       else if (r.nome === 'apresentacao') await raiz.TelaApresentacao.mostrar(conteudo, r.codigo, r.ano, conferir);
       else if (r.nome === 'diario') await raiz.TelaDiario.mostrar(conteudo, r.codigo, r.ano, conferir);
       else if (r.nome === 'familia') await raiz.TelaFamilia.mostrar(conteudo, r.codigo, r.familia, r.anoMes, conferir);
-      else if (r.nome === 'passo' && r.passo === 'passo1') await raiz.TelaPasso1.mostrar(conteudo, r.codigo, r.anoMes, conferir);
+      else if (r.nome === 'passo' && r.passo === 'passo1') await raiz.TelaPasso1.mostrar(conteudo, r.codigo, r.anoMes, conferir, r.familia);
       // 1.3 · razão limpo: o que compõe os saldos depois do ① (para imprimir e mandar ao financeiro).
-      else if (r.nome === 'passo' && r.passo === 'passo13') await raiz.TelaPasso13.mostrar(conteudo, r.codigo, r.anoMes, conferir);
+      else if (r.nome === 'passo' && r.passo === 'passo13') await raiz.TelaPasso13.mostrar(conteudo, r.codigo, r.anoMes, conferir, r.familia);
       // ④ · Fornecedores · somente razão: o razão de fornecedores (ou o livro diário) contra ele mesmo.
-      else if (r.nome === 'passo' && r.passo === 'passo4') await raiz.TelaPasso4.mostrar(conteudo, r.codigo, r.anoMes, conferir);
+      else if (r.nome === 'passo' && r.passo === 'passo4') await raiz.TelaPasso4.mostrar(conteudo, r.codigo, r.anoMes, conferir, r.familia);
       // Passos no modelo "Conciliar A × B": ③ Fornecedores × contas a pagar e ② Adiantamento × financeiro.
-      else if (r.nome === 'passo' && (r.passo === 'passo3' || r.passo === 'passo2')) await raiz.TelaPasso3.mostrar(conteudo, r.codigo, r.anoMes, conferir, r.passo);
-      else if (r.nome === 'passo' && (r.passo === 'passo3-relatorio' || r.passo === 'passo2-relatorio')) await raiz.TelaRelatorio3.mostrar(conteudo, r.codigo, r.anoMes, conferir, r.passo.replace('-relatorio', ''));
+      else if (r.nome === 'passo' && (r.passo === 'passo3' || r.passo === 'passo2')) await raiz.TelaPasso3.mostrar(conteudo, r.codigo, r.anoMes, conferir, r.passo, r.familia);
+      else if (r.nome === 'passo' && (r.passo === 'passo3-relatorio' || r.passo === 'passo2-relatorio')) await raiz.TelaRelatorio3.mostrar(conteudo, r.codigo, r.anoMes, conferir, r.passo.replace('-relatorio', ''), r.familia);
       else conteudo.innerHTML = '<div class="aviso ambar">Esta tela não existe. <a href="#/">Voltar para as empresas</a>.</div>';
     } catch (e) {
       console.error(e);

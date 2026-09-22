@@ -1,6 +1,6 @@
 /*
  * Conciliador Solutta — tela-passo1.js
- * A tela do Passo ① — Fornecedores × Adiantamento (Parte 7.2 e 7.3).
+ * A tela do Passo ① — a conta principal × o adiantamento da família aberta (Fornecedores ou Clientes; Parte 7.2 e 7.3).
  * O programa faz o braçal; O CONTADOR DECIDE: toda sugestão pode ser desmarcada, toda
  * batida pode ser desfeita ("✕ Não confere"), e dá para reclassificar e trocar o
  * fornecedor à mão. Grava sozinho a cada decisão e mostra "guardado às 14:23".
@@ -15,16 +15,31 @@
 
   function app() { return raiz.App; }
 
-  const ABAS = [
-    { id: 'bateuF', titulo: '1 · Bateu no razão · Fornecedores' },
-    { id: 'bateuA', titulo: '1 · Bateu no razão · Adiantamento' },
-    { id: 'reclass', titulo: '2 · Reclassificações' },
-    { id: 'naoF', titulo: 'Não bateu · Fornecedores' },
-    { id: 'naoA', titulo: 'Não bateu · Adiantamento' },
-    { id: 'fornF', titulo: 'Por fornecedor · Fornecedores' },
-    { id: 'fornA', titulo: 'Por fornecedor · Adiantamento' },
-    { id: 'razao', titulo: 'Razão completo' },
-  ];
+  // A família aberta (Fornecedores ou Clientes) e os textos dela — Dony, 22/09/2026: "clientes tem que ter o mesmo
+  // menu e todas as conciliações de fornecedores; só muda a conta, e a natureza de uma é credora e a da outra é devedora".
+  // O motor já tem as duas naturezas (MotorFechamento.TEXTOS): em fornecedores o crédito aumenta o saldo; em clientes, o débito.
+  function familiaAberta() { return (E && E.fam) || raiz.Familias.familia('fornecedores'); }
+  function TX() {
+    const f = familiaAberta();
+    const t = M.TEXTOS[f.natureza] || M.TEXTOS.fornecedores;
+    const cliente = f.id === 'clientes';
+    return { fam: f, F: t.F, A: t.A, f: f.contas.principal, a: f.contas.adiantamento,
+      pessoa: cliente ? 'cliente' : 'fornecedor', pessoas: cliente ? 'clientes' : 'fornecedores',
+      curtoA: cliente ? 'Adiantamento de clientes' : 'Adiantamento', titulo: t.F + ' × ' + (cliente ? 'Adiantamento de clientes' : 'Adiantamento') };
+  }
+  function abas() {
+    const x = TX();
+    return [
+      { id: 'bateuF', titulo: '1 · Bateu no razão · ' + x.F },
+      { id: 'bateuA', titulo: '1 · Bateu no razão · ' + x.curtoA },
+      { id: 'reclass', titulo: '2 · Reclassificações' },
+      { id: 'naoF', titulo: 'Não bateu · ' + x.F },
+      { id: 'naoA', titulo: 'Não bateu · ' + x.curtoA },
+      { id: 'fornF', titulo: 'Por ' + x.pessoa + ' · ' + x.F },
+      { id: 'fornA', titulo: 'Por ' + x.pessoa + ' · ' + x.curtoA },
+      { id: 'razao', titulo: 'Razão completo' },
+    ];
+  }
   const NAO_BATEU = ['sem-par', 'parcial', 'recusada', 'sem-fornecedor'];
 
   let E = null; // estado da tela aberta
@@ -34,29 +49,30 @@
   // ------------------------------------------------------------------
   // Os dados do ① de uma competência: arquivos, registro com as decisões e a entrada do motor. Serve também
   // o 1.3 (razão limpo), que parte do mesmo cálculo. null = outra tela foi aberta no meio do caminho.
-  async function carregarDados(codigo, anoMes, conferir) {
+  async function carregarDados(codigo, anoMes, conferir, familiaId) {
     const arm = app().armazenamento;
+    const fam = raiz.TelaFamilia.familiaDe(familiaId);
     const emp = app().empresas.find((e) => String(e.codigo) === String(codigo));
     if (!emp) return { erro: 'Empresa não cadastrada.' };
     const comp = anoMes + '-01';
     const concs = await arm.conciliacoes(codigo, comp);
     const metas = await arm.arquivos(codigo);
     if (conferir && !conferir()) return null;
-    const arqs = raiz.TelaFamilia.arquivosDoPasso1(metas, comp);
+    const arqs = raiz.TelaFamilia.arquivosDoPasso1(metas, comp, fam.id);
     // Subir continua liberado com o checklist pendente; a conciliação, não (Parte 7.1).
-    const checklist = concs.find((c) => c.id === raiz.TelaFamilia.idChecklist(codigo, comp));
+    const checklist = concs.find((c) => c.id === raiz.TelaFamilia.idChecklist(codigo, comp, fam.id));
     const checklistOk = raiz.TelaFamilia.checklistCompleto(checklist);
     const falta = !arqs.F.length || !arqs.A.length;
-    const dados = { emp, comp, arqs, checklistOk, falta };
+    const dados = { emp, comp, arqs, checklistOk, falta, fam };
     if (!checklistOk || falta) return dados;
     const carregar = async (m) => ({ meta: m, conteudo: await arm.conteudoDoArquivo(m.id) });
     const F = await Promise.all(arqs.F.map(carregar));
     const A = await Promise.all(arqs.A.map(carregar));
     const pagar = arqs.pagar ? await carregar(arqs.pagar) : null;
     if (conferir && !conferir()) return null;
-    const idReg = raiz.TelaFamilia.idPasso1(codigo, comp);
+    const idReg = raiz.TelaFamilia.idPasso1(codigo, comp, fam.id);
     const registro = concs.find((c) => c.id === idReg) || {
-      id: idReg, codigo, tipo: 'fornecedor_adiantamento', competencia: comp, situacao: 'andamento', arquivos: [], decisoes: {}, resumo: {},
+      id: idReg, codigo, tipo: raiz.TelaFamilia.tipoDoPasso(fam, 'passo1'), competencia: comp, situacao: 'andamento', arquivos: [], decisoes: {}, resumo: {},
     };
     const d = registro.decisoes || {};
     const fonte = (x) => ({ arquivoId: x.meta.id, conta: x.conteudo.conta, saldoAnterior: x.conteudo.conta.saldoAnterior,
@@ -67,7 +83,7 @@
     return Object.assign(dados, {
       registro, arquivos: { F, A, pagar },
       entrada: {
-        natureza: 'fornecedores', competencia: comp,
+        natureza: fam.natureza, competencia: comp,
         periodo: menor && maior ? { de: menor.texto, ate: maior.texto } : null,
         contas: { F: F.map(fonte), A: A.map(fonte) },
         titulos: pagar ? pagar.conteudo.titulos : [],
@@ -79,16 +95,17 @@
     });
   }
 
-  async function mostrar(el, codigo, anoMes, conferir) {
+  async function mostrar(el, codigo, anoMes, conferir, familiaId) {
     const comp = anoMes + '-01';
-    const voltar = '#/empresa/' + encodeURIComponent(codigo) + '/fornecedores/' + anoMes;
+    const fam = raiz.TelaFamilia.familiaDe(familiaId);
+    const voltar = '#/empresa/' + encodeURIComponent(codigo) + '/' + fam.id + '/' + anoMes;
     T.carregando(el, 'Abrindo o Passo ① de ' + U.nomeCompetencia(comp) + '…');
     // O livro diário é o razão (Dony, 22/09/2026: "se eu carreguei o diário, automaticamente ele tem que entender que o
     // diário é o razão; eu quero poder selecionar quais são as contas"): com as contas escolhidas, o razão delas sai do
     // diário antes de abrir (só o que mudou). Conta com razão carregado continua com o razão.
-    const sinc = await sincronizarComODiario(codigo, comp, conferir);
+    const sinc = await sincronizarComODiario(codigo, comp, conferir, fam.id);
     if (!sinc) return;
-    const dados = await carregarDados(codigo, anoMes, conferir);
+    const dados = await carregarDados(codigo, anoMes, conferir, fam.id);
     if (!dados) return;
     if (dados.erro) { el.innerHTML = '<div class="aviso ambar">' + T.esc(dados.erro) + ' <a href="#/">Voltar</a></div>'; return; }
     const { emp, arqs, checklistOk, falta } = dados;
@@ -99,16 +116,16 @@
       const doDiario = falta && sinc.prep ? (sinc.prep.ok ? (sinc.estado === 'escolher' ? S.cartaoDaEscolha(sinc.prep) : '')
         : '<div class="aviso ambar" style="margin-bottom:12px"><span class="icone-aviso">📒</span><div>' + S.textoSemDiario(codigo, sinc.prep, comp) + '</div></div>') : '';
       const extras = [S.lugarDoBalanceteDoDiario(falta ? sinc.prep : null)].filter(Boolean);
-      el.innerHTML = '<a class="voltar" href="' + voltar + '">← Fornecedores · ' + U.nomeCompetencia(comp) + '</a>' +
-        '<div class="cabecalho"><div class="titulos"><h1>Passo ① · Fornecedores × Adiantamento</h1>' +
+      el.innerHTML = '<a class="voltar" href="' + voltar + '">← ' + T.esc(fam.titulo.replace(/ ·.*$/, '')) + ' · ' + U.nomeCompetencia(comp) + '</a>' +
+        '<div class="cabecalho"><div class="titulos"><h1>Passo ① · ' + T.esc(M.TEXTOS[fam.natureza].F + ' × ' + (fam.id === 'clientes' ? 'Adiantamento de clientes' : 'Adiantamento')) + '</h1>' +
         '<p class="suave">' + T.esc(emp.codigo + ' · ' + emp.nome) + ' · ' + U.nomeCompetencia(comp) + '</p></div></div>' +
         (checklistOk ? '' : '<div class="aviso ambar" style="margin-bottom:12px"><span class="icone-aviso">🔒</span><div><b>A conciliação espera o checklist "Antes de conciliar".</b><br>' +
           'Marque que os bancos foram conciliados e que as notas fiscais de entrada subiram. <a href="' + voltar + '">Ir para o checklist</a>' +
           (falta ? ' — os arquivos já podem subir aqui embaixo.' : '') + '</div></div>') +
         (doDiario || (falta ? '<div class="aviso info" style="margin-bottom:12px"><span class="icone-aviso">📁</span><div><b>Suba cada razão no seu lugar.</b> ' +
-          'O programa sabe o que é pelo lugar onde você coloca. Falta: ' + [!arqs.F.length ? 'o razão de fornecedores' : '', !arqs.A.length ? 'o razão de adiantamento a fornecedores' : ''].filter(Boolean).join(' e ') + '.</div></div>' : '')) +
-        painelDoPasso1(codigo, comp, arqs, true, extras);
-      ligarPainelDoPasso1(el.querySelector('.arquivos-passo'), codigo, comp, arqs, extras);
+          'O programa sabe o que é pelo lugar onde você coloca. Falta: ' + [!arqs.F.length ? 'o razão de ' + fam.contas.principal : '', !arqs.A.length ? 'o razão de ' + fam.contas.adiantamento : ''].filter(Boolean).join(' e ') + '.</div></div>' : '')) +
+        painelDoPasso1(codigo, comp, arqs, true, extras, fam.id);
+      ligarPainelDoPasso1(el.querySelector('.arquivos-passo'), codigo, comp, arqs, extras, fam.id);
       S.ligarCartaoDaEscolha(el.querySelector('.escolha-diario'), codigo, sinc.prep);
       return;
     }
@@ -117,7 +134,7 @@
     // A tela mora num contêiner próprio: ao sair dela, o contêiner some junto com os eventos.
     el.innerHTML = '<div class="tela-passo1"></div>';
     E = {
-      el: el.firstChild, codigo, comp, emp, voltar, registro,
+      el: el.firstChild, codigo, comp, emp, voltar, registro, fam,
       arquivos: dados.arquivos,
       entrada: dados.entrada,
       decisoes: dados.decisoes,
@@ -129,7 +146,7 @@
       guardadoEm: registro.atualizadoEm || null,
       fila: Promise.resolve(),
     };
-    if (!ABAS.some((a) => a.id === E.aba)) E.aba = 'bateuF';
+    if (!abas().some((a) => a.id === E.aba)) E.aba = 'bateuF';
     E.arqs = arqs;
     calcular();
     desenharTudo();
@@ -137,16 +154,19 @@
 
   // Os lugares de arquivo do Passo ①: um razão de fornecedores e um de adiantamento (cada um pode
   // ter mais de uma conta) e, opcional, o contas a pagar em aberto (ajuda a reconhecer os nomes).
-  function lugaresDoPasso1(comp, arqs) {
+  function lugaresDoPasso1(comp, arqs, familiaId) {
+    const fam = raiz.TelaFamilia.familiaDe(familiaId || (E && E.fam && E.fam.id));
     const mes = U.nomeCompetencia(comp);
     const ate = { de: null, ate: comp };
+    const maiuscula = (x) => String(x).charAt(0).toUpperCase() + String(x).slice(1);
+    const aberto = fam.id === 'clientes' ? 'contas a receber em aberto' : 'contas a pagar em aberto';
     return [
-      { id: 'F', parte: 'Contabilidade', titulo: 'Razão de fornecedores', sub: mes, nome: 'razão de fornecedores de ' + mes, log: 'passo1/fornecedores',
-        tipo: 'razao', papel: 'principal', varias: true, competencia: comp, periodo: ate, nomePeriodo: 'até o fim de ' + mes, arquivos: arqs.F },
-      { id: 'A', parte: 'Contabilidade', titulo: 'Razão de adiantamento a fornecedores', sub: mes, nome: 'razão de adiantamento a fornecedores de ' + mes, log: 'passo1/adiantamento',
-        tipo: 'razao', papel: 'adiantamento', varias: true, competencia: comp, periodo: ate, nomePeriodo: 'até o fim de ' + mes, arquivos: arqs.A },
-      { id: 'pagar', parte: 'Financeiro · opcional', titulo: 'Contas a pagar em aberto', sub: mes + ' · ajuda a reconhecer os nomes', nome: 'contas a pagar em aberto de ' + mes, log: 'passo1/pagar',
-        tipo: 'financeiro_pagar', opcional: true, competencia: comp, arquivos: arqs.pagar ? [arqs.pagar] : [] },
+      { id: 'F', parte: 'Contabilidade', titulo: 'Razão de ' + fam.contas.principal, sub: mes, nome: 'razão de ' + fam.contas.principal + ' de ' + mes, log: 'passo1/' + fam.contas.principal,
+        tipo: 'razao', familia: fam.id, papel: 'principal', varias: true, competencia: comp, periodo: ate, nomePeriodo: 'até o fim de ' + mes, arquivos: arqs.F },
+      { id: 'A', parte: 'Contabilidade', titulo: 'Razão de ' + fam.contas.adiantamento, sub: mes, nome: 'razão de ' + fam.contas.adiantamento + ' de ' + mes, log: 'passo1/adiantamento',
+        tipo: 'razao', familia: fam.id, papel: 'adiantamento', varias: true, competencia: comp, periodo: ate, nomePeriodo: 'até o fim de ' + mes, arquivos: arqs.A },
+      { id: 'pagar', parte: 'Financeiro · opcional', titulo: maiuscula(aberto), sub: mes + ' · ajuda a reconhecer os nomes', nome: aberto + ' de ' + mes, log: 'passo1/pagar',
+        tipo: (fam.tipoFinanceiro || {}).principal, opcional: true, competencia: comp, arquivos: arqs.pagar ? [arqs.pagar] : [] },
     ];
   }
 
@@ -155,7 +175,7 @@
     return !!(app().demonstracao && raiz.Demonstracao && String(raiz.Demonstracao.EMPRESA.codigo) === String(codigo));
   }
 
-  function chaveDoPainel1(codigo, comp) { return codigo + '|passo1|' + comp; }
+  function chaveDoPainel1(codigo, comp, familiaId) { return codigo + '|passo1|' + (familiaId || 'fornecedores') + '|' + comp; }
 
   // A linha do cabeçalho quando o razão sai do livro diário, com o botão de trocar as contas (data-acao="trocar-contas").
   function linhaDoDiario(lugares) {
@@ -166,11 +186,11 @@
 
   // Os lugares de razão do ① com o que está guardado, sincronizados com o livro diário (TelaSubir.sincronizarDoDiario).
   // Serve também o 1.3 e o ④ (o mesmo razão de fornecedores). null = outra tela foi aberta no meio do caminho.
-  async function sincronizarComODiario(codigo, comp, conferir) {
+  async function sincronizarComODiario(codigo, comp, conferir, familiaId) {
     try {
       const metas = await app().armazenamento.arquivos(codigo);
       if (conferir && !conferir()) return null;
-      const sinc = await raiz.TelaSubir.sincronizarDoDiario(codigo, lugaresDoPasso1(comp, raiz.TelaFamilia.arquivosDoPasso1(metas, comp)));
+      const sinc = await raiz.TelaSubir.sincronizarDoDiario(codigo, lugaresDoPasso1(comp, raiz.TelaFamilia.arquivosDoPasso1(metas, comp, familiaId), familiaId));
       if (conferir && !conferir()) return null;
       return sinc;
     } catch (e) {
@@ -181,9 +201,9 @@
 
   // fixo = sempre à vista, sem "Fechar" (tela de falta de arquivo ou do checklist).
   // extras: lugares a mais (o balancete que dá o saldo inicial do livro diário, quando falta).
-  function painelDoPasso1(codigo, comp, arqs, fixo, extras) {
+  function painelDoPasso1(codigo, comp, arqs, fixo, extras, familiaId) {
     return raiz.TelaSubir.painel({
-      chave: chaveDoPainel1(codigo, comp), titulo: 'Arquivos do passo', resumo: U.nomeCompetencia(comp), fixo, lugares: lugaresDoPasso1(comp, arqs).concat(extras || []), metas: arqs.metas,
+      chave: chaveDoPainel1(codigo, comp, familiaId), titulo: 'Arquivos do passo', resumo: U.nomeCompetencia(comp), fixo, lugares: lugaresDoPasso1(comp, arqs, familiaId).concat(extras || []), metas: arqs.metas,
       depois: eDemonstracao(codigo)
         ? '<div class="linha-flex" style="margin-top:10px"><button type="button" class="botao" data-exemplo>🧪 Usar os razões de exemplo</button>' +
           '<span class="suave pequeno">Os razões de fornecedores e de adiantamento da empresa de demonstração (janeiro a julho/2026), com fornecedores, CNPJs e valores inventados.</span></div>'
@@ -191,9 +211,9 @@
     });
   }
 
-  function ligarPainelDoPasso1(el, codigo, comp, arqs, extras) {
+  function ligarPainelDoPasso1(el, codigo, comp, arqs, extras, familiaId) {
     if (!el) return;
-    const lugares = lugaresDoPasso1(comp, arqs).concat(extras || []);
+    const lugares = lugaresDoPasso1(comp, arqs, familiaId).concat(extras || []);
     raiz.TelaSubir.ligar(el, codigo, lugares);
     el.addEventListener('click', async (ev) => {
       const b = ev.target.closest('[data-exemplo]');
@@ -251,25 +271,25 @@
     const contaTxt = (lista) => lista.map((x) => T.esc(x.conteudo.conta.codigo + ' ' + x.conteudo.conta.nome) + ' <span class="suave">(' +
       x.conteudo.conta.lancamentos.length.toLocaleString('pt-BR') + ' lanç.)</span>').join(', ');
     E.el.innerHTML =
-      '<a class="voltar" href="' + E.voltar + '">← Fornecedores · ' + U.nomeCompetencia(E.comp) + '</a>' +
-      '<div class="cabecalho"><div class="titulos"><h1>Passo ① · Fornecedores × Adiantamento</h1>' +
+      '<a class="voltar" href="' + E.voltar + '">← ' + T.esc(E.fam.titulo.replace(/ ·.*$/, '')) + ' · ' + U.nomeCompetencia(E.comp) + '</a>' +
+      '<div class="cabecalho"><div class="titulos"><h1>Passo ① · ' + T.esc(TX().titulo) + '</h1>' +
       '<p class="suave">' + T.esc(E.emp.codigo + ' · ' + E.emp.nome) + ' · ' + U.nomeCompetencia(E.comp) + '</p>' +
-      '<p class="suave pequeno">Fornecedores: ' + contaTxt(E.arquivos.F) + ' · Adiantamento: ' + contaTxt(E.arquivos.A) +
+      '<p class="suave pequeno">' + T.esc(TX().F) + ': ' + contaTxt(E.arquivos.F) + ' · ' + T.esc(TX().curtoA) + ': ' + contaTxt(E.arquivos.A) +
       (E.arquivos.pagar ? ' · Contas a pagar: ' + E.arquivos.pagar.meta.titulos + ' títulos (ajuda a reconhecer nomes)' : '') + '</p>' +
-      linhaDoDiario(lugaresDoPasso1(E.comp, E.arqs)) + '</div>' +
+      linhaDoDiario(lugaresDoPasso1(E.comp, E.arqs, E.fam.id)) + '</div>' +
       '<div class="linha-flex" style="gap:12px"><span class="guardado" id="guardado" title="Cada decisão é gravada na hora, sozinha">' + (E.guardadoEm ? 'guardado às ' + U.horaLocal(E.guardadoEm) : 'nenhuma decisão tomada ainda') + '</span>' +
       // 1.3 (Dony, 19/09/2026): o que sobra em cada conta depois deste passo, para imprimir e mandar.
       '<button type="button" class="botao" data-acao="razao-limpo" title="1.3 · Razão limpo: só o que compõe o saldo de cada conta depois deste passo, por lançamento ou por fornecedor, para imprimir ou baixar em Excel">📄 1.3 Razão limpo</button>' +
       // Arquivos em cima à direita (Dony, 15/09/2026: "um lugar de carregar novos arquivos" e excluir).
-      raiz.TelaSubir.botao(chaveDoPainel1(E.codigo, E.comp)) + '</div></div>' +
-      painelDoPasso1(E.codigo, E.comp, E.arqs, false) +
+      raiz.TelaSubir.botao(chaveDoPainel1(E.codigo, E.comp, E.fam.id)) + '</div></div>' +
+      painelDoPasso1(E.codigo, E.comp, E.arqs, false, null, E.fam.id) +
       '<div id="avisos"></div>' +
       '<div class="grade-4" id="cartoes" style="margin-top:14px"></div>' +
       '<div class="abas" id="abas" role="tablist"></div>' +
       '<div class="filtros" id="filtros"></div>' +
       '<div id="aba"></div>' +
       '<div id="barra"></div>';
-    ligarPainelDoPasso1(E.el.querySelector('.arquivos-passo'), E.codigo, E.comp, E.arqs);
+    ligarPainelDoPasso1(E.el.querySelector('.arquivos-passo'), E.codigo, E.comp, E.arqs, null, E.fam.id);
     raiz.TelaSubir.ligarBotao(E.el.querySelector('[data-abrir-arquivos]'));
     desenharAvisos();
     desenharCartoes();
@@ -293,7 +313,7 @@
     const saF = r.totais.F.saldoAnterior, saA = r.totais.A.saldoAnterior;
     if (saF || saA) {
       partes.push('<div class="aviso ambar"><span class="icone-aviso">ℹ️</span><div><b>Primeiro fechamento, sem saldo de abertura por fornecedor.</b> ' +
-        'O razão começa em ' + T.esc(r.periodo ? r.periodo.de : '—') + ' com saldo anterior de ' + T.moeda(saF) + ' em fornecedores e ' + T.moeda(saA) + ' em adiantamento, sem dizer de qual fornecedor. ' +
+        'O razão começa em ' + T.esc(r.periodo ? r.periodo.de : '—') + ' com saldo anterior de ' + T.moeda(saF) + ' em ' + T.esc(TX().f) + ' e ' + T.moeda(saA) + ' em adiantamento, sem dizer de qual ' + TX().pessoa + '. ' +
         'Um pagamento do começo do período pode quitar nota de antes dele e aparecer como fornecedor devedor: <b>confira as inversas antes de aceitar</b>. ' +
         'Com a planilha de saldo de abertura por fornecedor isso se resolve (formato a combinar).</div></div>');
     }
@@ -322,8 +342,8 @@
       t[lado].sobraram.toLocaleString('pt-BR') + '</b> sobraram</span><span>saldo do razão ' + T.moeda(t[lado].saldoFinal) + ' · ajustes ' + T.moeda(t[lado].efeitoAjustes) + '</span></div></div>';
     const rs = r.resumo;
     E.el.querySelector('#cartoes').innerHTML =
-      cartaoConta('F', 'Fornecedores (a pagar)') +
-      cartaoConta('A', 'Adiantamento a fornecedores') +
+      cartaoConta('F', TX().F + (TX().fam.id === 'clientes' ? ' (a receber)' : ' (a pagar)')) +
+      cartaoConta('A', TX().A) +
       '<div class="cartao resumo"><div class="rotulo">Reclassificações</div><div class="grande">' + (rs.aceitas + rs.manuais) + ' marcadas</div>' +
       '<div class="detalhe"><span><span class="selo direta">diretas</span> <b>' + rs.diretas.qtd + '</b> · ' + T.moeda(rs.diretas.valor) + '</span>' +
       '<span><span class="selo inversa">inversas</span> <b>' + rs.inversas.qtd + '</b> · ' + T.moeda(rs.inversas.valor) + '</span>' +
@@ -349,7 +369,7 @@
   }
 
   function desenharAbas() {
-    E.el.querySelector('#abas').innerHTML = ABAS.map((a) => '<button type="button" role="tab" data-aba="' + a.id + '" class="' + (E.aba === a.id ? 'ativa' : '') + '">' +
+    E.el.querySelector('#abas').innerHTML = abas().map((a) => '<button type="button" role="tab" data-aba="' + a.id + '" class="' + (E.aba === a.id ? 'ativa' : '') + '">' +
       T.esc(a.titulo) + '<span class="contador">' + contadorDaAba(a.id).toLocaleString('pt-BR') + '</span></button>').join('');
   }
 
@@ -470,8 +490,9 @@
       (origem === 'suspeita' && s.suspeita) || (origem === 'desmarcada' && !s.marcada)) && origem !== 'mao' &&
       (!busca || combinaBusca(busca, s.nome) || (s.cnpj && s.cnpj.indexOf(U.soDigitos(busca)) >= 0 && U.soDigitos(busca))));
     const manuais = (!origem || origem === 'mao') ? r.manuais.filter((m) => !busca || combinaBusca(busca, m.nome)) : [];
-    const explica = '<p class="suave pequeno" style="margin:0 0 10px;line-height:1.5"><span class="selo direta">direta</span> a pagar e adiantamento do mesmo fornecedor: reclassifica o MENOR (D fornecedores / C adiantamento). ' +
-      '<span class="selo inversa">inversa</span> fornecedores DEVEDOR: o devedor inteiro vai para o adiantamento (D adiantamento / C fornecedores). ' +
+    const cli = TX().fam.id === 'clientes';
+    const explica = '<p class="suave pequeno" style="margin:0 0 10px;line-height:1.5"><span class="selo direta">direta</span> ' + (cli ? 'a receber' : 'a pagar') + ' e adiantamento do mesmo ' + TX().pessoa + ': reclassifica o MENOR (' + (cli ? 'C ' + TX().f + ' / D adiantamento' : 'D ' + TX().f + ' / C adiantamento') + '). ' +
+      '<span class="selo inversa">inversa</span> ' + T.esc(TX().f) + ' ' + (cli ? 'CREDOR' : 'DEVEDOR') + ': o saldo invertido inteiro vai para o adiantamento. ' +
       'Desmarcar tira a reclassificação do arquivo; a decisão fica gravada.</p>';
     alvo.innerHTML = explica + '<div id="tabela-aba"></div>' + (manuais.length || (!origem || origem === 'mao') ? '<h3 style="margin:18px 0 8px">Reclassificações à mão</h3><div id="tabela-mao"></div>' : '');
     T.tabelaPaginada(alvo.querySelector('#tabela-aba'), {
@@ -523,7 +544,7 @@
         T.tdValor(l.valor) + '<td class="historico">' + T.esc(l.historico) + '</td></tr>').join('') +
       '</tbody></table></div>';
     if (s.sentido === 'direta') {
-      return lanc + tabelaLinhas('Sobras em fornecedores', linhasDe(s.linhasF)) + tabelaLinhas('Sobras no adiantamento', linhasDe(s.linhasA));
+      return lanc + tabelaLinhas('Sobras em ' + TX().f, linhasDe(s.linhasF)) + tabelaLinhas('Sobras no adiantamento', linhasDe(s.linhasA));
     }
     return lanc + tabelaLinhas('Notas (formam o saldo)', linhasDe(s.notas)) + tabelaLinhas('Pagamentos (baixas)', linhasDe(s.pagamentos));
   }
@@ -567,7 +588,7 @@
     const lista = r.porFornecedor[lado].filter((x) => (!sit || x.situacao === sit) &&
       (combinaBusca(busca, x.nome) || (U.soDigitos(busca) && x.cnpj && x.cnpj.indexOf(U.soDigitos(busca)) >= 0)));
     const soma = (k) => lista.reduce((t, x) => t + x[k], 0);
-    alvo.innerHTML = '<p class="suave pequeno" style="margin:0 0 8px">Conta por conta: ' + (lado === 'F' ? 'aqui só a conta de <b>fornecedores</b> (positivo = a empresa deve).' :
+    alvo.innerHTML = '<p class="suave pequeno" style="margin:0 0 8px">Conta por conta: ' + (lado === 'F' ? 'aqui só a conta de <b>' + T.esc(TX().f) + '</b> (positivo = ' + (TX().fam.id === 'clientes' ? 'o cliente deve' : 'a empresa deve') + ').' :
       'aqui só a conta de <b>adiantamento</b> (positivo = a empresa adiantou).') + ' Nunca numa linha só com as duas contas: pareceria saldo líquido.</p><div id="tabela-aba"></div>';
     T.tabelaPaginada(alvo.querySelector('#tabela-aba'), {
       ordem: { id: 'p1-porfornecedor', colunas: [TXT((x) => (x.chave === SEM ? '' : x.nome)), TXT((x) => x.cnpj), TXT((x) => (T.SITUACOES[x.situacao] || [0, x.situacao])[1]),
@@ -575,7 +596,7 @@
       cabecalho: '<th>Fornecedor</th><th>CNPJ</th><th>Situação</th><th class="num" title="Saldo do fornecedor nesta conta no período">Tinha</th><th class="num">Linhas</th><th class="num">Bateram</th><th class="num" title="Efeito das reclassificações marcadas e à mão, com sinal">Reclassificado</th><th class="num">Fica</th>',
       linhas: lista,
       vazio: 'Nenhum fornecedor com estes filtros.',
-      rodape: '<tr class="total"><td colspan="3">Total (' + lista.length.toLocaleString('pt-BR') + ' fornecedores)</td>' + T.tdValor(soma('tinha')) +
+      rodape: '<tr class="total"><td colspan="3">Total (' + lista.length.toLocaleString('pt-BR') + ' ' + TX().pessoas + ')</td>' + T.tdValor(soma('tinha')) +
         '<td class="num">' + soma('linhas').toLocaleString('pt-BR') + '</td><td class="num">' + soma('bateram').toLocaleString('pt-BR') + '</td>' + T.tdValor(soma('reclassificado')) + T.tdValor(soma('fica')) + '</tr>',
       linha: (x) => '<tr><td class="nome">' + (x.chave === SEM ? '<span class="falta">Sem fornecedor</span>' : T.esc(x.nome)) + '</td><td class="num">' + (x.cnpj ? U.formatarCnpj(x.cnpj) : '—') + '</td>' +
         '<td>' + T.pilula(x.situacao) + '</td>' + T.tdValor(x.tinha) + '<td class="num">' + x.linhas + '</td><td class="num">' + x.bateram + '</td>' + T.tdValor(x.reclassificado) + T.tdValor(x.fica) + '</tr>',
@@ -587,7 +608,7 @@
     const r = E.r;
     desenharFiltros([
       { tipo: 'busca', nome: 'busca', texto: 'Buscar fornecedor, histórico ou batida' },
-      { tipo: 'select', nome: 'fonte', texto: 'Fonte', opcoes: [['', 'Todas as fontes']].concat(r.contas.F.map((c) => ['F:' + c.codigo, 'Fornecedores · ' + c.codigo])).concat(r.contas.A.map((c) => ['A:' + c.codigo, 'Adiantamento · ' + c.codigo])) },
+      { tipo: 'select', nome: 'fonte', texto: 'Fonte', opcoes: [['', 'Todas as fontes']].concat(r.contas.F.map((c) => ['F:' + c.codigo, TX().F + ' · ' + c.codigo])).concat(r.contas.A.map((c) => ['A:' + c.codigo, 'Adiantamento · ' + c.codigo])) },
       { tipo: 'select', nome: 'situacao', texto: 'Situação', opcoes: [['', 'Todas as situações'], ['bateu', 'bateu'], ['auto', 'reclassificada'], ['manual', 'à mão'], ['parcial', 'parcial'], ['recusada', 'desmarcada'], ['sem-par', 'sem par'], ['sem-fornecedor', 'sem fornecedor']] },
     ]);
     const busca = filtro('busca');
@@ -602,7 +623,7 @@
       cabecalho: '<th>Fonte</th><th>Data</th><th>Histórico</th><th>Contrapartida</th><th>Fornecedor</th><th class="num">Débito</th><th class="num">Crédito</th><th>Situação</th><th>Observação</th>',
       linhas: lista,
       vazio: 'Nenhuma linha com estes filtros.',
-      linha: (l) => '<tr><td class="pequeno">' + (l.lado === 'F' ? 'Fornecedores' : 'Adiantamento') + '<br><span class="suave">' + T.esc(l.conta) + '</span></td>' +
+      linha: (l) => '<tr><td class="pequeno">' + (l.lado === 'F' ? T.esc(TX().F) : 'Adiantamento') + '<br><span class="suave">' + T.esc(l.conta) + '</span></td>' +
         '<td class="num">' + l.data + '</td><td class="historico">' + T.esc(l.historico) + '</td><td>' + T.nome(l.contrapartida) + '</td>' + celulaDono(l) +
         T.tdValor(l.debito) + T.tdValor(l.credito) + '<td>' + T.pilula(l.situacao) + '</td><td>' + obsDaLinha(l) + '</td></tr>',
     });
@@ -632,7 +653,7 @@
         '→ inversa: ' + p.valida.partes.length + ' lançamento(s), ' + T.moeda(p.valida.valor))
       : p.motivo;
     barra.innerHTML = '<div class="barra-selecao"><span><b>' + ls.length + '</b> linha(s)</span>' +
-      '<span>Fornecedores <b class="num">' + U.formatarCentavos(somaF) + '</b></span><span>Adiantamento <b class="num">' + U.formatarCentavos(somaA) + '</b></span>' +
+      '<span>' + T.esc(TX().F) + ' <b class="num">' + U.formatarCentavos(somaF) + '</b></span><span>Adiantamento <b class="num">' + U.formatarCentavos(somaA) + '</b></span>' +
       '<span class="explica">' + T.esc(explica) + '</span>' +
       '<button type="button" class="botao primario" data-acao="reclassificar-mao"' + (p.valida ? '' : ' disabled') + '>Reclassificar à mão</button>' +
       '<button type="button" class="botao" data-acao="limpar-selecao">Limpar seleção</button></div>';
@@ -731,7 +752,7 @@
         // 1.3: espera a última decisão ser gravada, para o razão limpo sair com ela.
         if (a === 'razao-limpo') { acao.disabled = true; await E.fila; app().ir(E.voltar + '/passo13'); return; }
         // Livro diário: trocar as contas que saem dele (a escolha fica na empresa; o passo abre de novo com elas).
-        if (a === 'trocar-contas') { await E.fila; await raiz.TelaSubir.doDiario(E.codigo, lugaresDoPasso1(E.comp, E.arqs)); return; }
+        if (a === 'trocar-contas') { await E.fila; await raiz.TelaSubir.doDiario(E.codigo, lugaresDoPasso1(E.comp, E.arqs, E.fam.id)); return; }
         if (a === 'baixar') baixarArquivo();
         if (a === 'limpar-selecao') { E.selecao.clear(); redesenharAbaMantendoRolagem(); }
         if (a === 'reclassificar-mao') await reclassificarAMao();
@@ -824,7 +845,7 @@
     if (!r.invariantes.ok) { T.avisoRapido('A conferência falhou: revise antes de baixar o arquivo.', 'erro'); return; }
     const cfg = app().config.layoutAjustes || {};
     const g = raiz.LayoutAjustes.gerar(r.ajustes, cfg);
-    const nome = raiz.LayoutAjustes.nomeDoArquivo(E.codigo, E.comp, 'Fornecedores', g.extensao);
+    const nome = raiz.LayoutAjustes.nomeDoArquivo(E.codigo, E.comp, TX().F, g.extensao);
     T.baixar(g.bytes, nome, g.tipo || 'text/plain');
     E.ultimoArquivo = { nome, bytes: g.bytes, linhas: g.linhas, total: g.total };
     historico('Baixou o arquivo de ajustes: ' + g.linhas + ' lançamentos, ' + U.formatarCentavos(g.total));
