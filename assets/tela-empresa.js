@@ -67,6 +67,13 @@
       '<div class="rodape"><span class="suave pequeno">' + (livres.length ? livres.length + ' conciliação(ões) criada(s)' : 'nenhuma ainda · crie a primeira') + '</span>' +
       '<span class="botao primario pequeno">Abrir →</span></div></a>';
 
+    // Contas de resultado (Dony, 23/09/2026): achar distorções nas despesas e receitas.
+    const cartaoResultado = '<a class="cartao familia resultado" href="#/empresa/' + encodeURIComponent(codigo) + '/resultado">' +
+      '<div class="icone">🔎</div><h2>Contas de resultado</h2><p class="suave" style="line-height:1.5">Acha as distorções das despesas e receitas pelo livro diário: o mesmo fornecedor em contas diferentes, ' +
+      'pagamento direto na despesa, cheiro de tributo em conta que não é de tributo, lado errado e lançamento em dobro — com o arquivo de ajustes pronto.</p>' +
+      '<div class="rodape"><span class="suave pequeno">' + (ultimoDiario ? 'pelo diário de ' + String(ultimoDiario.competencia).slice(0, 4) : 'precisa do livro diário') + '</span>' +
+      '<span class="botao primario pequeno">Abrir →</span></div></a>';
+
     // Backup da empresa (Dony, 23/09/2026): cada um usa na sua máquina; o backup leva tudo para o colega.
     const cartaoBackup = '<a class="cartao familia backup" href="#/empresa/' + encodeURIComponent(codigo) + '/backup">' +
       '<div class="icone">💾</div><h2>Backup desta empresa</h2><p class="suave" style="line-height:1.5">Gere um arquivo com tudo desta empresa — arquivos, conciliações e decisões — ' +
@@ -77,7 +84,7 @@
     el.innerHTML = '<a class="voltar" href="#/">← Empresas</a>' +
       '<div class="cabecalho"><div class="titulos"><h1>' + T.esc(emp.nome) + '</h1><p class="suave">Código ' + T.esc(emp.codigo) + (detalhes.length ? ' · ' + T.esc(detalhes.join(' · ')) : '') + '</p></div>' +
       '<button class="botao" id="bt-editar">Editar cadastro</button></div>' +
-      '<div class="grade-3">' + cartaoApresentacao + cartaoDiario + cartoes + cartaoLivres + cartaoBackup + '</div>';
+      '<div class="grade-3">' + cartaoApresentacao + cartaoDiario + cartoes + cartaoLivres + cartaoResultado + cartaoBackup + '</div>';
     el.querySelector('#bt-editar').addEventListener('click', () => raiz.TelaCarteira.formulario(emp));
   }
 
