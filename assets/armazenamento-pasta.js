@@ -831,11 +831,18 @@
     // ------------------------------------------------------------------
     // Mudança de casa: o pacote que o servidor futuro importa (Parte 3.4)
     // ------------------------------------------------------------------
-    async function exportarTudo() {
+    // O pacote com TUDO (a pasta inteira) ou com UMA empresa só (Dony, 23/09/2026: "cada um usa na sua máquina;
+    // eu quero que o colaborador selecione a empresa, gere um backup, e o outro importe na máquina dele e os dois
+    // fiquem com os mesmos dados"). Leva o cadastro, os arquivos (o lido e o original), as conciliações, os
+    // congelados e as linhas de log daquela empresa.
+    async function montarPacote(codigoSo) {
       exigirConexao();
+      const todas = await empresas();
+      const lista = codigoSo ? todas.filter((e) => String(e.codigo) === String(codigoSo)) : todas;
+      if (codigoSo && !lista.length) throw erro('Validacao', 'A empresa ' + codigoSo + ' não está nesta pasta de dados.');
       const pacote = { programa: PROGRAMA, formato: FORMATO, exportadoEm: Util.agoraISO(), exportadoPor: quem(),
-        empresas: await empresas(), arquivos: [], conciliacoes: [], congelados: [], log: [] };
-      for (const emp of pacote.empresas) {
+        so: codigoSo ? String(codigoSo) : null, empresas: lista, arquivos: [], conciliacoes: [], congelados: [], log: [] };
+      for (const emp of lista) {
         for (const meta of await arquivos(emp.codigo)) {
           const conteudo = await conteudoDoArquivo(meta.id);
           const b = await bytesOriginais(meta.id);
@@ -850,19 +857,26 @@
       }
       const dirLog = await pasta(raiz, ['log'], false);
       for (const item of await listar(dirLog)) {
-        if (item.tipo === 'file' && /^\d{4}-\d{2}\.jsonl$/.test(item.nome)) pacote.log.push.apply(pacote.log, await lerLog(item.nome.slice(0, 7)));
+        if (item.tipo !== 'file' || !/^[0-9]{4}-[0-9]{2}\.jsonl$/.test(item.nome)) continue;
+        const linhas = await lerLog(item.nome.slice(0, 7));
+        pacote.log.push.apply(pacote.log, codigoSo ? linhas.filter((l) => String(l.codigo || '') === String(codigoSo)) : linhas);
       }
       return pacote;
     }
 
-    async function importarTudo(pacote) {
+    async function exportarTudo() { return montarPacote(null); }
+    async function exportarEmpresa(codigo) { return montarPacote(codigo); }
+    // opcoes.substituir = true: o que vem no pacote vale, mesmo que o daqui esteja mais novo (o que existia vira
+    // versão em _versoes, nada some). Sem isso, a regra é a de sempre: fica o mais recente e nada é apagado.
+    async function importarTudo(pacote, opcoes) {
       exigirConexao();
       if (!pacote || pacote.programa !== PROGRAMA) throw erro('Validacao', 'Este pacote não é do Conciliador Solutta.');
-      const r = { empresas: 0, arquivos: 0, conciliacoes: 0, congelados: 0, log: 0 };
+      const substituir = !!(opcoes && opcoes.substituir);
+      const r = { empresas: 0, arquivos: 0, conciliacoes: 0, congelados: 0, log: 0, jaTinha: { arquivos: 0, conciliacoes: 0 } };
       const listaAtual = (await lerJson(raiz, 'empresas.json')) || [];
       for (const e of pacote.empresas || []) {
         const i = listaAtual.findIndex((x) => String(x.codigo) === String(e.codigo));
-        if (i < 0 || Util.paraMs(e.atualizadoEm) > Util.paraMs(listaAtual[i].atualizadoEm)) {
+        if (i < 0 || substituir || Util.paraMs(e.atualizadoEm) > Util.paraMs(listaAtual[i].atualizadoEm)) {
           if (i < 0) listaAtual.push(e); else listaAtual[i] = e;
           r.empresas++;
         }
@@ -873,7 +887,7 @@
         const meta = a.meta;
         const dirEmpresa = await pastaDaEmpresa(meta.codigo, true);
         const { dirArq, indice } = await lerIndice(dirEmpresa);
-        if (indice.some((m) => m.id === meta.id)) continue;
+        if (indice.some((m) => m.id === meta.id)) { r.jaTinha.arquivos++; continue; }
         const dirMes = await pasta(dirArq, [Util.anoMes(meta.competencia)], true);
         if (a.original && meta.original && !(await existe(dirMes, meta.original))) await gravar(dirMes, meta.original, base64ParaBytes(a.original));
         await gravar(dirMes, meta.id + '.json', JSON.stringify({ meta, conteudo: a.conteudo }));
@@ -884,10 +898,14 @@
       for (const c of pacote.conciliacoes || []) {
         const dir = await pasta(await pastaDaEmpresa(c.codigo, true), ['conciliacoes'], true);
         const atual = await lerJson(dir, c.id + '.json');
-        if (!atual || Util.paraMs(c.atualizadoEm) > Util.paraMs(atual.atualizadoEm)) {
-          await gravar(dir, c.id + '.json', JSON.stringify(c));
-          r.conciliacoes++;
+        if (atual && !substituir && Util.paraMs(c.atualizadoEm) <= Util.paraMs(atual.atualizadoEm)) { r.jaTinha.conciliacoes++; continue; }
+        // O que já estava aqui vira versão antes de ser trocado: nada se perde.
+        if (atual) {
+          const dirVer = await pasta(dir, ['_versoes', c.id], true);
+          await gravar(dirVer, carimboDePasta(atual.atualizadoEm) + '.json', JSON.stringify(atual));
         }
+        await gravar(dir, c.id + '.json', JSON.stringify(c));
+        r.conciliacoes++;
       }
       for (const c of pacote.congelados || []) {
         if (!c || !c.id) continue;
@@ -911,14 +929,14 @@
           r.log += novas.length;
         }
       }
-      await registrarNoLog({ acao: 'pacote-importado', detalhe: JSON.stringify(r) });
+      await registrarNoLog({ acao: 'pacote-importado', codigo: (pacote.empresas && pacote.empresas.length === 1 ? pacote.empresas[0].codigo : ''), detalhe: JSON.stringify(r) });
       return r;
     }
 
     return {
       // contrato
       conectar, estaConectado, descricao, quemSou,
-      empresas, salvarEmpresa, apagarEmpresa,
+      empresas, salvarEmpresa, apagarEmpresa, exportarEmpresa,
       arquivos, conteudoDoArquivo, guardarArquivo, apagarArquivo, arquivoApagado,
       conciliacoes, salvarConciliacao, apagarConciliacao, versoes,
       congelar, congelado,

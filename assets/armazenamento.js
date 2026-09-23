@@ -8,6 +8,7 @@
  *   arquivos(codigo), conteudoDoArquivo(id), guardarArquivo(codigo, meta, conteudo, bytesOriginais), apagarArquivo(id),
  *   arquivoApagado(id) (a cópia do que foi apagado: { meta, conteudo } ou null)
  *   conciliacoes(codigo, competencia), salvarConciliacao(registro), apagarConciliacao(id), versoes(id)
+ *   exportarEmpresa(codigo) -> pacote de backup de uma empresa; importarTudo(pacote, { substituir })
  *   congelar(codigo, meta, conteudo), congelado(id)
  *   registrarNoLog(acao)
  *   exportarTudo(), importarTudo(pacote)
@@ -31,7 +32,7 @@
     'conciliacoes', 'salvarConciliacao', 'apagarConciliacao', 'versoes',
     'congelar', 'congelado',
     'registrarNoLog',
-    'exportarTudo', 'importarTudo',
+    'exportarTudo', 'exportarEmpresa', 'importarTudo',
   ];
 
   function conferirContrato(impl, nome) {

@@ -67,10 +67,17 @@
       '<div class="rodape"><span class="suave pequeno">' + (livres.length ? livres.length + ' conciliação(ões) criada(s)' : 'nenhuma ainda · crie a primeira') + '</span>' +
       '<span class="botao primario pequeno">Abrir →</span></div></a>';
 
+    // Backup da empresa (Dony, 23/09/2026): cada um usa na sua máquina; o backup leva tudo para o colega.
+    const cartaoBackup = '<a class="cartao familia backup" href="#/empresa/' + encodeURIComponent(codigo) + '/backup">' +
+      '<div class="icone">💾</div><h2>Backup desta empresa</h2><p class="suave" style="line-height:1.5">Gere um arquivo com tudo desta empresa — arquivos, conciliações e decisões — ' +
+      'para outro colaborador importar na máquina dele e ficar com os mesmos dados. E importe aqui o backup que ele mandar.</p>' +
+      '<div class="rodape"><span class="suave pequeno">' + (arquivos.length ? arquivos.length + ' arquivo(s) nesta máquina' : 'nenhum arquivo ainda') + '</span>' +
+      '<span class="botao primario pequeno">Abrir →</span></div></a>';
+
     el.innerHTML = '<a class="voltar" href="#/">← Empresas</a>' +
       '<div class="cabecalho"><div class="titulos"><h1>' + T.esc(emp.nome) + '</h1><p class="suave">Código ' + T.esc(emp.codigo) + (detalhes.length ? ' · ' + T.esc(detalhes.join(' · ')) : '') + '</p></div>' +
       '<button class="botao" id="bt-editar">Editar cadastro</button></div>' +
-      '<div class="grade-3">' + cartaoApresentacao + cartaoDiario + cartoes + cartaoLivres + '</div>';
+      '<div class="grade-3">' + cartaoApresentacao + cartaoDiario + cartoes + cartaoLivres + cartaoBackup + '</div>';
     el.querySelector('#bt-editar').addEventListener('click', () => raiz.TelaCarteira.formulario(emp));
   }
 

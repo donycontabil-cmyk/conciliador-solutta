@@ -10,8 +10,8 @@
   // Armadilha 23: lista de <script> alterada sem conferir -> módulo não carrega, calado.
   // Aqui se confere: faltando algum, a tela diz qual.
   const MODULOS = ['CONFIG', 'XLSX', 'Util', 'LerPlanilha', 'LerRazao', 'LerFinanceiro', 'LerBalancete', 'LerDiario', 'Familias', 'Leitor', 'MotorNomes',
-    'MotorReclass', 'MotorFechamento', 'MotorTerceiro', 'MotorApresentacao', 'MotorDiario', 'ExcelBonito', 'RelatorioCliente', 'LayoutAjustes', 'Demonstracao', 'Diagnostico', 'Armazenamento', 'ArmazenamentoPasta', 'ArmazenamentoMemoria',
-    'Tela', 'TelaPasta', 'TelaCarteira', 'TelaEmpresa', 'TelaFamilia', 'TelaSubir', 'TelaPasso1', 'TelaPasso13', 'TelaPasso4', 'TelaPasso3', 'TelaRelatorio3', 'TelaApresentacao', 'TelaDiario', 'TelaLivre', 'TelaSuporte'];
+    'MotorReclass', 'MotorFechamento', 'MotorTerceiro', 'MotorApresentacao', 'MotorDiario', 'ExcelBonito', 'Backup', 'RelatorioCliente', 'LayoutAjustes', 'Demonstracao', 'Diagnostico', 'Armazenamento', 'ArmazenamentoPasta', 'ArmazenamentoMemoria',
+    'Tela', 'TelaPasta', 'TelaCarteira', 'TelaEmpresa', 'TelaFamilia', 'TelaSubir', 'TelaPasso1', 'TelaPasso13', 'TelaPasso4', 'TelaPasso3', 'TelaRelatorio3', 'TelaApresentacao', 'TelaDiario', 'TelaLivre', 'TelaBackup', 'TelaSuporte'];
 
   const CHAVE_USUARIO = 'conciliador-solutta.usuario';
   // Menu da esquerda fixo ou flutuante (Dony, 18/09/2026: "uma setinha que eu possa fixar quando eu quiser;
@@ -128,6 +128,8 @@
         (r.nome === 'diario' ? 'ativo' : '') + '">📒 Livro diário<span class="sub">todas as contas; confere com o balancete</span></a>');
       partes.push('<a href="#/empresa/' + encodeURIComponent(r.codigo) + '/livres" class="' +
         (r.nome === 'livres' || r.nome === 'livre' ? 'ativo' : '') + '">🧩 Minhas conciliações<span class="sub">as que você cria, de qualquer conta</span></a>');
+      partes.push('<a href="#/empresa/' + encodeURIComponent(r.codigo) + '/backup" class="' +
+        (r.nome === 'backup' ? 'ativo' : '') + '">💾 Backup<span class="sub">levar esta empresa para outra máquina</span></a>');
     }
     partes.push('<div class="grupo">Programa</div>');
     partes.push('<a href="#/suporte" class="' + (r.nome === 'suporte' ? 'ativo' : '') + '">🔎 Ver o desenho de um arquivo<span class="sub">para adaptar a um sistema novo</span></a>');
@@ -157,6 +159,8 @@
       if (p[2] === 'diario') return { codigo: p[1], nome: 'diario', ano: /^\d{4}$/.test(p[3] || '') ? Number(p[3]) : null };
       // Conciliações livres (Dony, 22/09/2026: "poder criar a conciliação que eu quero, dentro de cada empresa"):
       // #/empresa/<código>/livres e #/empresa/<código>/livre/<id>/<AAAA-MM>
+      // Backup da empresa (Dony, 23/09/2026): #/empresa/<código>/backup
+      if (p[2] === 'backup') return { codigo: p[1], nome: 'backup' };
       if (p[2] === 'livres') return { codigo: p[1], nome: 'livres' };
       if (p[2] === 'livre' && p[3]) return { codigo: p[1], nome: 'livre', livre: p[3], anoMes: /^\d{4}-\d{2}$/.test(p[4] || '') ? p[4] : null };
       const r = { codigo: p[1], nome: 'empresa' };
@@ -199,6 +203,7 @@
       else if (r.nome === 'empresa') await raiz.TelaEmpresa.mostrar(conteudo, r.codigo, conferir);
       else if (r.nome === 'apresentacao') await raiz.TelaApresentacao.mostrar(conteudo, r.codigo, r.ano, conferir);
       else if (r.nome === 'diario') await raiz.TelaDiario.mostrar(conteudo, r.codigo, r.ano, conferir);
+      else if (r.nome === 'backup') await raiz.TelaBackup.mostrar(conteudo, r.codigo, conferir);
       else if (r.nome === 'livres') await raiz.TelaLivre.mostrarLista(conteudo, r.codigo, conferir);
       else if (r.nome === 'livre') await raiz.TelaLivre.mostrar(conteudo, r.codigo, r.livre, r.anoMes || raiz.Util.anoMes(raiz.Util.hoje().texto), conferir);
       else if (r.nome === 'familia') await raiz.TelaFamilia.mostrar(conteudo, r.codigo, r.familia, r.anoMes, conferir);
