@@ -454,7 +454,7 @@
     const dif = soma(a) - soma(b);
     barra.innerHTML = '<div class="barra-selecao"><span><b>' + a.length + '</b> na A (' + T.moeda(soma(a)) + ') e <b>' + b.length + '</b> na B (' + T.moeda(soma(b)) + ')' +
       (dif ? ' · <span class="falta">diferença ' + T.moeda(dif) + '</span>' : ' · <b>batem</b>') + '</span>' +
-      '<button type="button" class="botao primario" data-acao="conciliar-mao">Conciliar estes</button>' +
+      '<button type="button" class="botao primario" data-acao="conciliar-mao">✋ Conciliar à mão</button>' +
       '<button type="button" class="botao" data-acao="limpar-selecao">Limpar</button></div>';
   }
 

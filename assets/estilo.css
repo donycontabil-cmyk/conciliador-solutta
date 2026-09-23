@@ -1069,3 +1069,9 @@ table.rc-tabela-contas { font-size: 7.6pt; }
   .rc, .rc * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   .rc-so-tela { display: none !important; }
 }
+
+/* Versão nova publicada e a janela continua na antiga: faixa fixa no alto, com o botão de atualizar. */
+.faixa-versao { position: fixed; left: 0; right: 0; top: 0; z-index: 90; display: flex; align-items: center; justify-content: center; gap: 12px;
+  padding: 8px 16px; background: linear-gradient(#fff8e1, #ffeeba); color: #6b4a12; border-bottom: 1px solid #e3cf9f; font-size: 13.5px; box-shadow: 0 2px 8px rgba(20,30,40,.12); }
+.faixa-versao .botao { min-height: 26px; }
+@media print { .faixa-versao { display: none; } }

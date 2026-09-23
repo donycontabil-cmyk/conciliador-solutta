@@ -91,6 +91,8 @@
       decisoes: {
         recusadas: d.recusadas || [], aceitas: d.aceitas || [], manuais: d.manuais || [], desfeitas: d.desfeitas || [],
         donos: d.donos || {}, historico: d.historico || [],
+        // As regras ligadas e as conciliações feitas à mão também são decisão: têm que voltar quando a tela reabre.
+        regras: d.regras || null, batidasAMao: d.batidasAMao || [],
       },
     });
   }
@@ -329,9 +331,11 @@
     if (r.foraDaCompetencia) {
       partes.push('<div class="aviso ambar"><span class="icone-aviso">📅</span><div>' + r.foraDaCompetencia + ' lançamento(s) com data depois do fim da competência ficaram de fora deste passo.</div></div>');
     }
-    if (r.manuaisQueNaoEncaixam.length || r.desfeitasQueNaoEncaixam.length) {
+    const maoFora = r.aMaoQueNaoEncaixam || [];
+    if (r.manuaisQueNaoEncaixam.length || r.desfeitasQueNaoEncaixam.length || maoFora.length) {
       partes.push('<div class="aviso vermelho"><span class="icone-aviso">⚠️</span><div><b>Decisões que não encaixam mais</b> (nada foi apagado — confira):<ul class="pequeno">' +
         r.manuaisQueNaoEncaixam.map((x) => '<li>Reclassificação à mão "' + T.esc(x.manual.nome || x.manual.id) + '" de ' + T.esc(x.manual.quem || '') + ': ' + T.esc(x.motivo) + '</li>').join('') +
+        maoFora.map((x) => '<li>Conciliação à mão ' + T.esc(x.grupo.id || '') + ' de ' + T.esc(x.grupo.quem || '') + ': ' + T.esc(x.motivo) + '</li>').join('') +
         r.desfeitasQueNaoEncaixam.map((x) => '<li>Batida desfeita ' + T.esc(x.desfeita.id) + ': ' + T.esc(x.motivo) + '</li>').join('') + '</ul></div></div>');
     }
     E.el.querySelector('#avisos').innerHTML = partes.join('');
@@ -475,7 +479,8 @@
           '<td>' + T.seloComo(b.como) + '</td><td class="nome">' + nome + '</td><td class="num">' + ls.length + '</td>' + T.tdValor(b.valor) +
           '<td class="num">' + T.esc(ls[0].data + (ls.length > 1 && ls[ls.length - 1].data !== ls[0].data ? ' a ' + ls[ls.length - 1].data : '')) + '</td>' +
           '<td class="pequeno suave">' + T.esc(b.id) + '</td>' +
-          '<td class="num"><button type="button" class="botao pequeno perigo" data-nao-confere="' + b.id + '" title="As linhas voltam a ficar em aberto e não são casadas com outras">✕ Não confere</button></td></tr>';
+          '<td class="num"><button type="button" class="botao pequeno perigo" data-nao-confere="' + b.id + '" title="As linhas voltam a ficar em aberto e não são casadas com outras">' +
+          (b.regra === 'manual' ? '✕ Desfazer' : '✕ Não confere') + '</button></td></tr>';
         if (aberto) {
           html += ls.map((l) => '<tr class="sub"><td></td><td class="num">' + l.data + '</td><td class="historico" colspan="3">' + T.esc(l.historico) + '</td>' +
             T.tdValor(l.debito) + T.tdValor(l.credito) + '<td colspan="2">' + (l.reclass ? obsDaLinha(Object.assign({}, l, { batida: null })) : '<span class="suave pequeno">' + (l.valor > 0 ? 'forma o saldo' : 'baixa') + '</span>') + '</td></tr>').join('');
@@ -491,14 +496,16 @@
   // regra e o passo recalcula na hora: ⚡ documento e fornecedor e 👤 fornecedor e valor vêm ligados (é o que o
   // ① sempre fez); ± com margem e ≈ só pelo valor só entram quando ele aperta, como no ③.
   // ------------------------------------------------------------------
-  const CLASSE_REGRA = { documento: 'documento', 'fornecedor-valor': 'fornecedor', margem: 'margem', 'fornecedor-proximo': 'proximo', valor: 'valor', 'mesmo-dia': 'opcional' };
+  const CLASSE_REGRA = { documento: 'documento', 'fornecedor-valor': 'fornecedor', margem: 'margem', 'fornecedor-proximo': 'proximo', valor: 'valor', 'mesmo-dia': 'opcional', manual: 'mao' };
+  const REGRA_AMAO = { icone: '✋', curto: 'à mão', nome: 'À mão', texto: 'Conciliação feita à mão: você marcou as linhas e disse que casam.' };
   function regrasLigadas() { return M.regrasDe(E.decisoes.regras); }
   function seloRegra(id) {
-    const g = M.REGRA_DE[id] || { icone: '', nome: id, texto: '' };
+    const g = (id === 'manual' ? REGRA_AMAO : M.REGRA_DE[id]) || { icone: '', nome: id, texto: '' };
     return '<span class="selo ' + (CLASSE_REGRA[id] || 'opcional') + '" title="' + T.esc(g.texto) + '">' + g.icone + ' ' + T.esc(g.curto || g.nome) + '</span>';
   }
   function opcoesDeRegra() {
-    return [['', 'Conciliado por: tudo']].concat(M.REGRAS.map((g) => [g.id, g.icone + ' ' + g.nome])).concat([['mesmo-dia', '📅 Mesmo dia, sem ' + TX().pessoa]]);
+    return [['', 'Conciliado por: tudo']].concat(M.REGRAS.map((g) => [g.id, g.icone + ' ' + g.nome]))
+      .concat([['mesmo-dia', '📅 Mesmo dia, sem ' + TX().pessoa], ['manual', '✋ À mão']]);
   }
   function desenharRegras() {
     const alvo = E.el.querySelector('#regras');
@@ -733,10 +740,22 @@
       ? (p.valida.sentido === 'direta' ? '→ direta de ' + T.moeda(p.valida.valor) + ' (vale o menor; a diferença fica em aberto)' :
         '→ inversa: ' + p.valida.partes.length + ' lançamento(s), ' + T.moeda(p.valida.valor))
       : p.motivo;
+    // Conciliar à mão é dentro da MESMA conta (débito e crédito que se anulam); reclassificar é de uma conta para
+    // a outra. Por isso os dois botões: o que vale para o que está marcado fica ligado (Dony, 23/09/2026).
+    const lados = new Set(ls.map((l) => l.lado));
+    const podeConciliar = ls.length >= 2 && lados.size === 1 && ls.every((l) => l.situacao !== 'bateu');
+    const somaSel = ls.reduce((t, l) => t + l.valor, 0);
+    const explicaAqui = podeConciliar
+      ? (lados.has('F') ? T.esc(TX().F) : 'Adiantamento') + ': ' + ls.filter((l) => l.valor > 0).length + ' a crédito e ' + ls.filter((l) => l.valor < 0).length + ' a débito' +
+        (somaSel ? ' → conciliar à mão deixa ' + U.formatarCentavos(Math.abs(somaSel)) + ' de diferença em aberto' : ' → conciliar à mão fecha no centavo')
+      : explica;
     barra.innerHTML = '<div class="barra-selecao"><span><b>' + ls.length + '</b> linha(s)</span>' +
       '<span>' + T.esc(TX().F) + ' <b class="num">' + U.formatarCentavos(somaF) + '</b></span><span>Adiantamento <b class="num">' + U.formatarCentavos(somaA) + '</b></span>' +
-      '<span class="explica">' + T.esc(explica) + '</span>' +
-      '<button type="button" class="botao primario" data-acao="reclassificar-mao"' + (p.valida ? '' : ' disabled') + '>Reclassificar à mão</button>' +
+      '<span class="explica">' + T.esc(explicaAqui) + '</span>' +
+      '<button type="button" class="botao primario" data-acao="conciliar-mao"' + (podeConciliar ? '' : ' disabled') +
+      ' title="' + (podeConciliar ? 'Casar estas linhas entre si dentro da mesma conta' + (somaSel ? ' (sobra ' + U.formatarCentavos(Math.abs(somaSel)) + ', que continua em aberto)' : '')
+        : lados.size > 1 ? 'Conciliar à mão é dentro da mesma conta: marque só linhas de uma delas' : 'Marque duas linhas ou mais que ainda não bateram') + '">✋ Conciliar à mão</button>' +
+      '<button type="button" class="botao' + (podeConciliar ? '' : ' primario') + '" data-acao="reclassificar-mao"' + (p.valida ? '' : ' disabled') + '>Reclassificar à mão</button>' +
       '<button type="button" class="botao" data-acao="limpar-selecao">Limpar seleção</button></div>';
   }
 
@@ -797,6 +816,16 @@
         const id = naoConfere.getAttribute('data-nao-confere');
         const b = E.batidaPorId.get(id);
         if (!b) return;
+        // Batida feita à mão: desfazer é apagar a decisão à mão (marcar "não confere" não teria efeito, ela
+        // voltaria a ser criada na próxima conta).
+        if (b.regra === 'manual') {
+          E.decisoes.batidasAMao = (E.decisoes.batidasAMao || []).filter((x) => x.id !== b.idAMao);
+          historico('Desfez a conciliação à mão ' + (b.idAMao || id));
+          recalcularEDesenhar();
+          T.avisoRapido('Conciliação à mão ' + (b.idAMao || id) + ' desfeita: as linhas voltaram para "Não bateu".');
+          gravar('batida-a-mao-desfeita', b.idAMao || id, b.marcas.length + ' linhas');
+          return;
+        }
         E.decisoes.desfeitas = E.decisoes.desfeitas.concat([{ id, marcas: b.marcas.slice(), quem: app().usuario.nome, quando: U.agoraISO() }]);
         historico('Não confere: ' + id);
         recalcularEDesenhar();
@@ -838,6 +867,7 @@
         if (a === 'trocar-contas') { await E.fila; await raiz.TelaSubir.doDiario(E.codigo, lugaresDoPasso1(E.comp, E.arqs, E.fam.id)); return; }
         if (a === 'baixar') baixarArquivo();
         if (a === 'limpar-selecao') { E.selecao.clear(); redesenharAbaMantendoRolagem(); }
+        if (a === 'conciliar-mao') await conciliarAMao();
         if (a === 'reclassificar-mao') await reclassificarAMao();
         if (a === 'limpar-filtros') {
           Object.keys(E.filtros).filter((k) => k.startsWith(E.aba + '.')).forEach((k) => { delete E.filtros[k]; });
@@ -935,6 +965,57 @@
     historico('Baixou o arquivo de ajustes: ' + g.linhas + ' lançamentos, ' + U.formatarCentavos(g.total));
     gravar('arquivo-ajustes-baixado', nome, g.linhas + ' lançamentos · R$ ' + U.formatarCentavos(g.total));
     T.avisoRapido('Arquivo "' + nome + '" gerado: ' + g.linhas + ' lançamentos, ' + T.moeda(g.total) + '. Ele está na pasta Downloads.', 'ok', 6000);
+  }
+
+  // ------------------------------------------------------------------
+  // CONCILIAR À MÃO dentro da mesma conta (Dony, 23/09/2026: "kd a opção de conciliar manualmente mano?" ·
+  // "conciliar manual, deve exister em todos"). Vale antes de qualquer regra; pode ser de fornecedores diferentes
+  // e pode ter diferença — a diferença continua em aberto, e o em aberto segue igual ao saldo do razão.
+  // ------------------------------------------------------------------
+  function proximoIdAMao() {
+    let n = 0;
+    for (const g of (E.decisoes.batidasAMao || [])) { const m = String(g.id || '').match(/(\d+)$/); if (m) n = Math.max(n, Number(m[1])); }
+    return 'M' + (n + 1);
+  }
+  async function conciliarAMao() {
+    const marcas = Array.from(E.selecao).filter((d) => E.porDigital.has(d));
+    const ls = marcas.map((d) => E.porDigital.get(d));
+    if (ls.length < 2 || new Set(ls.map((l) => l.lado)).size !== 1) return;
+    const lado = ls[0].lado;
+    const credito = ls.filter((l) => l.valor > 0).reduce((s, l) => s + l.valor, 0);
+    const debito = -ls.filter((l) => l.valor < 0).reduce((s, l) => s + l.valor, 0);
+    const dif = credito - debito;
+    const conta = lado === 'F' ? TX().F : 'Adiantamento';
+    const r = await T.janela({
+      titulo: 'Conciliar à mão' + (dif ? ' com diferença?' : '?'),
+      corpo: '<p style="line-height:1.7">' + ls.length + ' linha(s) de <b>' + T.esc(conta) + '</b> que se anulam entre si:<br>' +
+        'A crédito: <b>' + T.moeda(credito) + '</b> (' + ls.filter((l) => l.valor > 0).length + ')<br>' +
+        'A débito: <b>' + T.moeda(debito) + '</b> (' + ls.filter((l) => l.valor < 0).length + ')<br>' +
+        (dif ? '<span class="falta">Diferença: <b>' + T.moeda(Math.abs(dif)) + '</b> — continua em aberto.</span>' : 'Fecha no centavo.') + '</p>' +
+        '<div class="campo" style="margin-top:10px"><label for="obs-mao1">Observação (por que concilia assim)</label><input id="obs-mao1" autocomplete="off" maxlength="200" placeholder="Ex.: pagamento parcial da nota" autofocus></div>',
+      botoes: [{ texto: 'Cancelar', valor: null }, { texto: dif ? 'Conciliar com diferença' : 'Conciliar', tipo: 'primario', antes: (j) => ({ obs: j.querySelector('#obs-mao1').value.trim() }) }],
+      aoAbrir: (j) => { j.querySelector('#obs-mao1').addEventListener('keydown', (e) => { if (e.key === 'Enter') j.querySelector('footer .primario').click(); }); },
+    });
+    if (!r) return;
+    const g = { id: proximoIdAMao(), marcas, quem: app().usuario.nome, quando: U.agoraISO() };
+    if (r.obs) g.obs = r.obs;
+    E.decisoes.batidasAMao = (E.decisoes.batidasAMao || []).concat([g]);
+    E.selecao.clear();
+    calcular();
+    const feita = E.r.batidas.find((b) => b.idAMao === g.id);
+    if (!feita) {
+      E.decisoes.batidasAMao = E.decisoes.batidasAMao.filter((x) => x !== g);
+      recalcularEDesenhar();
+      T.avisoRapido('Não deu para conciliar essas linhas à mão.', 'erro', 7000);
+      return;
+    }
+    historico('Conciliou à mão ' + g.id + ': ' + ls.length + ' linha(s) de ' + conta + ' · ' + U.formatarCentavos(credito) + ' × ' + U.formatarCentavos(debito) +
+      (dif ? ' · diferença ' + U.formatarCentavos(Math.abs(dif)) + ' em aberto' : '') + (r.obs ? ' · ' + r.obs : ''));
+    E.aba = lado === 'F' ? 'bateuF' : 'bateuA';
+    E.abertos.add(feita.id);
+    recalcularEDesenhar();
+    T.avisoRapido('Conciliado à mão: batida ' + feita.id + '. Para desfazer, use o ✕ na aba "Bateu no razão".', E.r.invariantes.ok ? 'ok' : 'erro', 8000);
+    gravar('batida-a-mao-criada', g.id, ls.length + ' linhas · ' + U.formatarCentavos(credito));
   }
 
   async function reclassificarAMao() {

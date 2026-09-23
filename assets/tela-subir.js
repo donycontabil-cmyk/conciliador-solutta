@@ -544,7 +544,8 @@
     const naoServe = (esperado, outroTipo) => T.janela({
       titulo: 'Esse arquivo não é ' + esperado,
       corpo: '<p style="line-height:1.5">Este lugar é o do <b>' + T.esc(lugar.nome) + '</b>, mas <b>' + T.esc(arquivo.name) + '</b> ' +
-        (outroTipo ? 'é de outro tipo: ' + T.esc(r.nomeDoTipo || r.tipo) + '.' : 'não foi entendido pelo programa' + (r.motivo ? ': ' + T.esc(r.motivo) : '.')) + '</p>' +
+        (outroTipo ? 'é de outro tipo: ' + T.esc(r.nomeDoTipo || r.tipo) + '.' : 'não foi entendido pelo programa' + (r.motivo ? ': ' + T.esc(r.motivo) : '.')) +
+        ' <span class="suave pequeno">(programa versão ' + T.esc(String((app().config && app().config.numero) || '?')) + ')</span></p>' +
         '<p class="suave pequeno" style="margin-top:8px">Confira se é o arquivo certo. Se for, mas o programa não entendeu, mande o desenho pelo menu “Ver o desenho de um arquivo”.</p>' });
     try {
       let resumo, jaEra = true;

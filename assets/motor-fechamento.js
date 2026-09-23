@@ -27,6 +27,12 @@
   // crédito e bate o valor, concilia"). As duas primeiras vêm ligadas (é o que o ① sempre fez); as duas últimas
   // só rodam quando ele aperta o botão, como no ③.
   const MARGEM = 100; // R$ 1,00 — a mesma margem do ③
+  // As conciliações que podem tirar de um fornecedor o que devolvem a outro, ou deixar diferença: o que elas mexem
+  // além do que era de cada um fica guardado como RESÍDUO, senão o "em aberto" não fecharia com o saldo da conta.
+  const DEIXA_RESIDUO = new Set(['margem', 'valor', 'fornecedor-proximo', 'manual']);
+  // As que podem não somar zero: a margem (os centavos) e a que o contador faz à mão (ele manda, e a diferença
+  // continua em aberto, aparecendo na conferência).
+  const PODE_TER_DIFERENCA = new Set(['margem', 'manual']);
   const REGRAS = [
     { id: 'documento', icone: '⚡', nome: 'Documento e fornecedor', curto: 'documento e fornecedor', sub: 'o mesmo documento', padrao: true,
       texto: 'Mesmo fornecedor e MESMO documento (a nota), valor igual: o par certo, sem chute.' },
@@ -165,6 +171,12 @@
   // tudo o que se mata dentro dos próprios razões pra depois confrontar um razão com
   // outro, senão está tudo errado."
   // ------------------------------------------------------------------
+  // O desenho da batida pelo número de linhas de cada lado: 1x1, 1xN, Nx1 ou NxM.
+  function tipoDaBatida(grupo) {
+    const c = grupo.filter((l) => l.valor > 0).length;
+    const d = grupo.filter((l) => l.valor < 0).length;
+    return (c <= 1 && d <= 1) ? '1x1' : c <= 1 ? '1xN' : d <= 1 ? 'Nx1' : 'NxM';
+  }
   function idDaBatida(marcas) {
     return 'BR-' + Util.hash8(marcas.slice().sort().join('#'));
   }
@@ -178,13 +190,13 @@
     const residuos = new Map();
     const registrar = (como, lado, chave, grupo, regra) => {
       const soma = grupo.reduce((s, l) => s + l.valor, 0);
-      if (soma !== 0 && regra !== 'margem') throw new Error('Batida que não soma zero (' + como + '): ' + soma);
+      if (soma !== 0 && !PODE_TER_DIFERENCA.has(regra)) throw new Error('Batida que não soma zero (' + como + '): ' + soma);
       const marcas = grupo.map((l) => l.digital);
       const b = { id: idDaBatida(marcas), como, regra: regra || 'fornecedor-valor', lado, chave, marcas,
         valor: grupo.filter((l) => l.valor > 0).reduce((s, l) => s + l.valor, 0), diferenca: soma, linhas: grupo.map((l) => l.i) };
       batidas.push(b);
       for (const l of grupo) batidaDe.set(l.digital, b);
-      if (b.regra === 'margem' || b.regra === 'valor' || b.regra === 'fornecedor-proximo') {
+      if (DEIXA_RESIDUO.has(b.regra)) {
         for (const l of grupo) {
           const k = l.dono.chave + '|' + l.lado;
           residuos.set(k, (residuos.get(k) || 0) + l.valor);
@@ -196,11 +208,32 @@
     const custoDoPar = (f, b) => ({ f, b, custo: Math.abs(f.dia - b.dia) + (b.dia < f.dia ? JANELA_DIAS : 0),
       o1: Math.min(f.i, b.i), o2: Math.max(f.i, b.i) });
 
+    // ✋ À MÃO, ANTES DE TUDO — o que o contador casou na tela vale mais que qualquer regra (Dony, 23/09/2026:
+    // "conciliar manual deve existir em todos"). Ele pode casar linhas de fornecedores diferentes e com diferença;
+    // o que sobra fica como resíduo e continua em aberto, então as contas seguem fechando.
+    const porDigital = new Map();
+    for (const l of linhas) porDigital.set(l.digital, l);
+    const aMaoQueNaoEncaixam = [];
+    for (const g of (opcoes && opcoes.aMao) || []) {
+      const achadas = (g.marcas || []).map((d) => porDigital.get(d)).filter((l) => l && !bloqueadas.has(l.digital) && !batidaDe.has(l.digital));
+      if (achadas.length < 2 || achadas.length < (g.marcas || []).length) {
+        aMaoQueNaoEncaixam.push({ grupo: g, motivo: achadas.length < 2 ? 'as linhas desta conciliação à mão não estão mais no razão' :
+          ((g.marcas || []).length - achadas.length) + ' linha(s) desta conciliação à mão não estão mais no razão' });
+        continue;
+      }
+      const lados = new Set(achadas.map((l) => l.lado));
+      if (lados.size > 1) { aMaoQueNaoEncaixam.push({ grupo: g, motivo: 'conciliação à mão com linhas das duas contas' }); continue; }
+      const b = registrar(tipoDaBatida(achadas), achadas[0].lado, achadas[0].dono.chave, achadas, 'manual');
+      b.idAMao = g.id || '';
+      b.quem = g.quem || '';
+      b.quando = g.quando || '';
+    }
+
     // Grupos por fornecedor e por lado.
     const grupos = new Map();
     const semDono = new Map();
     for (const l of linhas) {
-      if (bloqueadas.has(l.digital) || l.valor === 0) continue;
+      if (bloqueadas.has(l.digital) || l.valor === 0 || batidaDe.has(l.digital)) continue;
       if (l.dono.chave === SEM) {
         const k = l.conta + '|' + l.lado + '|' + l.dia;
         if (!semDono.has(k)) semDono.set(k, []);
@@ -393,7 +426,7 @@
         }
       }
     }
-    return { batidas, batidaDe, residuos, regras };
+    return { batidas, batidaDe, residuos, regras, aMaoQueNaoEncaixam };
   }
 
   // ------------------------------------------------------------------
@@ -480,6 +513,8 @@
       manuais: (decisoes.manuais || []).map((m) => (m.marcas || []).join('#')).sort(),
       titulos: (entrada.titulos || []).length,
       regras: regrasDe(decisoes.regras),
+      // As conciliações à mão entram na chave: sem isso, conciliar à mão devolveria a conta guardada de antes.
+      aMao: (decisoes.batidasAMao || []).map((g) => g.id + ':' + (g.marcas || []).join('#')).sort(),
     });
 
     let base;
@@ -511,7 +546,7 @@
           desfeitaDe.set(m, d);
         }
       }
-      const e1 = etapa1(linhas, bloqueadas, { regras: decisoes.regras });
+      const e1 = etapa1(linhas, bloqueadas, { regras: decisoes.regras, aMao: decisoes.batidasAMao });
       base = { linhas, contas: montadas.contas, foraDaCompetencia: montadas.foraDaCompetencia, nomes, porDigital,
         manuais, desfeitaDe, desfeitasQueNaoEncaixam, e1, ms: Date.now() - t0 };
       if (cache) { cache.chave = chaveCache; cache.base = base; }
@@ -755,8 +790,9 @@
       // "em aberto" não fecharia mais com o saldo da conta.
       let residuo = 0;
       e1.residuos.forEach((v, k) => { if (k.endsWith('|' + lado)) residuo += v; });
-      const comMargem = e1.batidas.filter((b) => b.lado === lado && b.regra === 'margem');
+      const comMargem = e1.batidas.filter((b) => b.lado === lado && PODE_TER_DIFERENCA.has(b.regra) && b.diferenca !== 0);
       const soPeloValor = e1.batidas.filter((b) => b.lado === lado && (b.regra === 'valor' || b.regra === 'fornecedor-proximo'));
+      const aMao = e1.batidas.filter((b) => b.lado === lado && b.regra === 'manual');
       const naoBateu = sobras.filter((l) => l.situacao !== 'auto' && l.situacao !== 'manual');
       totais[lado] = {
         titulo: textos[lado],
@@ -768,6 +804,7 @@
         residuo,
         comMargem: { qtd: comMargem.length, valor: comMargem.reduce((t, b) => t + b.diferenca, 0) },
         soPeloValor: { qtd: soPeloValor.length, valor: soPeloValor.reduce((t, b) => t + b.valor, 0) },
+        aMao: { qtd: aMao.length, valor: aMao.reduce((t, b) => t + b.valor, 0), diferenca: aMao.reduce((t, b) => t + b.diferenca, 0) },
         saldoAnterior,
         movimento,
         saldoFinal: saldoAnterior + movimento,
@@ -830,7 +867,7 @@
       natureza, competencia: entrada.competencia, periodo, textos: { F: textos.F, A: textos.A },
       linhas, contas, foraDaCompetencia: base.foraDaCompetencia,
       batidas: e1.batidas, sugestoes, manuais: manuais.validas, manuaisQueNaoEncaixam: manuais.naoEncaixam,
-      desfeitasQueNaoEncaixam: base.desfeitasQueNaoEncaixam,
+      desfeitasQueNaoEncaixam: base.desfeitasQueNaoEncaixam, aMaoQueNaoEncaixam: e1.aMaoQueNaoEncaixam || [],
       porFornecedor, totais, resumo, ajustes, totalArquivo,
       fornecedores: nomes.fornecedores, regras: nomes.regras, naoEntendidos: nomes.naoEntendidos,
       invariantes: { ok: falhas.length === 0, falhas },
@@ -904,7 +941,7 @@
     // O resto das conciliações opcionais (± com margem e ≈ só pelo valor): o que saiu do fornecedor além do
     // que era dele continua compondo o saldo dele, com o número da conciliação no histórico.
     for (const b of r.batidas || []) {
-      if (b.regra !== 'margem' && b.regra !== 'valor' && b.regra !== 'fornecedor-proximo') continue;
+      if (!DEIXA_RESIDUO.has(b.regra)) continue;
       const porChave = new Map();
       for (const i of b.linhas) {
         const l = r.linhas[i];
@@ -977,7 +1014,7 @@
     const linhas = montadas.linhas;
     const nomes = MotorNomes.resolver(linhas, { donos: (entrada.decisoes && entrada.decisoes.donos) || {}, titulos: entrada.titulos || [] });
     for (const l of linhas) l.dono = nomes.porLinha.get(l.digital);
-    const e1 = etapa1(linhas, new Set(), { regras: (entrada.decisoes || {}).regras });
+    const e1 = etapa1(linhas, new Set(), { regras: (entrada.decisoes || {}).regras, aMao: (entrada.decisoes || {}).batidasAMao });
     for (const l of linhas) {
       const b = e1.batidaDe.get(l.digital);
       l.situacao = b ? 'bateu' : 'aberta';
@@ -1007,12 +1044,12 @@
     const movimento = soma(linhas);
     const somaCredito = soma(credito), somaDebito = -soma(debito);
     const falhas = [];
-    // Só a regra ± com margem pode não somar zero; o que ela deixa de diferença continua em aberto (residuo).
-    for (const b of e1.batidas) if (b.regra !== 'margem' && b.linhas.reduce((t, i) => t + linhas[i].valor, 0) !== 0) falhas.push('Batida ' + b.id + ' não soma zero.');
-    const comMargem = e1.batidas.filter((b) => b.regra === 'margem');
+    // Só a ± com margem e a feita à mão podem não somar zero; o que elas deixam de diferença continua em aberto (residuo).
+    for (const b of e1.batidas) if (!PODE_TER_DIFERENCA.has(b.regra) && b.linhas.reduce((t, i) => t + linhas[i].valor, 0) !== 0) falhas.push('Batida ' + b.id + ' não soma zero.');
+    const comMargem = e1.batidas.filter((b) => PODE_TER_DIFERENCA.has(b.regra));
     const soPeloValor = e1.batidas.filter((b) => b.regra === 'valor' || b.regra === 'fornecedor-proximo');
     const residuo = comMargem.reduce((t, b) => t + b.diferenca, 0);
-    if (somaCredito - somaDebito + residuo !== movimento) falhas.push('O que ficou em aberto (' + Util.formatarCentavos(somaCredito - somaDebito) + ') mais a diferença das conciliações com margem (' + Util.formatarCentavos(residuo) + ') não é o movimento do razão (' + Util.formatarCentavos(movimento) + ').');
+    if (somaCredito - somaDebito + residuo !== movimento) falhas.push('O que ficou em aberto (' + Util.formatarCentavos(somaCredito - somaDebito) + ') mais a diferença das conciliações com margem e à mão (' + Util.formatarCentavos(residuo) + ') não é o movimento do razão (' + Util.formatarCentavos(movimento) + ').');
     const porFornecedorSoma = porFornecedor.reduce((t, g) => t + g.saldo, 0);
     if (porFornecedorSoma !== somaCredito - somaDebito) falhas.push('A soma por fornecedor não fecha com o que ficou em aberto.');
     if (!montadas.foraDaCompetencia) {
@@ -1026,6 +1063,7 @@
     return {
       natureza, competencia: entrada.competencia, textos: TEXTOS[natureza], linhas, contas: montadas.contas.F, foraDaCompetencia: montadas.foraDaCompetencia,
       batidas: e1.batidas, abertas: { credito, debito }, porFornecedor, fornecedores: nomes.fornecedores,
+      aMaoQueNaoEncaixam: e1.aMaoQueNaoEncaixam || [],
       totais: {
         linhas: linhas.length, bateram, batidas: e1.batidas.length, zeradas: linhas.filter((l) => l.valor === 0).length,
         regras: regrasDe((entrada.decisoes || {}).regras),

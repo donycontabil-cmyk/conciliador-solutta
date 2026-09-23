@@ -146,7 +146,7 @@
   function nomeDoHistorico(historico) {
     const h = String(historico || '').replace(/\s+/g, ' ').trim();
     const achou = (nota, nome) => ({ nota: nota || '', fornecedor: String(nome || '').replace(/\s+/g, ' ').trim() });
-    let m = h.match(/^compras?(?:\s+[a-zà-ú]+){0,2}\s+(?:cfe|conf\.?|conforme)\s+(?:nf\s*)?n[º°o]?\.?\s*([\w.\/-]+?)\s*-\s*(.+)$/i);
+    let m = h.match(/^(?:compras?|vendas?)(?:\s+[a-zà-ú]+){0,2}\s+(?:cfe|conf\.?|conforme)\s+(?:nf\s*)?n[º°o]?\.?\s*([\w.\/-]+?)\s*-\s*(.+)$/i);
     if (m) return achou(m[1], m[2]);
     const semRabo = h.replace(PAGO_NO_EXTRATO, '');
     m = semRabo.match(/^pagamento\s+(?:fatura|boleto|recibo|dacte|ap[óo]lice|nota\s+fiscal(?:\s+eletr[ôo]nica)?)\s+\.{0,3}([\w.\/-]*\d[\w.\/-]*)\s+(?:parc\s+\d+\s*\/\s*\d+\s+)?(.+)$/i);
@@ -163,7 +163,80 @@
     for (let i = partes.length - 1; i >= 1; i--) { const x = LerRazao.lancamentoH(partes[i]); if (x.fornecedor) return achou(x.nota, x.fornecedor); }
     const palavras = h.split(' ').length;
     if (/^[A-ZÀ-Ú&.\/' -]+$/.test(h) && palavras >= 2 && palavras <= 8 && !NAO_E_NOME.test(Util.semAcento(h))) return achou('', h);
+    const noMeio = nomePorPartes(h) || nomeNoFim(h);
+    if (noMeio) return achou('', noMeio);
     return { nota: '', fornecedor: '' };
+  }
+
+  // ------------------------------------------------------------------
+  // O NOME QUE ESTÁ NO MEIO DO HISTÓRICO, lido por partes (Dony, 23/09/2026: "como vc me diz que não tem
+  // fornecedor mano? precisa ser mais inteligente"). No diário da Felix, 118 de 436 históricos ficavam sem nome
+  // e o nome estava escrito neles: "PAGAMENTO FORNECEDOR - NOME - o que foi", "RECEBIMENTO/TRANSFERENCIA ENTRE
+  // EMPRESAS - NOME", "Líquido Férias 08/2026 col.:9 - NOME", "PAGAMENTO - NOME - a descrição".
+  // A régua é a de quem lê: quebra o histórico nos traços e fica com o pedaço que PARECE NOME — primeiro o que
+  // termina em LTDA/ME/EIRELI/S.A., senão o primeiro pedaço curto que não é a descrição do que foi pago.
+  // O primeiro pedaço fica de fora: ali está o tipo do lançamento, não o fornecedor.
+  // ------------------------------------------------------------------
+  const FIM_DE_EMPRESA = /\b(ltda|limitada|eireli|epp|mei|me|s\.?\/?a)\.?$/i;
+  const E_DESCRICAO = new RegExp('^(' + [
+    'ref\\b', 'refer', 'honorar', 'mensalid', 'parcela', 'parc\\b', 'vencto', 'vencimento', 'nota fiscal', 'nf\\b',
+    'contabilid', 'escrit', 'consultor', 'aluguel', 'energia', 'agua\\b', 'telefon', 'internet', 'combustiv',
+    'manutenc', 'seguro', 'plano\\b', 'salario', 'ferias', 'decimo', 'rescis', 'inss', 'fgts', 'irrf', 'iss\\b',
+    'icms', 'pis\\b', 'cofins', 'simples', 'das\\b', 'darf', 'diferenca', 'multa', 'juros', 'taxa', 'tarifa',
+    'desconto', 'adiantamento', 'emprestimo', 'repasse', 'reembolso', 'devoluc', 'compra', 'venda', 'pagamento',
+    'recebimento', 'transferencia', 'deposito', 'saque', 'cartao', 'cartoes', 'boleto', 'pix\\b', 'ted\\b',
+    'conforme', 'cfe\\b', 'valor\\b', 'saldo', 'total', 'lancamento', 'estorno', 'baixa', 'provisao',
+    'apropriacao', 'integralizacao', 'capital', 'socio', 'retirada', 'prolabore', 'pro labore', 'quotas',
+  ].join('|') + ')', 'i');
+  function pareceNome(pedaco) {
+    const x = String(pedaco || '').trim();
+    if (x.length < 4 || x.length > 90) return false;
+    const empresa = FIM_DE_EMPRESA.test(x);
+    // Número no meio só passa em nome de empresa ("POSTO 3 IRMÃOS LTDA"); "08/2026 col.:9" não é nome.
+    if (/\d/.test(x) && !empresa) return false;
+    if (!/^[A-Za-zÀ-Ãà-ú0-9&.,'ºª\/ -]+$/.test(x)) return false;
+    const palavras = x.split(/\s+/).filter(Boolean);
+    if (palavras.length < 1 || palavras.length > 9) return false;
+    // Terminando em razão social, é nome mesmo começando por uma palavra que também serve de descrição
+    // ("SEGUROS FICTÍCIA LTDA"); sem razão social, a descrição do que foi pago não vale como nome.
+    if (empresa) return true;
+    if (E_DESCRICAO.test(Util.semAcento(x))) return false;
+    // Sem sufixo de empresa: ou está todo em maiúsculas, ou as palavras grandes começam com maiúscula.
+    const grandes = palavras.filter((p) => p.length >= 3);
+    if (!grandes.length) return false;
+    const maiusculo = x === x.toUpperCase();
+    const proprias = grandes.filter((p) => /^[A-ZÀ-Ã]/.test(p));
+    return maiusculo || proprias.length === grandes.length;
+  }
+  function nomePorPartes(historico) {
+    const partes = String(historico || '').split(/\s+[-–]\s+/).map((x) => x.trim()).filter(Boolean);
+    if (partes.length < 2) return '';
+    const candidatos = partes.slice(1);
+    const empresa = candidatos.find((x) => FIM_DE_EMPRESA.test(x) && pareceNome(x));
+    if (empresa) return empresa;
+    return candidatos.find(pareceNome) || '';
+  }
+
+  // O histórico SEM TRAÇO que acaba em razão social: "Adiantamento a fornecedor GAMA FICTÍCIA LTDA", "Compensação
+  // de adiantamento GAMA FICTÍCIA LTDA". Volta do fim juntando as palavras próprias e para na primeira que é do
+  // lançamento, não do nome (pagamento, fornecedor, ref, nota…). Só vale terminando em LTDA/ME/EIRELI/S.A. e com
+  // duas palavras ou mais, senão sobraria meia razão social.
+  const PALAVRA_DO_LANCAMENTO = new Set(('pagamento pagto pgto recebimento adiantamento compensacao reclassificacao estorno ' +
+    'baixa provisao apropriacao fornecedor fornecedores cliente clientes ref referente nf nfe nfs nota duplicata boleto ' +
+    'titulo parcela parc valor saldo total transferencia deposito pix ted doc conforme cfe aquisicao').split(' '));
+  function nomeNoFim(historico) {
+    const h = String(historico || '').replace(/\s+/g, ' ').trim();
+    if (!FIM_DE_EMPRESA.test(h)) return '';
+    const palavras = h.split(' ');
+    let i = palavras.length;
+    while (i > 0) {
+      const p = palavras[i - 1];
+      if (!/^[A-ZÀ-Ã][A-Za-zÀ-Ãà-ú0-9&.,'\/-]*$/.test(p)) break;
+      if (PALAVRA_DO_LANCAMENTO.has(Util.semAcento(p).toLowerCase().replace(/[^a-z]/g, ''))) break;
+      i--;
+    }
+    const nome = palavras.slice(i).join(' ');
+    return i < palavras.length && palavras.length - i >= 2 && pareceNome(nome) ? nome : '';
   }
   // O leitor do razão primeiro; sem nome, as formas do diário.
   // Prefixo que só diz o que o lançamento é, antes do histórico de verdade: "Reclassificação - Serviços
@@ -171,20 +244,24 @@
   // que enxergar que a nota foi reclassificada naquela conta).
   const PREFIXO_DE_AJUSTE = /^\s*(reclassifica[çc][ãa]o|reclass\.?|estorno|ajuste|transfer[êe]ncia de saldo|revers[ãa]o|baixa de provis[ãa]o|apropria[çc][ãa]o)\s*(de\s+)?[-:–]?\s*/i;
 
+  // O nome lido é só a descrição do que foi pago ("REFERENTE A TAXA DE INCLUSÃO", "PLANO DE SAÚDE")? Então não é
+  // fornecedor: melhor ficar sem nome do que inventar um fornecedor que não existe (Dony, 23/09/2026).
+  const soDescricao = (nome) => !FIM_DE_EMPRESA.test(nome) && E_DESCRICAO.test(Util.semAcento(String(nome || '')));
+
   function lerHistorico(historico) {
     const lido = LerRazao.lancamentoH(historico);
-    if (lido.fornecedor) return lido;
+    if (lido.fornecedor && !soDescricao(lido.fornecedor)) return lido;
     const d = nomeDoHistorico(historico);
     if (d.fornecedor) return { nota: lido.nota || d.nota, fornecedor: d.fornecedor };
     // Sem nome ainda: tira o prefixo do ajuste e lê de novo o que sobrou.
     const semPrefixo = String(historico || '').replace(PREFIXO_DE_AJUSTE, '');
     if (semPrefixo && semPrefixo !== historico) {
       const outra = LerRazao.lancamentoH(semPrefixo);
-      if (outra.fornecedor) return { nota: lido.nota || outra.nota, fornecedor: outra.fornecedor };
+      if (outra.fornecedor && !soDescricao(outra.fornecedor)) return { nota: lido.nota || outra.nota, fornecedor: outra.fornecedor };
       const d2 = nomeDoHistorico(semPrefixo);
       if (d2.fornecedor) return { nota: lido.nota || d2.nota, fornecedor: d2.fornecedor };
     }
-    return lido;
+    return lido.fornecedor ? { nota: lido.nota, fornecedor: '' } : lido;
   }
 
   // ------------------------------------------------------------------

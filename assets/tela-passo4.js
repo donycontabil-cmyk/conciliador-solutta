@@ -9,7 +9,9 @@
  * mesmo: as mesmas batidas do ① dentro do razão, sem adiantamento e sem reclassificação (MotorFechamento.somenteRazao).
  * UMA lista (a Parte A do ③): cada lançamento com o seu ID de conciliação, filtros de documento, fornecedor, valor, data
  * e D/C, e o "mostrar" (em aberto, a crédito, a débito, conciliados, todos). Embaixo, as conciliações com ID e o por
- * fornecedor. Não grava decisão: é uma leitura do razão.
+ * fornecedor. Guarda no mês só o que é decisão: quais REGRAS estão ligadas e as CONCILIAÇÕES FEITAS À MÃO (Dony,
+ * 23/09/2026: "kd a opção de conciliar manualmente mano?" · "conciliar manual, deve exister em todos"); o resto é
+ * leitura do razão, refeita a cada abertura.
  */
 (function (raiz) {
   'use strict';
@@ -96,9 +98,10 @@
     try { registro = (await arm.conciliacoes(codigo, comp)).find((x) => x.id === idDoPasso4(codigo, comp, familia.id)) || null; } catch (e) { registro = null; }
     if (conferir && !conferir()) return;
     const regras = M().regrasDe(registro && registro.decisoes ? registro.decisoes.regras : null);
-    const r = M().somenteRazao({ natureza: familia.natureza, competencia: comp, contas: { F: F.map(fonte) }, titulos: pagar ? pagar.conteudo.titulos : [], decisoes: { regras } });
+    const aMao = (registro && registro.decisoes && registro.decisoes.batidasAMao) || [];
+    const r = M().somenteRazao({ natureza: familia.natureza, competencia: comp, contas: { F: F.map(fonte) }, titulos: pagar ? pagar.conteudo.titulos : [], decisoes: { regras, batidasAMao: aMao } });
     P = { codigo, comp, emp, voltar, arqs, F, pagar, r, cabecalho, fam: familia, abertos: new Set(), regras, registro, fonte,
-      titulos: pagar ? pagar.conteudo.titulos : [],
+      titulos: pagar ? pagar.conteudo.titulos : [], aMao, selecao: new Set(),
       filtros: { busca: '', mostrar: '', regra: '', doc: '', forn: '', valor: '', data: '', dc: '' } };
     numerarBatidas();
     el.innerHTML = '<div class="tela-passo4"></div>';
@@ -111,14 +114,15 @@
   // As REGRAS (as mesmas do ①, Dony 22/09/2026: "esses botões em todas as conciliações"): cada botão liga
   // ou desliga a regra e a leitura do razão é refeita na hora. Fica guardado no mês.
   // ------------------------------------------------------------------
-  const CLASSE_REGRA = { documento: 'documento', 'fornecedor-valor': 'fornecedor', margem: 'margem', 'fornecedor-proximo': 'proximo', valor: 'valor', 'mesmo-dia': 'opcional' };
+  const CLASSE_REGRA = { documento: 'documento', 'fornecedor-valor': 'fornecedor', margem: 'margem', 'fornecedor-proximo': 'proximo', valor: 'valor', 'mesmo-dia': 'opcional', manual: 'mao' };
+  const REGRA_AMAO = { icone: '✋', curto: 'à mão', nome: 'À mão', texto: 'Conciliação feita à mão: o contador marcou as linhas e disse que casam.' };
   function seloRegra(id) {
-    const g = M().REGRA_DE[id] || { icone: '', curto: id, texto: '' };
+    const g = (id === 'manual' ? REGRA_AMAO : M().REGRA_DE[id]) || { icone: '', curto: id, texto: '' };
     return '<span class="selo ' + (CLASSE_REGRA[id] || 'opcional') + '" title="' + T.esc(g.texto) + '">' + g.icone + ' ' + T.esc(g.curto) + '</span>';
   }
   function opcoesDeRegra() {
     return [['', 'Conciliado por: tudo']].concat(M().REGRAS.map((g) => [g.id, g.icone + ' ' + g.nome]))
-      .concat([['mesmo-dia', '📅 Mesmo dia, sem ' + rotulos().pessoa]]);
+      .concat([['mesmo-dia', '📅 Mesmo dia, sem ' + rotulos().pessoa], ['manual', '✋ À mão']]);
   }
   function barraDeRegras() {
     const t = P.r.totais;
@@ -136,12 +140,21 @@
       t.comMargem.qtd ? '<span class="falta">± <b>' + t.comMargem.qtd + '</b> com margem: a diferença de ' + T.moeda(Math.abs(t.comMargem.valor)) + ' continua em aberto.</span>' : '',
       t.soPeloValor.qtd ? '<span class="falta">≈ <b>' + t.soPeloValor.qtd + '</b> só pelo valor: são de ' + T.esc(rotulos().pessoas) + ' diferentes — confira uma a uma.</span>' : '',
     ].filter(Boolean).join(' ');
+    const mao = P.r.batidas.filter((b) => b.regra === 'manual').length;
     return '<div class="acoes-ab" style="margin:14px 0 0"><div class="rotulo-regras pequeno">Conciliação dentro do razão · total: <b>' +
-      t.batidas.toLocaleString('pt-BR') + '</b> conciliações · <b>' + t.bateram.toLocaleString('pt-BR') + '</b> de ' + t.linhas.toLocaleString('pt-BR') + ' linhas</div>' +
+      t.batidas.toLocaleString('pt-BR') + '</b> conciliações · <b>' + t.bateram.toLocaleString('pt-BR') + '</b> de ' + t.linhas.toLocaleString('pt-BR') + ' linhas' +
+      (mao ? ' · ✋ <b>' + mao + '</b> à mão' : '') + '</div>' +
       '<div class="acoes-conciliar cinco">' + M().REGRAS.map(botao).join('') + '</div>' +
       '<p class="pequeno suave" style="margin:0">Cada botão mostra quantas conciliações saíram pela <b>regra dele</b> (a soma dá o total aí em cima) e liga ou desliga a regra, refazendo a leitura na hora. ' +
       (md ? '📅 <b>' + md + '</b> bateram no mesmo dia, sem ' + T.esc(rotulos().pessoa) + '. ' : '') + avisos + '</p></div>';
   }
+  // Refaz a leitura do razão com as regras ligadas e as conciliações feitas à mão.
+  function recalcular() {
+    P.r = M().somenteRazao({ natureza: P.fam.natureza, competencia: P.comp, contas: { F: P.F.map(P.fonte) }, titulos: P.titulos,
+      decisoes: { regras: P.regras, batidasAMao: P.aMao } });
+    numerarBatidas();
+  }
+
   async function alternarRegra(id) {
     const g = M().REGRA_DE[id];
     if (!g || !P) return;
@@ -150,8 +163,7 @@
     const novas = Object.assign({}, P.regras);
     novas[id] = ligar;
     P.regras = novas;
-    P.r = M().somenteRazao({ natureza: P.fam.natureza, competencia: P.comp, contas: { F: P.F.map(P.fonte) }, titulos: P.titulos, decisoes: { regras: P.regras } });
-    numerarBatidas();
+    recalcular();
     P.abertos = new Set();
     P.filtros.regra = ligar ? id : (P.filtros.regra === id ? '' : P.filtros.regra);
     if (ligar) P.filtros.mostrar = 'conciliados';
@@ -162,15 +174,84 @@
       (ligar ? daRegra + ' conciliação(ões) por esta regra, ' + (dif >= 0 ? '+' : '') + dif + ' linha(s) a mais conciliadas'
         : Math.abs(dif) + ' linha(s) voltaram a ficar em aberto');
     T.avisoRapido(texto + '. Clique de novo no botão para voltar atrás.', P.r.invariantes.ok ? 'ok' : 'erro', 9000);
+    await guardar(texto, 'passo4-regra-' + (ligar ? 'ligada' : 'desligada'));
+  }
+
+  // O que este mês guarda: as regras ligadas e as conciliações feitas à mão (o resto é leitura do razão).
+  async function guardar(texto, acao) {
     try {
       const arm = app().armazenamento;
       const base = P.registro || { id: idDoPasso4(P.codigo, P.comp, P.fam.id), codigo: P.codigo, tipo: raiz.TelaFamilia.tipoDoPasso(P.fam, 'passo4'), competencia: P.comp, arquivos: [] };
-      const decisoes = Object.assign({}, base.decisoes, { regras: P.regras });
+      const decisoes = Object.assign({}, base.decisoes, { regras: P.regras, batidasAMao: P.aMao });
       decisoes.historico = (decisoes.historico || []).concat([{ quando: U.agoraISO(), quem: app().usuario.nome, texto }]).slice(-200);
       P.registro = await arm.salvarConciliacao(Object.assign({}, base, { situacao: 'andamento', decisoes,
-        resumo: { linhas: P.r.totais.linhas, bateram: P.r.totais.bateram, batidas: P.r.totais.batidas, conferido: P.r.invariantes.ok } }));
-      await arm.registrarNoLog({ codigo: P.codigo, acao: 'passo4-regra-' + (ligar ? 'ligada' : 'desligada'), alvo: P.registro.id, detalhe: texto });
-    } catch (e) { T.avisoRapido('A regra valeu agora, mas não deu para guardar: ' + T.mensagemDeErro(e), 'erro', 8000); }
+        resumo: { linhas: P.r.totais.linhas, bateram: P.r.totais.bateram, batidas: P.r.totais.batidas, aMao: P.aMao.length, conferido: P.r.invariantes.ok } }));
+      await arm.registrarNoLog({ codigo: P.codigo, acao, alvo: P.registro.id, detalhe: texto });
+    } catch (e) { T.avisoRapido('Valeu agora, mas não deu para guardar: ' + T.mensagemDeErro(e), 'erro', 8000); }
+  }
+
+  // ------------------------------------------------------------------
+  // CONCILIAR À MÃO (Dony, 23/09/2026: "kd a opção de conciliar manualmente mano?" · "deve exister em todos").
+  // Marca as linhas na lista e diz que casam. Vale antes de qualquer regra; pode ser de fornecedores diferentes e
+  // pode ter diferença — a diferença continua em aberto, então o saldo da conta segue fechando.
+  // ------------------------------------------------------------------
+  function linhasMarcadas() { return P.r.linhas.filter((l) => P.selecao.has(l.digital)); }
+  function proximoIdAMao() {
+    let n = 0;
+    for (const g of P.aMao) { const m = String(g.id || '').match(/(\d+)$/); if (m) n = Math.max(n, Number(m[1])); }
+    return 'M' + (n + 1);
+  }
+  async function conciliarAMao() {
+    const ls = linhasMarcadas();
+    if (ls.length < 2) return;
+    const credito = ls.filter((l) => l.valor > 0).reduce((s, l) => s + l.valor, 0);
+    const debito = -ls.filter((l) => l.valor < 0).reduce((s, l) => s + l.valor, 0);
+    const dif = credito - debito;
+    let obs = '';
+    if (dif !== 0) {
+      const r = await T.janela({
+        titulo: 'Conciliar à mão com diferença?',
+        corpo: '<p style="line-height:1.7">' + T.esc(rotulos().aumento) + ': <b>' + T.moeda(credito) + '</b> (' + ls.filter((l) => l.valor > 0).length + ' linha(s))<br>' +
+          T.esc(rotulos().reducao) + ': <b>' + T.moeda(debito) + '</b> (' + ls.filter((l) => l.valor < 0).length + ' linha(s))<br>' +
+          '<span class="falta">Diferença: <b>' + T.moeda(Math.abs(dif)) + ' ' + dcDe(dif) + '</b> — continua em aberto.</span></p>' +
+          '<div class="campo" style="margin-top:10px"><label for="obs-mao">Observação (por que concilia assim)</label><input id="obs-mao" autocomplete="off" maxlength="200" placeholder="Ex.: pagamento parcial da nota" autofocus></div>',
+        botoes: [{ texto: 'Cancelar', valor: null }, { texto: 'Conciliar com diferença', tipo: 'primario', antes: (j) => ({ obs: j.querySelector('#obs-mao').value.trim() }) }],
+        aoAbrir: (j) => { j.querySelector('#obs-mao').addEventListener('keydown', (e) => { if (e.key === 'Enter') j.querySelector('footer .primario').click(); }); },
+      });
+      if (!r) return;
+      obs = r.obs;
+    }
+    const g = { id: proximoIdAMao(), marcas: ls.map((l) => l.digital), quem: app().usuario.nome, quando: U.agoraISO() };
+    if (obs) g.obs = obs;
+    P.aMao = P.aMao.concat([g]);
+    P.selecao = new Set();
+    recalcular();
+    const feita = P.r.batidas.find((b) => b.idAMao === g.id);
+    if (!feita) {
+      P.aMao = P.aMao.filter((x) => x !== g);
+      recalcular();
+      desenhar();
+      T.avisoRapido('Não deu para conciliar essas linhas à mão (as duas contas não se misturam numa conciliação).', 'erro', 8000);
+      return;
+    }
+    const n = P.numeroDaBatida.get(feita.id);
+    P.abertos.add(feita.id);
+    desenhar();
+    const texto = 'Conciliou à mão a ' + g.id + ' (#' + n + '): ' + ls.length + ' linha(s), ' + T.moeda(credito) + ' contra ' + T.moeda(debito) +
+      (dif ? ' · diferença ' + T.moeda(Math.abs(dif)) + ' ' + dcDe(dif) + ' em aberto' : '') + (obs ? ' · ' + obs : '');
+    T.avisoRapido('Conciliado à mão: #' + n + '. Dá para desfazer na lista de conciliações.', P.r.invariantes.ok ? 'ok' : 'erro', 8000);
+    await guardar(texto, 'passo4-conciliar-a-mao');
+  }
+  async function desfazerAMao(id) {
+    const g = P.aMao.find((x) => x.id === id);
+    if (!g) return;
+    if (!await T.confirmar({ titulo: 'Desfazer a conciliação à mão ' + id + '?',
+      texto: 'As ' + (g.marcas || []).length + ' linha(s) voltam para "em aberto" e as regras tentam conciliá-las de novo.', botao: 'Desfazer' })) return;
+    P.aMao = P.aMao.filter((x) => x.id !== id);
+    recalcular();
+    desenhar();
+    T.avisoRapido('Conciliação à mão ' + id + ' desfeita.', 'ok');
+    await guardar('Desfez a conciliação à mão ' + id + ' (' + (g.marcas || []).length + ' linha(s))', 'passo4-desfazer-a-mao');
   }
 
   // Cada batida ganha um número (#1, #2, …), da mais antiga para a mais nova — é o ID que aparece na lista.
@@ -321,6 +402,11 @@
     } else {
       partes.push('<div class="aviso vermelho"><span class="icone-aviso">⚠️</span><div><b>A conferência falhou.</b><ul class="pequeno">' + r.invariantes.falhas.slice(0, 10).map((f) => '<li>' + T.esc(f) + '</li>').join('') + '</ul></div></div>');
     }
+    const naoEncaixam = r.aMaoQueNaoEncaixam || [];
+    if (naoEncaixam.length) {
+      partes.push('<div class="aviso ambar"><span class="icone-aviso">✋</span><div><b>' + naoEncaixam.length + ' conciliação(ões) feita(s) à mão não valem mais neste razão</b> — o arquivo mudou e as linhas não estão mais lá.<ul class="pequeno" style="margin:6px 0 0">' +
+        naoEncaixam.slice(0, 10).map((x) => '<li>' + T.esc(x.grupo.id || '') + ': ' + T.esc(x.motivo) + '</li>').join('') + '</ul></div></div>');
+    }
     if (t.saldoAnterior) {
       partes.push('<div class="aviso ambar"><span class="icone-aviso">ℹ️</span><div><b>O razão começa com saldo anterior de ' + T.esc(textoDC(t.saldoAnterior)) + ', sem dizer de qual fornecedor.</b> ' +
         (cliente() ? 'Recebimento' : 'Pagamento') + ' do começo do período que quita nota de antes dele aparece em aberto do outro lado (a nota está no saldo anterior).</div></div>');
@@ -368,17 +454,19 @@
       '<span class="pilula azul" title="Soma da lista com os filtros de agora">' + textoDC(total) + '</span></div>' +
       '<p class="suave pequeno" style="margin:0 0 8px">' + P.F.map((x) => T.esc(x.conteudo.conta.codigo)).join(', ') + ' · ' + lista.length.toLocaleString('pt-BR') + ' ' + rot +
       (filtrado ? ' <b>(filtrado)</b>' : '') + ' · de ' + P.r.totais.linhas.toLocaleString('pt-BR') + ' lançamentos</p>' +
-      filtrosDasColunasHtml() + '<div id="p4-tabela"></div></div>';
+      filtrosDasColunasHtml() + '<div id="p4-tabela"></div><div id="p4-selecao"></div></div>';
     T.tabelaPaginada(P.el.querySelector('#p4-tabela'), {
       alta: true, porPagina: 200,
-      ordem: { id: 'p4-linhas', colunas: [TXT(docDe), TXT((l) => (l.dono.chave === SEM() ? '' : l.dono.nome)), DATA((l) => l.data), VALOR((l) => l.valor),
+      ordem: { id: 'p4-linhas', colunas: [null, TXT(docDe), TXT((l) => (l.dono.chave === SEM() ? '' : l.dono.nome)), DATA((l) => l.data), VALOR((l) => l.valor),
         NUM((l) => { const b = P.batidaDaLinha.get(l.i); return b ? P.numeroDaBatida.get(b.id) : null; })] },
-      cabecalho: '<th>Documento</th><th>' + (cliente() ? 'Cliente' : 'Fornecedor') + '</th><th>Data · conta</th><th class="num" title="Sem sinal: D = débito · C = crédito">Valor · D/C</th><th>ID</th>',
+      cabecalho: '<th class="caixa"><input type="checkbox" data-marcar-pagina title="Marcar as linhas mostradas"></th><th>Documento</th><th>' + (cliente() ? 'Cliente' : 'Fornecedor') + '</th><th>Data · conta</th><th class="num" title="Sem sinal: D = débito · C = crédito">Valor · D/C</th><th>ID</th>',
       linhas: lista, vazio: 'Nada nesta lista com estes filtros.',
       linha: (l) => {
         const b = P.batidaDaLinha.get(l.i);
         const n = b ? P.numeroDaBatida.get(b.id) : null;
-        return '<tr' + (b && P.abertos.has(b.id) ? ' class="destaque"' : '') + '><td class="num"><b>' + T.nome(docDe(l)) + '</b></td>' +
+        return '<tr' + (b && P.abertos.has(b.id) ? ' class="destaque"' : P.selecao.has(l.digital) ? ' class="destaque"' : '') +
+          '><td class="caixa">' + (b ? '' : '<input type="checkbox" data-marcar="' + T.esc(l.digital) + '"' + (P.selecao.has(l.digital) ? ' checked' : '') + '>') + '</td>' +
+          '<td class="num"><b>' + T.nome(docDe(l)) + '</b></td>' +
           '<td class="nome">' + (l.dono.chave === SEM() ? '<span class="falta">sem ' + rotulos().pessoa + '</span>' : T.esc(l.dono.nome)) +
           (l.historico ? '<br><span class="suave pequeno">' + T.esc(l.historico.slice(0, 80)) + '</span>' : '') + '</td>' +
           '<td class="num">' + T.esc(l.data || '—') + '<br><span class="pequeno suave" title="' + T.esc(l.contaNome || '') + '">conta ' + T.esc(l.conta) + '</span></td>' +
@@ -387,6 +475,31 @@
             : '<span class="selo opcional" title="Não casou com nenhum débito ou crédito do mesmo fornecedor">em aberto</span>') + '</td></tr>';
       },
     });
+    desenharSelecao();
+  }
+
+  // A barra da seleção: aparece quando há linhas marcadas, com a soma de cada lado e a diferença.
+  function desenharSelecao() {
+    const alvo = P.el.querySelector('#p4-selecao');
+    if (!alvo) return;
+    const ls = linhasMarcadas();
+    if (!ls.length) {
+      alvo.innerHTML = '<p class="suave pequeno" style="margin:10px 0 0">Para <b>conciliar à mão</b>: marque duas linhas ou mais que se anulam (o que o programa não casou sozinho) — ' +
+        'aparece aqui a opção <b>Conciliar à mão</b>, que cria o próximo ID. Vale mesmo com ' + T.esc(rotulos().pessoas) + ' diferentes ou com diferença.</p>';
+      return;
+    }
+    const credito = ls.filter((l) => l.valor > 0).reduce((s, l) => s + l.valor, 0);
+    const debito = -ls.filter((l) => l.valor < 0).reduce((s, l) => s + l.valor, 0);
+    const dif = credito - debito;
+    const nomes = Array.from(new Set(ls.map((l) => nomeDe(l))));
+    alvo.innerHTML = '<div class="barra-selecao"><span><b>' + ls.length + '</b> linha(s) marcada(s)</span>' +
+      '<span>' + T.esc(rotulos().aumento) + ' <b class="num">' + U.formatarCentavos(credito) + '</b></span>' +
+      '<span>' + T.esc(rotulos().reducao) + ' <b class="num">' + U.formatarCentavos(debito) + '</b></span>' +
+      '<span class="' + (dif ? 'falta' : '') + '">Diferença <b class="num">' + U.formatarCentavos(Math.abs(dif)) + (dif ? ' ' + dcDe(dif) : '') + '</b></span>' +
+      '<span class="explica">' + (nomes.length > 1 ? nomes.length + ' ' + T.esc(rotulos().pessoas) + ' diferentes' : T.esc(nomes[0] || '')) +
+      (dif ? ' · a diferença continua em aberto' : '') + '</span>' +
+      '<button type="button" class="botao primario" data-acao="conciliar-a-mao"' + (ls.length < 2 ? ' disabled' : '') + '>✋ Conciliar à mão</button>' +
+      '<button type="button" class="botao" data-acao="limpar-selecao">Limpar seleção</button></div>';
   }
 
   // As conciliações com ID (o que casou), no estilo da lista do ③.
@@ -420,8 +533,16 @@
           '<td class="num">' + T.nome(docDe(ls[0])) + '</td>' +
           '<td class="nome">' + (ls[0].dono.chave === SEM() ? '<span class="falta">sem fornecedor</span>' : T.esc(ls[0].dono.nome)) + '</td>' +
           '<td class="num">' + T.esc(ls[0].data + (ls.length > 1 && ls[ls.length - 1].data !== ls[0].data ? ' a ' + ls[ls.length - 1].data : '')) + '</td>' +
-          T.tdValor(x.valor) + '<td class="pequeno">' + ls.length + ' (' + ls.filter((l) => l.valor > 0).length + ' a crédito · ' + ls.filter((l) => l.valor < 0).length + ' a débito)</td></tr>';
+          T.tdValor(x.valor) + '<td class="pequeno">' + ls.length + ' (' + ls.filter((l) => l.valor > 0).length + ' a crédito · ' + ls.filter((l) => l.valor < 0).length + ' a débito)' +
+          (x.regra === 'manual' ? '<br><button type="button" class="lapis" data-desfazer-mao="' + T.esc(x.idAMao || '') + '" title="Desfazer esta conciliação feita à mão">✕ desfazer</button>' +
+            (x.quem ? ' <span class="suave pequeno">' + T.esc(x.quem) + '</span>' : '') : '') + '</td></tr>';
         if (aberto) {
+          const g = x.regra === 'manual' ? P.aMao.find((y) => y.id === x.idAMao) : null;
+          if (g && (g.obs || g.quem)) {
+            html += '<tr class="sub"><td></td><td colspan="7" class="pequeno suave">✋ à mão por <b>' + T.esc(g.quem || '—') + '</b>' +
+              (g.quando ? ' em ' + T.esc(U.dataHoraCurta ? U.dataHoraCurta(g.quando) : String(g.quando).slice(0, 10)) : '') +
+              (g.obs ? ' · <b>' + T.esc(g.obs) + '</b>' : '') + '</td></tr>';
+          }
           html += ls.map((l) => '<tr class="sub"><td></td><td class="num">' + T.nome(docDe(l)) + '</td><td class="pequeno" colspan="3">' + T.esc(l.data) + ' · ' + T.esc(l.historico.slice(0, 90)) +
             '</td><td class="pequeno suave">conta ' + T.esc(l.conta) + '</td>' + tdDC(l.valor) + '<td></td></tr>').join('');
         }
@@ -492,11 +613,38 @@
       const ff = ev.target.closest('[data-filtrar-forn]');
       if (ff) { P.filtros.forn = ff.getAttribute('data-filtrar-forn'); P.filtros.mostrar = P.filtros.mostrar === 'conciliados' ? '' : P.filtros.mostrar; desenharFiltros(); redesenharListas(); const p = P.el.querySelector('#p4-parte'); if (p && p.scrollIntoView) p.scrollIntoView({ block: 'start', behavior: 'smooth' }); return; }
       if (ev.target.closest('[data-limpar-filtros]')) { CAMPOS.forEach((n) => { P.filtros[n] = ''; }); redesenharListas(); return; }
+      const desf = ev.target.closest('[data-desfazer-mao]');
+      if (desf) { await desfazerAMao(desf.getAttribute('data-desfazer-mao')); return; }
       const acao = ev.target.closest('[data-acao]');
       if (!acao) return;
       const a = acao.getAttribute('data-acao');
       if (a === 'excel') baixarExcel();
+      if (a === 'conciliar-a-mao') await conciliarAMao();
+      if (a === 'limpar-selecao') { P.selecao = new Set(); desenharListaMantendoRolagem(); }
       if (a === 'trocar-contas') await raiz.TelaSubir.doDiario(P.codigo, lugaresDoPasso4(P.comp, P.arqs, P.fam.id));
+    });
+    // Marcar linhas para conciliar à mão.
+    P.el.addEventListener('change', (ev) => {
+      const cx = ev.target.closest('[data-marcar]');
+      if (cx) {
+        const d = cx.getAttribute('data-marcar');
+        if (cx.checked) P.selecao.add(d); else P.selecao.delete(d);
+        const tr = cx.closest('tr');
+        if (tr) tr.classList.toggle('destaque', cx.checked);
+        desenharSelecao();
+        return;
+      }
+      const pg = ev.target.closest('[data-marcar-pagina]');
+      if (pg) {
+        P.el.querySelectorAll('[data-marcar]').forEach((c) => {
+          c.checked = pg.checked;
+          const d = c.getAttribute('data-marcar');
+          if (pg.checked) P.selecao.add(d); else P.selecao.delete(d);
+          const tr = c.closest('tr');
+          if (tr) tr.classList.toggle('destaque', pg.checked);
+        });
+        desenharSelecao();
+      }
     });
     P.el.addEventListener('toggle', (ev) => { if (ev.target && ev.target.id === 'p4-det-forn') P.fornecedoresAberto = ev.target.open; }, true);
   }

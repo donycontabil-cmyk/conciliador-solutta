@@ -1325,7 +1325,7 @@
     const barra = E.el.querySelector('#barra-ab'); if (!barra) return;
     const sa = somaSel(E.selA), sb = somaSel(E.selB), dif = sa - sb;
     const nSel = E.selA.size + E.selB.size;
-    if (!nSel) { barra.innerHTML = '<p class="suave pequeno" style="margin:10px 0">Para conciliar à mão: marque os itens na Parte A e/ou na Parte B — aparece embaixo a opção <b>Conciliar manualmente</b>, que cria o próximo ID.</p>'; return; }
+    if (!nSel) { barra.innerHTML = '<p class="suave pequeno" style="margin:10px 0">Para conciliar à mão: marque os itens na Parte A e/ou na Parte B — aparece embaixo a opção <b>✋ Conciliar à mão</b>, que cria o próximo ID.</p>'; return; }
     const bate = Math.abs(dif) < 1;
     // Marcado fora da lista só acontece com a busca de cima ou o "Mostrar" (os filtros de cada parte deixam no topo).
     const naTela = new Set((E.listaA || []).concat(E.listaB || []).map((x) => x.id));
@@ -1337,7 +1337,7 @@
       '<span class="' + (bate ? 'ok' : 'falta') + '">' + (bate ? '✓ bate' : 'diferença ' + textoDC(dif)) + '</span>' +
       '<span class="explica">vira o ID #' + M.proximoIdAB(E.decisoes.conciliacoesAB) + ' · ' + TIPO_AB[M.tipoAB(E.selA.size, E.selB.size)] +
       (fora ? ' · ' + fora + ' marcado(s) fora do filtro' : '') + '</span>' +
-      '<button type="button" class="botao primario" data-acao="conciliar-ab">✓ Conciliar manualmente</button>' +
+      '<button type="button" class="botao primario" data-acao="conciliar-ab">✋ Conciliar à mão</button>' +
       '<button type="button" class="botao" data-acao="limpar-ab">Limpar</button></div>';
   }
 
@@ -1709,7 +1709,7 @@
     if (Math.abs(valorA - valorB) >= 1) {
       // Diferença não bloqueia: pergunta mostrando os dois valores (Parte 7.11), com o motivo.
       const r = await T.janela({
-        titulo: 'Conciliar manualmente com diferença?',
+        titulo: 'Conciliar à mão com diferença?',
         corpo: '<p style="line-height:1.7">Parte A: <b>R$ ' + textoDC(valorA) + '</b> (' + a.length + ' item(ns))<br>Parte B: <b>R$ ' + textoDC(valorB) + '</b> (' + b.length + ' item(ns))<br>' +
           '<span class="falta">Diferença: <b>R$ ' + textoDC(valorA - valorB) + '</b></span></p>' +
           '<div class="campo" style="margin-top:10px"><label for="obs-ab">Observação (por que concilia assim)</label><input id="obs-ab" autocomplete="off" maxlength="200" placeholder="Ex.: juros pagos no boleto" autofocus></div>',

@@ -286,13 +286,30 @@
       if (!publicada || publicada <= aqui) { try { raiz.sessionStorage.removeItem(CHAVE_VERSAO); } catch (e) { /* segue */ } return; }
       let jaTentou = false;
       try { jaTentou = raiz.sessionStorage.getItem(CHAVE_VERSAO) === String(publicada); } catch (e) { jaTentou = true; }
-      if (jaTentou) { // recarregou e continua velha: o aviso fica na tela, com o botão
-        if (raiz.Tela && raiz.Tela.avisoRapido) raiz.Tela.avisoRapido('Existe uma versão mais nova (' + publicada + ') do que a que abriu aqui (' + aqui + '). Aperte Ctrl+F5 para pegar.', 'ambar', 20000);
+      if (jaTentou) { // recarregou e continua velha: a faixa fica na tela até ele atualizar
+        faixaDeVersaoNova(publicada, aqui);
         return;
       }
       try { raiz.sessionStorage.setItem(CHAVE_VERSAO, String(publicada)); } catch (e) { /* segue */ }
       raiz.location.replace(raiz.location.origin + raiz.location.pathname + '?versao=' + publicada + raiz.location.hash);
     } catch (e) { /* sem rede ou sem permissão: o programa continua como está */ }
+  }
+
+  // Versão nova publicada e a página daqui continua velha (o navegador insiste no cache): uma FAIXA fixa no
+  // alto, que não some, com o botão de atualizar. Antes era um aviso que sumia em 20 segundos e passava batido
+  // (Dony, 23/09/2026: mandou foto de um erro que já estava corrigido no ar).
+  function faixaDeVersaoNova(publicada, aqui) {
+    if (document.getElementById("faixa-versao")) return;
+    const d = document.createElement("div");
+    d.id = "faixa-versao";
+    d.className = "faixa-versao";
+    d.innerHTML = "<span>⬆️ <b>Saiu a versão " + publicada + "</b> — esta janela ainda está na " + aqui + ". Atualize para pegar as novidades e as correções.</span>" +
+      "<button type=\"button\" class=\"botao primario pequeno\">🔄 Atualizar agora</button>";
+    d.querySelector("button").addEventListener("click", () => {
+      try { raiz.sessionStorage.removeItem(CHAVE_VERSAO); } catch (e) { /* segue */ }
+      raiz.location.replace(raiz.location.origin + raiz.location.pathname + "?versao=" + publicada + "-" + Date.now() + raiz.location.hash);
+    });
+    document.body.appendChild(d);
   }
 
   async function iniciar() {
