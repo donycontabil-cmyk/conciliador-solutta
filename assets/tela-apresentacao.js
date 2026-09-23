@@ -816,6 +816,59 @@
       '</tbody></table></div>';
   }
 
+  // LALUR SIMULAÇÃO (Dony, 23/09/2026: "toda empresa que eu fizer o DRE simulação, eu quero que ele crie um
+  // LALUR simulação, acompanhando tudo que eu fizer na DRE simulação"): o mesmo LALUR, com o lucro de cada mês
+  // vindo da DRE simulada (com os ajustes dela) e as contas dos meses simulados tiradas do ano anterior com o
+  // percentual. Fica logo embaixo da DRE simulada, na mesma aba.
+  function secaoLalurSimulado(s, ant, op) {
+    const L = motor().lalurSimulacao(s, E.rel, ant, E.config);
+    if (!L) return '';
+    const real = E.rel.lalur;
+    const editavel = !(op && op.impressao);
+    const cor = (origem) => (origem === 'simulado' ? 'sim' : origem === 'misto' ? 'aj' : '');
+    const colA = L.parteA.colunas.map((c) => Object.assign({}, c, { cls: c.soma ? 'acum' : cor(c.origem) }));
+    const parteA = tabelaSimples(['Linha', 'Bloco'], colA, L.parteA.linhas.map((l) => ({ cls: l.destaque ? 'total' : '',
+      cab: [T.esc(l.rotulo), '<span class="suave">' + T.esc(l.bloco) + '</span>'], valores: l.valores })));
+    // O que muda do LALUR real para o simulado, nas linhas que importam.
+    const doReal = (campo) => {
+      const i = real.parteA.colunas.findIndex((c) => c.acumulado) >= 0 ? real.parteA.colunas.findIndex((c) => c.acumulado) : real.parteA.colunas.length - 1;
+      const l = real.parteA.linhas.find((x) => x.campo === campo);
+      return l ? l.valores[i] : null;
+    };
+    const doSim = (campo) => {
+      const i = L.parteA.colunas.length - 1;
+      const l = L.parteA.linhas.find((x) => x.campo === campo);
+      return l ? l.valores[i] : null;
+    };
+    const fichas = [['lucroContabil', 'Lucro contábil'], ['lrAntes', 'Lucro real antes da compensação'], ['irpjTotal', 'IRPJ'], ['csll', 'CSLL'], ['total', 'IRPJ + CSLL líquido']]
+      .map(([campo, rotulo]) => {
+        const sim = doSim(campo), rl = doReal(campo);
+        const dif = sim === null || rl === null ? null : sim - rl;
+        return '<div class="apres-ficha sim-ficha"><span>' + T.esc(rotulo) + ' · simulado</span><b>' + dinheiro(sim) + '</b>' +
+          '<small>só com os meses reais: ' + dinheiro(rl) + (dif ? ' · ' + variacaoCor(dif, (dif > 0 ? '▲ ' : '▼ ') + dinheiro(Math.abs(dif))) : '') + '</small></div>';
+      }).join('');
+    const colAj = L.ajustes.colunas.map((c) => Object.assign({}, c, { cls: c.trimestre ? 'tri' : '' }));
+    const ajustes = L.ajustes.linhas.length
+      ? tabelaSimples(['Descrição', 'Conta', 'Tipo'], colAj, L.ajustes.linhas.map((a) => ({
+        cab: [T.esc(a.titulo || '') + (a.noBalancete ? '' : ' <span class="rel-aviso">(não está nos balancetes)</span>'),
+          '<span class="cod">' + T.esc(a.conta) + '</span>', a.tipo], valores: a.valores })).concat([
+        { cls: 'total', cab: ['Total das Adições', '', ''], valores: L.ajustes.adicoes },
+        { cls: 'total', cab: ['Total das Exclusões', '', ''], valores: L.ajustes.exclusoes }]))
+      : '<p class="apres-nota nao-imprimir">Nenhuma conta marcada como adição ou exclusão. As que você marcar na aba <b>LALUR</b> entram aqui também, ' +
+        'com os meses simulados tirados de ' + (ant.ano) + ' ' + sinalPercentual(s.percentual) + '.</p>';
+    const colPat = L.pat.colunas.map((c) => Object.assign({}, c, { cls: c.lalur ? 'acum' : '' }));
+    const pat = L.pat.linhas.length ? tabelaSimples(['Descrição', 'Linha'], colPat, L.pat.linhas.map((l) => ({ cab: [T.esc(l.rotulo), l.letra], valores: l.valores }))) : '';
+    const sub = 'A mesma apuração do LALUR, com o lucro da DRE simulada: ' + (s.simulados.length ? 'os meses simulados saem de ' + ant.ano + ' ' + sinalPercentual(s.percentual) : 'só meses reais') +
+      (s.ajustes.length ? ' · os ' + s.ajustes.length + ' ajuste' + (s.ajustes.length > 1 ? 's' : '') + ' da simulação entram no lucro' : '') +
+      ' · a Parte B (prejuízo fiscal, base negativa e IR retido) é a mesma da aba LALUR.';
+    return tituloSecao('LALUR simulação · IRPJ e CSLL projetados', sub) +
+      (L.confere ? '' : '<div class="aviso vermelho" style="margin:0 0 10px"><span class="icone-aviso">⚠️</span><div>O lucro do LALUR simulado não bate com a DRE simulada: avise o suporte.</div></div>') +
+      '<div class="apres-fichas">' + fichas + '</div>' + parteA +
+      '<h3 class="apres-sub">Adições e exclusões na simulação <small>as contas marcadas no LALUR · nos meses simulados, o valor de ' + ant.ano + ' ' + T.esc(sinalPercentual(s.percentual)) + '</small></h3>' + ajustes +
+      (pat ? '<h3 class="apres-sub">Incentivo fiscal PAT na simulação <small>conta ' + T.esc(L.contaPAT || '—') + '</small></h3>' + pat : '') +
+      (editavel ? '<p class="apres-nota nao-imprimir">Mexeu no percentual ou nos ajustes da DRE simulação aí em cima? Este LALUR muda junto.</p>' : '');
+  }
+
   function secaoLalur(op) {
     const L = E.rel.lalur;
     const colA = L.parteA.colunas.map((c) => Object.assign({}, c, { cls: c.soma ? 'acum' : '' }));
@@ -1467,7 +1520,8 @@
     return tituloSecao('DRE simulação', sub) +
       (avisos.length ? '<div class="aviso ambar" style="margin:0 0 10px"><span class="icone-aviso">⚠️</span><div>' + avisos.map((a) => T.esc(a)).join('<br>') + '</div></div>' : '') +
       '<div class="apres-fichas">' + fichas + '</div>' + listaAjustes +
-      '<div class="apres-caixa"><table class="apres dre simulacao">' + cab + '<tbody>' + corpo + '</tbody></table></div>' + conf + notaAcumulado;
+      '<div class="apres-caixa"><table class="apres dre simulacao">' + cab + '<tbody>' + corpo + '</tbody></table></div>' + conf + notaAcumulado +
+      secaoLalurSimulado(s, ant, op);
   }
 
   // O percentual digitado: guarda no registro do ano e refaz a simulação na hora ("10", "10,5", "-5", "10%").

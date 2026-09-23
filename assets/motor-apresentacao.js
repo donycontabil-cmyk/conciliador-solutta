@@ -584,6 +584,9 @@
     conferencia.filter((c) => c.diferenca).forEach((c) => avisos.push('Em ' + c.mes + ' o lucro da DRE difere do resultado do balancete em ' + Util.formatarCentavos(c.diferenca) + ' (contas fora da DRE).'));
 
     return { ano, meses, trimestres, contas, base, mensal, trimestral,
+      // Acesso às contas mês a mês: o LALUR simulado usa isto para pegar as contas de ajuste e do PAT nos
+      // meses reais e, do ano anterior, nos meses simulados.
+      acesso: { valor, linhaDoMes, indice, porMes },
       dre: { mensal: dreMensal, trimestral: dreTrimestral, foraDaDre, naoMapeadas, conferencia, situacao: situacaoDre, mapa: mapaUsado, rotulos: rotulosDre, avaliacao,
         acumulado: { semJaneiro: acumulado.semJaneiro, paraEm: acumulado.paraEm === null ? null : meses[acumulado.paraEm].rotulo } },
       lalur, resumo, balanco, avisos, faltando };
@@ -1374,6 +1377,87 @@
     return { tipo: 'balancete', iguais: la.length - sairam.length, entraram, sairam, mudaram, qtdAntes: la.length, qtdDepois: ld.length, antes: totais(la), depois: totais(ld) };
   }
 
-  return { montar, compararBalancetes, indicadores, comparativo, simulacao, demonstracoes, nomeDaDemonstracao, noMeioDaFrase, INDICADORES, contasDoBalanco, MODELO_DRE, FORA_DA_DRE, PARAMETROS, AJUSTES_MODELO, CONTA_PAT_MODELO, PREMISSAS, rotuloMes, compararContas, valorUsado,
+  // ------------------------------------------------------------------
+  // LALUR SIMULAÇÃO (Dony, 23/09/2026: "toda empresa que eu fizer o DRE simulação, eu quero que ele crie um
+  // LALUR simulação, acompanhando tudo que eu fizer na DRE simulação").
+  // É o MESMO LALUR (a mesma matemática, as mesmas linhas, o mesmo PAT e a mesma Parte B), com três trocas:
+  //   - o lucro contábil de cada mês vem da DRE SIMULADA — com os ajustes que ele lançou nela;
+  //   - as contas de adição/exclusão e a do PAT, nos meses SIMULADOS, saem do mesmo mês do ano anterior com o
+  //     percentual de evolução (igual ao que a DRE simulada faz com as contas de resultado);
+  //   - entram os 12 meses do ano (os reais e os simulados), então os trimestres do ano todo aparecem.
+  // Assim, mexeu no percentual ou lançou um ajuste na DRE simulação, o IRPJ e a CSLL simulados mudam junto.
+  // ------------------------------------------------------------------
+  function lalurSimulacao(sim, atual, anterior, cfg) {
+    if (!sim || !atual || !atual.acesso || !anterior || !anterior.acesso) return null;
+    const config = cfg || {};
+    const fator = sim.fator;
+    const ano = sim.ano;
+    // Os meses que existem na simulação (real ou simulado), na ordem.
+    const meses = sim.meses.filter((m) => m.origem !== 'vazio').map((m) => ({
+      comp: m.comp, mes: m.mes, rotulo: m.rotulo, tem: true, trimestre: Math.ceil(m.mes / 3), origem: m.origem,
+      compAnterior: (anterior.ano) + '-' + String(m.mes).padStart(2, '0') + '-01',
+    }));
+    if (!meses.length) return null;
+    const trimestres = [];
+    meses.forEach((m) => {
+      let t = trimestres.find((x) => x.n === m.trimestre);
+      if (!t) { t = { n: m.trimestre, id: m.trimestre + 'T' + String(ano).slice(-2), meses: [] }; trimestres.push(t); }
+      t.meses.push(m);
+    });
+    trimestres.forEach((t) => {
+      t.carregados = t.meses.length;
+      t.parcial = t.meses.length < 3;
+      t.emAndamento = t.meses.length < 3;
+      t.simulado = t.meses.some((m) => m.origem === 'simulado');
+      t.real = t.meses.every((m) => m.origem === 'real');
+      t.rotulo = t.id + (t.parcial ? ' (parcial)' : '') + (t.simulado ? (t.real ? '' : ' · simulado') : '');
+    });
+    // O mês equivalente no ano anterior (para os meses simulados).
+    const mesAnterior = (m) => (anterior.meses || []).find((x) => x.comp === m.compAnterior) || null;
+    const escalar = (v) => (v === null || v === undefined ? v : Math.round(v * fator));
+    const valorSim = (conta, m) => {
+      if (m.origem === 'real') {
+        const real = (atual.meses || []).find((x) => x.comp === m.comp);
+        return real ? atual.acesso.valor(conta, real) : null;
+      }
+      const ant = mesAnterior(m);
+      return ant ? escalar(anterior.acesso.valor(conta, ant)) : 0;
+    };
+    const linhaSim = (conta, m) => {
+      if (m.origem === 'real') {
+        const real = (atual.meses || []).find((x) => x.comp === m.comp);
+        return real ? atual.acesso.linhaDoMes(conta, real) : null;
+      }
+      const ant = mesAnterior(m);
+      const l = ant ? anterior.acesso.linhaDoMes(conta, ant) : null;
+      if (!l) return null;
+      return Object.assign({}, l, { saldoAnterior: escalar(l.saldoAnterior), debitos: escalar(l.debitos),
+        creditos: escalar(l.creditos), saldoAtual: escalar(l.saldoAtual) });
+    };
+    // O índice de contas: as do ano e as do ano anterior (conta que só existe no ano anterior também entra).
+    const indice = new Map(anterior.acesso.indice);
+    atual.acesso.indice.forEach((v, k) => indice.set(k, v));
+    // O lucro antes dos tributos de cada mês, da DRE SIMULADA (com os ajustes dela).
+    const linhaLucro = (sim.linhas || []).find((l) => l.id === 'antesTributos' && l.tipo !== 'ajuste');
+    const lucros = meses.map((m) => (linhaLucro ? (linhaLucro.valores[m.mes - 1] || 0) : 0));
+    const dreMensal = { totais: new Map([['antesTributos', lucros]]) };
+    const lalur = montarLalur({ ano, meses, trimestres, porMes: atual.acesso.porMes, valor: valorSim, linhaDoMes: linhaSim, indice, dreMensal, cfg: config });
+    // O que é real e o que é simulado em cada coluna da Parte A (a tela marca).
+    const origemDoTrimestre = new Map(trimestres.map((t) => [t.id, t.real ? 'real' : t.meses.every((m) => m.origem === 'simulado') ? 'simulado' : 'misto']));
+    lalur.parteA.colunas.forEach((c) => { c.origem = origemDoTrimestre.get(c.id) || (c.soma ? 'misto' : ''); });
+    lalur.simulacao = { percentual: sim.percentual, fator, anoAnterior: anterior.ano,
+      reais: sim.reais, simulados: sim.simulados, ajustes: (sim.ajustes || []).length,
+      trimestres: trimestres.map((t) => ({ id: t.id, rotulo: t.rotulo, origem: origemDoTrimestre.get(t.id), meses: t.meses.map((m) => m.rotulo) })) };
+    // Conferência: o lucro contábil de cada trimestre do LALUR é a soma do lucro da DRE simulada nos meses dele.
+    lalur.confere = trimestres.every((t) => {
+      const doLalur = (lalur.parteA.linhas.find((l) => l.campo === 'lucroContabil') || { valores: [] }).valores[lalur.parteA.colunas.findIndex((c) => c.id === t.id)];
+      const daDre = t.meses.reduce((acc, m) => acc + (lucros[meses.indexOf(m)] || 0), 0);
+      return Math.abs((doLalur || 0) - daDre) <= 1;
+    });
+    return lalur;
+  }
+
+
+  return { montar, compararBalancetes, indicadores, comparativo, simulacao, lalurSimulacao, demonstracoes, nomeDaDemonstracao, noMeioDaFrase, INDICADORES, contasDoBalanco, MODELO_DRE, FORA_DA_DRE, PARAMETROS, AJUSTES_MODELO, CONTA_PAT_MODELO, PREMISSAS, rotuloMes, compararContas, valorUsado,
     LINHAS_DO_MAPA, sugerirMapaDre, mapaDoModelo, reclassificarConta, planoJunto, linhaNoMapa, linhaDoModelo, avaliarModelo, linhasSugeridas, nomeNormal };
 });
