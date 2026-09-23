@@ -166,11 +166,25 @@
     return { nota: '', fornecedor: '' };
   }
   // O leitor do razão primeiro; sem nome, as formas do diário.
+  // Prefixo que só diz o que o lançamento é, antes do histórico de verdade: "Reclassificação - Serviços
+  // tomados ref. NF nº 400 - OMEGA MONTAGENS LTDA" é a mesma nota da OMEGA (Dony, 23/09/2026: o programa tem
+  // que enxergar que a nota foi reclassificada naquela conta).
+  const PREFIXO_DE_AJUSTE = /^\s*(reclassifica[çc][ãa]o|reclass\.?|estorno|ajuste|transfer[êe]ncia de saldo|revers[ãa]o|baixa de provis[ãa]o|apropria[çc][ãa]o)\s*(de\s+)?[-:–]?\s*/i;
+
   function lerHistorico(historico) {
     const lido = LerRazao.lancamentoH(historico);
     if (lido.fornecedor) return lido;
     const d = nomeDoHistorico(historico);
-    return d.fornecedor ? { nota: lido.nota || d.nota, fornecedor: d.fornecedor } : lido;
+    if (d.fornecedor) return { nota: lido.nota || d.nota, fornecedor: d.fornecedor };
+    // Sem nome ainda: tira o prefixo do ajuste e lê de novo o que sobrou.
+    const semPrefixo = String(historico || '').replace(PREFIXO_DE_AJUSTE, '');
+    if (semPrefixo && semPrefixo !== historico) {
+      const outra = LerRazao.lancamentoH(semPrefixo);
+      if (outra.fornecedor) return { nota: lido.nota || outra.nota, fornecedor: outra.fornecedor };
+      const d2 = nomeDoHistorico(semPrefixo);
+      if (d2.fornecedor) return { nota: lido.nota || d2.nota, fornecedor: d2.fornecedor };
+    }
+    return lido;
   }
 
   // ------------------------------------------------------------------

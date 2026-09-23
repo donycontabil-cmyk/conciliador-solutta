@@ -32,9 +32,11 @@
     { id: 'tributo', titulo: 'Cheiro de tributo em conta que não é de tributo', icone: '🧾', chave: 'cheiroDeTributo',
       texto: 'O histórico fala de DARF, DAS, GPS, INSS, FGTS, IRRF, PIS, COFINS, ISS… mas a conta não é de tributo.' },
     { id: 'lado', titulo: 'Lado errado', icone: '↔️', chave: 'ladoErrado',
-      texto: 'Crédito em conta de despesa (ou débito em conta de receita) que não é estorno declarado nem rotina de folha. Olhe a contrapartida antes de decidir.' },
+      texto: 'Crédito em conta de despesa (ou débito em conta de receita) de verdade: já ficam de fora o estorno declarado, a rotina de folha, as contas redutoras, o rateio entre contas de resultado e o crédito de PIS/COFINS.' },
     { id: 'repetidos', titulo: 'Pode ser lançamento em dobro', icone: '👯', chave: 'repetidos',
       texto: 'Mesmo fornecedor, mesma conta, mesmo valor e mesmo mês, mais de uma vez. Às vezes é parcela; às vezes é dobra.' },
+    { id: 'credito', titulo: 'Crédito de PIS/COFINS', icone: '💳', chave: 'creditoTributo',
+      texto: 'O crédito de PIS/COFINS (e de outros tributos a recuperar) sai da despesa e vai para o ativo: a conta de despesa é creditada de propósito. Informativo — não é distorção.' },
     { id: 'rateio', titulo: 'Rateio entre contas de resultado', icone: '↪️', chave: 'rateio',
       texto: 'Lançamentos que saem de uma conta de resultado e entram em outra (rateio, apropriação de custo, reclassificação já feita). Informativo.' },
   ];
@@ -98,9 +100,12 @@
       '<div class="aviso info"><span class="icone-aviso">📒</span><div>Do livro diário de ' + T.esc(String(E.meta.competencia).slice(0, 4)) + ' (' +
       T.esc(E.r.periodo.de.slice(0, 7)) + ' a ' + T.esc(E.r.periodo.ate.slice(0, 7)) + '): <b>' + n(t.linhas) + '</b> lançamento(s) em <b>' + n(t.contas) +
       '</b> contas de resultado, de <b>' + n(t.fornecedores) + '</b> fornecedor(es) reconhecido(s)' + (t.semFornecedor ? ' · ' + n(t.semFornecedor) + ' sem nome no histórico' : '') + '. ' +
-      'Débitos ' + T.moeda(t.debito) + ' · créditos ' + T.moeda(t.credito) + '.</div></div>' +
+      'Débitos ' + T.moeda(t.debito) + ' · créditos ' + T.moeda(t.credito) + '.' +
+      (t.anuladas && t.anuladas.qtd ? ' <b>' + n(t.anuladas.qtd) + '</b> lançamento(s) já se anulam dentro da própria conta (a nota que foi reclassificada, o estorno): ' +
+        'ficam de fora de todas as listas.' : '') +
+      (t.folha && t.folha.qtd ? ' ' + n(t.folha.qtd) + ' crédito(s) de rotina de folha também.' : '') + '</div></div>' +
       '<div class="grade-3" style="margin-top:12px">' + ABAS.slice(0, 3).map((a) => cartao(a.id)).join('') + '</div>' +
-      '<div class="grade-3" style="margin-top:10px">' + ABAS.slice(3).map((a) => cartao(a.id)).join('') + '</div>' +
+      '<div class="grade-4" style="margin-top:10px">' + ABAS.slice(3).map((a) => cartao(a.id)).join('') + '</div>' +
       '<div class="filtros" id="re-filtros"></div>' +
       '<div id="re-lista"></div>';
     desenharFiltros();
@@ -162,8 +167,8 @@
       '<div class="linha-flex" style="margin-bottom:6px"><h3 style="flex:1;margin:0">🔀 Mesmo fornecedor em várias contas ' +
       '<span class="suave pequeno">(' + lista.length.toLocaleString('pt-BR') + ')</span></h3>' +
       '<span class="pilula azul">' + marcados + ' marcado(s) para o arquivo de ajustes</span></div>' +
-      '<p class="suave pequeno" style="margin:0 0 8px">Marque o fornecedor e escolha a <b>conta que fica</b>: o programa monta o lançamento que leva o resto para ela. ' +
-      'A conta sugerida é a que tem a maior parte do valor.</p><div id="re-tab"></div></div>';
+      '<p class="suave pequeno" style="margin:0 0 8px">Marque o fornecedor e escolha a <b>conta que fica</b>: o programa monta o lançamento que leva <b>o saldo</b> das outras para ela. ' +
+      'A conta sugerida é a que tem a maior parte. O que já foi reclassificado (débito e crédito que se anulam na mesma conta) <b>não entra</b>.</p><div id="re-tab"></div></div>';
     T.tabelaPaginada(alvo.querySelector('#re-tab'), {
       alta: true, porPagina: 60,
       ordem: { id: 're-varias', colunas: [null, TXT((f) => f.nome), NUM((f) => f.qtdContas), VALOR((f) => f.total), VALOR((f) => f.aLevar), null] },
@@ -172,7 +177,12 @@
       linha: (f) => {
         const e = E.escolhas.get(f.chave) || { marcado: false, destino: f.principal };
         const contas = f.contas.map((c) => '<div class="pequeno">' + (String(c.conta) === String(e.destino) ? '<b>' : '') + T.esc(c.conta + ' · ' + c.nome) +
-          ' · ' + T.moeda(c.valor) + ' · ' + c.linhas.length + ' lanç.' + (String(c.conta) === String(e.destino) ? ' (fica)</b>' : '') + '</div>').join('');
+          ' · ' + T.moeda(c.valor) + ' · ' + c.linhas.length + ' lanç.' + (c.anuladas ? ' <span class="suave">(+' + c.anuladas + ' já resolvido)</span>' : '') +
+          (String(c.conta) === String(e.destino) ? ' (fica)</b>' : '') + '</div>').join('') +
+          ((f.jaResolvidas || []).length ? '<div class="pequeno suave">já resolvido nesta conta (débito e crédito se anulam): ' +
+            f.jaResolvidas.map((c) => T.esc(c.conta + ' · ' + c.nome)).join(' · ') + '</div>' : '') +
+          ((f.residuos || []).length ? '<div class="pequeno falta">resíduo do lado contrário (não entra na reclassificação): ' +
+            f.residuos.map((c) => T.esc(c.conta) + ' ' + T.moeda(c.valor)).join(' · ') + '</div>' : '');
         return '<tr><td><input type="checkbox" data-marcar="' + T.esc(f.chave) + '"' + (e.marcado ? ' checked' : '') + '></td>' +
           '<td class="nome"><b>' + T.esc(f.nome) + '</b>' + contas + '</td>' +
           '<td class="num">' + f.qtdContas + '</td>' + T.tdValor(f.total) + T.tdValor(f.aLevar) +

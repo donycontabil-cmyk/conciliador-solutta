@@ -53,6 +53,10 @@
   const CONTA_DE_PESSOAL = /(sal[áa]rio|f[ée]rias|d[ée]cimo|13|aviso pr[ée]vio|rescis|indeniza|vale.?transporte|vale.?refei|vale.?alimenta|adiantamento de sal|pr[óo]-labore|pro.?labore|estagi|encargo)/i;
   // Estorno declarado: o crédito na despesa está explicado no próprio histórico.
   const ESTORNO = /(estorno|reclassifica|transfer[êe]ncia de saldo|baixa de provis|revers[ãa]o|apropria)/i;
+  // CRÉDITO DE PIS/COFINS (e demais tributos a recuperar): o crédito apropriado SAI da despesa e vai para o
+  // ativo — a despesa é creditada de propósito, não é lado errado.
+  const CREDITO_DE_TRIBUTO = /(pis|cofins|icms|ipi|tribut|imposto).*(recuperar|recuper|a compensar|cr[ée]dito)|cr[ée]dito.*(pis|cofins|icms|ipi)/i;
+  const HISTORICO_DE_CREDITO = /(cr[ée]dito de (pis|cofins|icms|ipi)|valor de (pis|cofins) cr[ée]dito|cr[ée]dito presumido|apropria[çc][ãa]o de cr[ée]dito)/i;
 
   function nomeDaLinha(l) {
     const lido = MotorDiario.lerHistorico ? MotorDiario.lerHistorico(l.historico || '') : { fornecedor: '' };
@@ -104,6 +108,34 @@
     });
 
     // ------------------------------------------------------------------
+    // O QUE JÁ FOI RESOLVIDO (Dony, 23/09/2026: "se eu tenho uma nota numa conta e reclassifiquei, o sistema tem
+    // que entender que nessa conta teve o débito e o crédito e não pode querer reclassificar").
+    // Dentro da MESMA conta e do MESMO fornecedor, cada débito que encontra um crédito de mesmo valor está
+    // anulado: a nota que foi reclassificada, o lançamento estornado, a despesa devolvida. Linha anulada sai de
+    // TODOS os achados e não conta no saldo do fornecedor naquela conta.
+    // ------------------------------------------------------------------
+    const anuladas = new Set();
+    (function marcarAnuladas() {
+      const grupos = new Map();
+      linhas.forEach((x) => {
+        if (x.chave === SEM) return;
+        const k = x.chave + '|' + x.conta + '|' + x.valor;
+        if (!grupos.has(k)) grupos.set(k, { D: [], C: [] });
+        grupos.get(k)[x.lado].push(x);
+      });
+      grupos.forEach((g) => {
+        const pares = Math.min(g.D.length, g.C.length);
+        for (let i = 0; i < pares; i++) {
+          // O par mais próximo na data primeiro (a reclassificação costuma vir logo depois da nota).
+          anuladas.add(g.D[i].i);
+          anuladas.add(g.C[i].i);
+        }
+      });
+      linhas.forEach((x) => { x.anulada = anuladas.has(x.i); });
+    })();
+    const vivas = linhas.filter((x) => !x.anulada);
+
+    // ------------------------------------------------------------------
     // Resumo por conta e por fornecedor
     // ------------------------------------------------------------------
     const contas = new Map();
@@ -118,10 +150,10 @@
       if (x.chave === SEM) return;
       if (!porFornecedor.has(x.chave)) porFornecedor.set(x.chave, { chave: x.chave, nome: x.nome, total: 0, linhas: [], contas: new Map() });
       const f = porFornecedor.get(x.chave);
-      f.total += x.lado === 'D' ? x.valor : -x.valor;
-      f.linhas.push(x.i);
-      if (!f.contas.has(x.conta)) f.contas.set(x.conta, { conta: x.conta, nome: x.contaNome, valor: 0, linhas: [] });
+      if (!x.anulada) { f.total += x.lado === 'D' ? x.valor : -x.valor; f.linhas.push(x.i); }
+      if (!f.contas.has(x.conta)) f.contas.set(x.conta, { conta: x.conta, nome: x.contaNome, valor: 0, linhas: [], anuladas: 0, despesa: x.despesa });
       const c = f.contas.get(x.conta);
+      if (x.anulada) { c.anuladas++; return; }
       c.valor += x.lado === 'D' ? x.valor : -x.valor;
       c.linhas.push(x.i);
     });
@@ -129,15 +161,24 @@
     // 1. O MESMO FORNECEDOR EM VÁRIAS CONTAS DE RESULTADO
     const mesmoFornecedorVariasContas = [];
     porFornecedor.forEach((f) => {
-      const contasDele = Array.from(f.contas.values()).filter((c) => c.valor !== 0 || c.linhas.length);
+      // Só conta a conta em que sobrou saldo DO LADO NATURAL dela: despesa com saldo devedor, receita com saldo
+      // credor. Conta zerada (a nota que já foi reclassificada) e resíduo do lado contrário não viram sugestão.
+      const todas = Array.from(f.contas.values());
+      const contasDele = todas.filter((c) => (c.despesa ? c.valor > 0 : c.valor < 0));
+      const residuos = todas.filter((c) => !contasDele.includes(c) && c.valor !== 0);
+      const jaResolvidas = todas.filter((c) => c.valor === 0 && c.anuladas);
       if (contasDele.length < 2) return;
       const ordenadas = contasDele.slice().sort((a, b) => Math.abs(b.valor) - Math.abs(a.valor));
       const principal = ordenadas[0];
       mesmoFornecedorVariasContas.push({
         chave: f.chave, nome: f.nome, total: f.total, qtdContas: ordenadas.length,
         contas: ordenadas, principal: principal.conta, principalNome: principal.nome,
-        aLevar: ordenadas.slice(1).reduce((s, c) => s + c.valor, 0),
+        // O que muda de conta é o SALDO das outras contas (não os lançamentos brutos).
+        aLevar: ordenadas.slice(1).reduce((s, c) => s + Math.abs(c.valor), 0),
+        saldos: ordenadas.slice(1).map((c) => ({ conta: c.conta, nome: c.nome, valor: c.valor, despesa: c.despesa })),
         linhas: ordenadas.slice(1).reduce((t, c) => t.concat(c.linhas), []),
+        jaResolvidas: jaResolvidas.map((c) => ({ conta: c.conta, nome: c.nome, anuladas: c.anuladas })),
+        residuos: residuos.map((c) => ({ conta: c.conta, nome: c.nome, valor: c.valor })),
       });
     });
     mesmoFornecedorVariasContas.sort((a, b) => Math.abs(b.aLevar) - Math.abs(a.aLevar) || b.qtdContas - a.qtdContas);
@@ -154,11 +195,11 @@
         }
       });
     });
-    const pagamentoDireto = linhas.filter((x) => x.despesa && x.lado === 'D' && x.contraBanco && x.chave !== SEM &&
+    const pagamentoDireto = vivas.filter((x) => x.despesa && x.lado === 'D' && x.contraBanco && x.chave !== SEM &&
       noPassivo.has(MotorNomes.limparNome(x.nome)));
 
     // 3. CHEIRO DE TRIBUTO EM CONTA QUE NÃO É DE TRIBUTO
-    const cheiroDeTributo = linhas.filter((x) => TRIBUTOS.test(x.historico) && !CONTA_DE_TRIBUTO.test(x.contaNome));
+    const cheiroDeTributo = vivas.filter((x) => TRIBUTOS.test(x.historico) && !CONTA_DE_TRIBUTO.test(x.contaNome));
 
     // 4. LADO ERRADO (crédito em despesa / débito em receita) sem estorno declarado. Quando a contrapartida é
     // OUTRA conta de resultado, é rateio/reclassificação entre despesas (comum, e não é erro): vai para a lista
@@ -167,13 +208,19 @@
     const noResultado = (x) => ehResultado(daContra(x));
     const invertido = (x) => (x.despesa && x.lado === 'C') || (!x.despesa && x.lado === 'D');
     const daFolha = (x) => CONTA_DE_PESSOAL.test(x.contaNome) && classe(daContra(x).conta) === '2';
-    const ladoErrado = linhas.filter((x) => invertido(x) && !ESTORNO.test(x.historico) && !noResultado(x) && !daFolha(x) && !ehRedutora(x.contaNome));
-    const folha = linhas.filter((x) => invertido(x) && !noResultado(x) && daFolha(x));
-    const rateio = linhas.filter((x) => invertido(x) && noResultado(x));
+    // Crédito de PIS/COFINS: a contrapartida é a conta do crédito no ativo, ou o histórico diz.
+    const creditoDeTributo = (x) => CREDITO_DE_TRIBUTO.test(x.contraNome || '') || HISTORICO_DE_CREDITO.test(x.historico || '');
+    // Folha: qualquer crédito em conta de pessoal é rotina (desconto de falta, adiantamento, provisão).
+    const daFolhaLarga = (x) => CONTA_DE_PESSOAL.test(x.contaNome);
+    const ladoErrado = vivas.filter((x) => invertido(x) && !ESTORNO.test(x.historico) && !noResultado(x) &&
+      !daFolhaLarga(x) && !ehRedutora(x.contaNome) && !creditoDeTributo(x));
+    const folha = vivas.filter((x) => invertido(x) && !noResultado(x) && daFolhaLarga(x));
+    const creditoTributo = vivas.filter((x) => invertido(x) && !noResultado(x) && !daFolhaLarga(x) && creditoDeTributo(x));
+    const rateio = vivas.filter((x) => invertido(x) && noResultado(x));
 
     // 5. REPETIDOS: mesmo fornecedor, conta, valor, lado e mês, mais de uma vez
     const grupos = new Map();
-    linhas.forEach((x) => {
+    vivas.forEach((x) => {
       if (x.chave === SEM) return;
       const k = x.chave + '|' + x.conta + '|' + x.lado + '|' + x.valor + '|' + x.comp;
       if (!grupos.has(k)) grupos.set(k, []);
@@ -193,9 +240,12 @@
       periodo: { de, ate }, plano, linhas,
       contas: Array.from(contas.values()).sort((a, b) => (b.debito + b.credito) - (a.debito + a.credito)),
       fornecedores: Array.from(porFornecedor.values()).sort((a, b) => Math.abs(b.total) - Math.abs(a.total)),
-      achados: { mesmoFornecedorVariasContas, pagamentoDireto, cheiroDeTributo, ladoErrado, rateio, folha, repetidos },
+      achados: { mesmoFornecedorVariasContas, pagamentoDireto, cheiroDeTributo, ladoErrado, rateio, folha, creditoTributo, repetidos },
       totais: {
         linhas: linhas.length,
+        // Débito e crédito que se anulam na mesma conta e no mesmo fornecedor: já foi resolvido, não é distorção.
+        anuladas: { qtd: anuladas.size, valor: linhas.filter((x) => x.anulada && x.lado === 'D').reduce((s, x) => s + x.valor, 0) },
+        vivas: vivas.length,
         contas: contas.size,
         fornecedores: porFornecedor.size,
         semFornecedor: linhas.filter((x) => x.chave === SEM).length,
@@ -207,6 +257,7 @@
         ladoErrado: { qtd: ladoErrado.length, valor: soma(ladoErrado) },
         rateio: { qtd: rateio.length, valor: soma(rateio) },
         folha: { qtd: folha.length, valor: soma(folha) },
+        creditoTributo: { qtd: creditoTributo.length, valor: soma(creditoTributo) },
         repetidos: { qtd: repetidos.length, valor: repetidos.reduce((s, r) => s + r.valor * (r.vezes - 1), 0) },
       },
       ms: Date.now() - t0,
@@ -221,16 +272,25 @@
   function ajustesDe(r, escolhas) {
     const lancamentos = [];
     const porDestino = new Map();
+    // O que vai para o destino é o SALDO de cada conta naquele fornecedor (débitos − créditos), nunca os
+    // lançamentos brutos: a nota que já foi reclassificada se anula e não entra (Dony, 23/09/2026).
     (escolhas || []).forEach((e) => {
+      const porConta = new Map();
       (e.linhas || []).forEach((i) => {
         const x = r.linhas[i];
-        if (!x || !e.destino || String(e.destino) === String(x.conta)) return;
-        const k = e.destino + '|' + x.conta + '|' + x.lado + '|' + x.chave + '|' + x.comp;
-        if (!porDestino.has(k)) porDestino.set(k, { destino: String(e.destino), origem: x.conta, origemNome: x.contaNome, lado: x.lado,
-          nome: x.nome, comp: x.comp, valor: 0, linhas: [] });
-        const g = porDestino.get(k);
-        g.valor += x.valor;
+        if (!x || x.anulada || !e.destino || String(e.destino) === String(x.conta)) return;
+        const k = e.destino + '|' + x.conta + '|' + x.chave;
+        if (!porConta.has(k)) porConta.set(k, { destino: String(e.destino), origem: x.conta, origemNome: x.contaNome,
+          nome: x.nome, comp: x.comp, saldo: 0, linhas: [] });
+        const g = porConta.get(k);
+        g.saldo += x.lado === 'D' ? x.valor : -x.valor;
+        if (x.comp > g.comp) g.comp = x.comp;
         g.linhas.push(i);
+      });
+      porConta.forEach((g, k) => {
+        if (!g.saldo) return; // a conta zerou sozinha: nada a reclassificar
+        porDestino.set(k, { destino: g.destino, origem: g.origem, origemNome: g.origemNome, lado: g.saldo > 0 ? 'D' : 'C',
+          nome: g.nome, comp: g.comp, valor: Math.abs(g.saldo), linhas: g.linhas });
       });
     });
     porDestino.forEach((g) => {
