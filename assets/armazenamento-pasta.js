@@ -531,18 +531,32 @@
       return registro;
     }
 
-    async function apagarEmpresa(codigo) {
+    // Apagar a empresa. Sem opções, só apaga a empresa VAZIA (o jeito seguro de sempre). Com { comTudo: true },
+    // apaga a pasta dela inteira — arquivos, conciliações e histórico (Dony, 24/09/2026: "eu quero poder excluir
+    // empresa também"). Quem chama pergunta antes e oferece o backup; o log da pasta guarda o que foi apagado.
+    async function apagarEmpresa(codigo, opcoes) {
       exigirConexao();
       const c = validarCodigo(codigo);
       const arqs = await arquivos(c);
       const concs = await conciliacoes(c);
-      if (arqs.length || concs.length) {
+      const comTudo = !!(opcoes && opcoes.comTudo);
+      if ((arqs.length || concs.length) && !comTudo) {
         throw erro('EmpresaComDados', 'A empresa ' + c + ' tem ' + arqs.length + ' arquivo(s) e ' + concs.length + ' conciliação(ões) guardados. Apague os arquivos antes.');
+      }
+      if (comTudo) {
+        const dirEmpresas = await pasta(raiz, ['empresas'], true);
+        const dir = await pastaDaEmpresa(c, false);
+        if (dir) {
+          const nomePasta = pastasDeEmpresa.get(c) || c;
+          try { await dirEmpresas.removeEntry(nomePasta, { recursive: true }); } catch (e) { throw erro('NaoDeuParaApagar', 'Não deu para apagar a pasta da empresa ' + c + ': ' + (e && e.message ? e.message : e)); }
+          pastasDeEmpresa.delete(c);
+        }
       }
       const lista = ((await lerJson(raiz, 'empresas.json')) || []).filter((e) => String(e.codigo) !== c);
       await gravar(raiz, 'empresas.json', JSON.stringify(lista, null, 2));
-      await registrarNoLog({ codigo: c, acao: 'empresa-apagada', alvo: c });
-      return true;
+      await registrarNoLog({ codigo: c, acao: 'empresa-apagada', alvo: c,
+        detalhe: comTudo ? 'com tudo: ' + arqs.length + ' arquivo(s) e ' + concs.length + ' conciliação(ões)' : 'empresa vazia' });
+      return { codigo: c, arquivos: arqs.length, conciliacoes: concs.length, comTudo };
     }
 
     // ------------------------------------------------------------------

@@ -190,5 +190,18 @@
     }
   }
 
-  raiz.TelaBackup = { mostrar };
+  // Gerar e baixar o backup de uma empresa de fora desta tela (a exclusão de empresa oferece isso antes de apagar).
+  async function baixarBackup(codigo) {
+    const pacote = await app().armazenamento.exportarEmpresa(codigo);
+    const bytes = B().empacotar(pacote);
+    const nome = B().nomeDoArquivo(pacote);
+    T.baixar(bytes, nome, 'application/zip');
+    const r = B().resumo(pacote);
+    T.avisoRapido('Backup gerado: ' + nome + ' · ' + r.arquivos + ' arquivo(s) e ' + r.conciliacoes + ' conciliação(ões).', 'ok', 8000);
+    app().armazenamento.registrarNoLog({ codigo, acao: 'backup-gerado', alvo: nome,
+      detalhe: r.arquivos + ' arquivos · ' + r.conciliacoes + ' conciliações · ' + bytes.length + ' bytes' }).catch(() => {});
+    return nome;
+  }
+
+  raiz.TelaBackup = { mostrar, baixarBackup };
 })(self);

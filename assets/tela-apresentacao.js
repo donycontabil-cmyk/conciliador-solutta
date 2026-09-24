@@ -59,7 +59,7 @@
   const E = { codigo: null, ano: null, emp: null, rel: null, registro: null, config: {}, lugares: [], metas: [],
     aba: 'dre-mensal', avah: true, nivel: 5, semZeradas: false, abertos: new Set(), selecao: null, marcarLalur: false, balancetes: [], fila: null, clienteMes: null, cacheCliente: null, ultimoCliente: null, casas: 2, milhar: false,
     dreEdicao: null, balancetesAnt: [], relAnt: null, ultimaDre: 'dre-mensal', ultimoRelatorio: 'cliente',
-    assinaturaMes: null, assinaturaSoMes: false, assinaturaComparar: false, assinaturaNivel: 3, dfcDetalhe: false };
+    assinaturaMes: null, assinaturaSoMes: false, assinaturaComparar: false, assinaturaNivel: 3, nivelDre: 2, dfcDetalhe: false, balancoLado: false, balancoPaisagem: false };
   (function lerPreferencias() {
     try {
       const p = JSON.parse((raiz.localStorage && raiz.localStorage.getItem(CHAVE_PREF)) || '{}') || {};
@@ -68,13 +68,18 @@
       if (GRUPO_RELATORIOS.indexOf(p.ultimoRelatorio) >= 0) E.ultimoRelatorio = p.ultimoRelatorio;
       if (typeof p.avah === 'boolean') E.avah = p.avah;
       if (p.nivel >= 1 && p.nivel <= 9) E.nivel = p.nivel;
+      if (p.nivelBalanco >= 1 && p.nivelBalanco <= 9) E.assinaturaNivel = p.nivelBalanco;
+      if (p.nivelDre >= 1 && p.nivelDre <= 9) E.nivelDre = p.nivelDre;
+      if (typeof p.balancoLado === 'boolean') E.balancoLado = p.balancoLado;
+      if (typeof p.balancoPaisagem === 'boolean') E.balancoPaisagem = p.balancoPaisagem;
       if (typeof p.semZeradas === 'boolean') E.semZeradas = p.semZeradas;
       if (p.casas === 0 || p.casas === 1 || p.casas === 2) E.casas = p.casas;
       if (typeof p.milhar === 'boolean') E.milhar = p.milhar;
     } catch (e) { /* sem preferências guardadas */ }
   })();
   function guardarPreferencias() {
-    try { raiz.localStorage.setItem(CHAVE_PREF, JSON.stringify({ aba: E.aba, ultimaDre: E.ultimaDre, ultimoRelatorio: E.ultimoRelatorio, avah: E.avah, nivel: E.nivel, semZeradas: E.semZeradas, casas: E.casas, milhar: E.milhar })); } catch (e) { /* navegador sem armazenamento */ }
+    try { raiz.localStorage.setItem(CHAVE_PREF, JSON.stringify({ aba: E.aba, ultimaDre: E.ultimaDre, ultimoRelatorio: E.ultimoRelatorio, avah: E.avah, nivel: E.nivel, semZeradas: E.semZeradas, casas: E.casas, milhar: E.milhar,
+      nivelBalanco: E.assinaturaNivel, nivelDre: E.nivelDre, balancoLado: E.balancoLado, balancoPaisagem: E.balancoPaisagem })); } catch (e) { /* navegador sem armazenamento */ }
   }
 
   // ------------------------------------------------------------------
@@ -930,9 +935,15 @@
       const dcPeriodo = ev.target.closest('button[data-dc-periodo]');
       if (dcPeriodo) { E.assinaturaSoMes = dcPeriodo.getAttribute('data-dc-periodo') === 'mes'; redesenharFolha(el); return; }
       const dcNivel = ev.target.closest('button[data-dc-nivel]');
-      if (dcNivel) { E.assinaturaNivel = Number(dcNivel.getAttribute('data-dc-nivel')); redesenharFolha(el); return; }
+      if (dcNivel) { E.assinaturaNivel = Number(dcNivel.getAttribute('data-dc-nivel')); guardarPreferencias(); redesenharFolha(el); return; }
       const dcDet = ev.target.closest('button[data-dfc-detalhe]');
       if (dcDet) { E.dfcDetalhe = dcDet.getAttribute('data-dfc-detalhe') === '1'; redesenharFolha(el); return; }
+      const dreNivel = ev.target.closest('button[data-dre-nivel]');
+      if (dreNivel) { E.nivelDre = Number(dreNivel.getAttribute('data-dre-nivel')); guardarPreferencias(); redesenharFolha(el); return; }
+      const bpModelo = ev.target.closest('button[data-bp-modelo]');
+      if (bpModelo) { E.balancoLado = bpModelo.getAttribute('data-bp-modelo') === 'lado'; guardarPreferencias(); redesenharFolha(el); return; }
+      const bpPapel = ev.target.closest('button[data-bp-papel]');
+      if (bpPapel) { E.balancoPaisagem = bpPapel.getAttribute('data-bp-papel') === 'paisagem'; guardarPreferencias(); redesenharFolha(el); return; }
       const dc = ev.target.closest('button[data-dc]');
       if (dc) { if (dc.getAttribute('data-dc') === 'assinaturas') await editarAssinaturas(el); else await imprimirDocumentos(el, DOCUMENTOS[E.aba]); return; }
       const nivel = ev.target.closest('[data-nivel]');
@@ -1677,12 +1688,25 @@
       titulo = 'Balanço patrimonial';
       sub = 'Levantado em ' + dataPorExtenso(d.data) + ' · ' + valores;
       cab = '<th>&nbsp;</th><th class="num">' + T.esc(d.data) + '</th>' + (comAnt ? '<th class="num">' + T.esc(d.anterior.data || '—') + '</th>' : '');
-      // O nível de detalhe escolhido: 2 = só os grupos, 3 = as contas de cada grupo, 9 = tudo até a analítica.
-      corpo = d.balanco.linhas.filter((l) => l.tipo === 'secao' || l.tipo === 'total' || (!zero(l) && (l.nivel || 2) <= E.assinaturaNivel)).map((l) => {
+      // O nível de detalhe escolhido: 1 = ativo e passivo, 2 = os grupos, 3 = as contas, 4 e 5 = as de baixo.
+      const doNivel = d.balanco.linhas.filter((l) => l.tipo === 'secao' || l.tipo === 'total' || (!zero(l) && (l.nivel || 2) <= E.assinaturaNivel));
+      const linhaBal = (l) => {
         if (l.tipo === 'secao') return secaoDoc(l.rotulo);
         const cls = l.tipo === 'total' ? 'dem-total' : l.tipo === 'grupo' ? 'dem-grupo' : 'dem-conta' + (l.detalhe ? ' dem-fundo n' + Math.min(l.nivel || 4, 7) : '');
         return linha(cls, l.rotulo, l);
-      }).join('');
+      };
+      if (E.balancoLado) {
+        // Modelo lado a lado (Dony, 24/09/2026): ativo à esquerda, passivo e patrimônio líquido à direita.
+        const iPassivo = doNivel.findIndex((l) => l.tipo === 'secao' && /PASSIVO/.test(l.rotulo));
+        const esquerda = iPassivo < 0 ? doNivel : doNivel.slice(0, iPassivo);
+        const direita = iPassivo < 0 ? [] : doNivel.slice(iPassivo);
+        const meia = (ls) => '<table class="dem-tabela"><thead><tr>' + cab + '</tr></thead><tbody>' + ls.map(linhaBal).join('') + '</tbody></table>';
+        return '<div class="dem dem-pagina' + (E.balancoPaisagem ? ' dem-deitada' : '') + '"><div class="dem-cab"><div class="dem-empresa">' + T.esc(emp.nome) + '</div>' +
+          (emp.cnpj ? '<div class="dem-cnpj">CNPJ ' + T.esc(U.formatarCnpj(emp.cnpj)) + '</div>' : '') +
+          '<h2>' + T.esc(titulo) + '</h2><div class="dem-sub">' + T.esc(sub) + '</div></div>' +
+          '<div class="dem-duas-colunas">' + meia(esquerda) + meia(direita) + '</div>' + blocoAssinaturas(editavel) + '</div>';
+      }
+      corpo = doNivel.map(linhaBal).join('');
     } else if (qual === 'dre') {
       const exercicio = d.periodo.de.slice(0, 5) === '01/01' && d.periodo.ate.slice(0, 5) === '31/12';
       titulo = 'Demonstração do resultado do ' + (exercicio ? 'exercício' : 'período');
@@ -1690,10 +1714,15 @@
       cab = '<th>&nbsp;</th><th class="num">' + periodoEmDuasLinhas(d.periodo) + '</th>' + (comAnt ? '<th class="num">' + periodoEmDuasLinhas(d.anterior.periodo) + '</th>' : '');
       const SEM_FAIXA = { 'Subtotal CPC 51': true, Subtotal: true, Resultado: true };
       let categoria = null;
-      corpo = d.dre.filter((l) => l.id === 'lucroLiquido' || !zero(l)).map((l) => {
+      // Nível 1 = só os subtotais e o lucro; 2 = as linhas da DRE; 3 em diante abre as contas de cada linha.
+      const nivel = E.nivelDre || 2;
+      const contasDaLinha = (l) => (nivel < 3 ? '' : (l.detalhe || [])
+        .filter((x) => (x.prof || 1) <= nivel - 2 && (Math.round(x.valor) || Math.round(x.anterior || 0)))
+        .map((x) => linha('dem-conta dem-fundo n' + Math.min((x.prof || 1) + 3, 7), x.conta + ' · ' + x.titulo, x)).join(''));
+      corpo = d.dre.filter((l) => l.id === 'lucroLiquido' || (!zero(l) && (nivel >= 2 || l.tipo === 'total'))).map((l) => {
         let faixa = '';
         if (l.categoria !== categoria) { categoria = l.categoria; if (!SEM_FAIXA[categoria]) faixa = secaoDoc(categoria); }
-        return faixa + linha(l.tipo !== 'total' ? 'dem-conta' : l.id === 'lucroLiquido' ? 'dem-total' : 'dem-subtotal', l.rotulo, l);
+        return faixa + linha(l.tipo !== 'total' ? 'dem-conta' : l.id === 'lucroLiquido' ? 'dem-total' : 'dem-subtotal', l.rotulo, l) + contasDaLinha(l);
       }).join('');
     } else {
       const f = d.dfc;
@@ -1717,7 +1746,7 @@
         linha('dem-conta', 'Caixa e equivalentes no fim do período (' + d.data + ')', v(f.caixaFim)) +
         (E.dfcDetalhe ? (f.caixa || []).map((c) => linha('dem-conta dem-fundo n4', c.conta + ' · ' + c.titulo, v(c.fim))).join('') : '');
     }
-    return '<div class="dem dem-pagina"><div class="dem-cab"><div class="dem-empresa">' + T.esc(emp.nome) + '</div>' +
+    return '<div class="dem dem-pagina' + (qual === 'balanco' && E.balancoPaisagem ? ' dem-deitada' : '') + '"><div class="dem-cab"><div class="dem-empresa">' + T.esc(emp.nome) + '</div>' +
       (emp.cnpj ? '<div class="dem-cnpj">CNPJ ' + T.esc(U.formatarCnpj(emp.cnpj)) + '</div>' : '') +
       '<h2>' + T.esc(titulo) + '</h2><div class="dem-sub">' + T.esc(sub) + '</div></div>' +
       '<table class="dem-tabela"><thead><tr>' + cab + '</tr></thead><tbody>' + corpo + '</tbody></table>' + blocoAssinaturas(editavel) + '</div>';
@@ -1726,14 +1755,22 @@
     const ms = E.rel.meses.filter((m) => m.tem);
     const comp = mesDaAssinatura();
     const seg = (ativo, atributo, texto, dica) => '<button type="button" class="seg' + (ativo ? ' ativo' : '') + '" ' + atributo + (dica ? ' title="' + dica + '"' : '') + ' aria-pressed="' + ativo + '">' + texto + '</button>';
+    // O nível de detalhe, em números: cada demonstração tem o seu (Dony, 24/09/2026: "eu quero poder escolher
+    // o nível que eu quiser, um para o balancete, outro para o balanço e outro para a DRE").
+    const nivelSeg = (rotulo, atributo, atual, dica) => '<span class="grupo-seg" title="' + T.esc(dica) + '"><span class="seg-rotulo">' + rotulo + '</span>' +
+      [1, 2, 3, 4, 5].map((n) => seg(atual === n, atributo + '="' + n + '"', String(n), dica)).join('') +
+      seg(atual >= 9, atributo + '="9"', 'Tudo', 'Abre até a última conta, seja qual for o nível') + '</span>';
     return '<div class="rc-barra nao-imprimir">' +
       '<label>' + (qual === 'balanco' ? 'Balanço no fim de' : 'Até o fim de') + ' <select class="apres-campo" id="dc-mes">' +
       ms.map((m) => '<option value="' + m.comp + '"' + (m.comp === comp ? ' selected' : '') + '>' + T.esc(m.rotulo) + '</option>').join('') + '</select></label>' +
       (qual === 'balanco'
-        ? '<span class="grupo-seg"><span class="seg-rotulo">Detalhe</span>' + seg(E.assinaturaNivel === 2, 'data-dc-nivel="2"', 'Grupos', 'Circulante, não circulante e patrimônio líquido') +
-          seg(E.assinaturaNivel === 3, 'data-dc-nivel="3"', 'Contas', 'Também as contas de cada grupo') +
-          seg(E.assinaturaNivel >= 4, 'data-dc-nivel="9"', 'Tudo', 'Abre todas as contas de baixo, até a analítica') + '</span>'
+        ? nivelSeg('Mostrar até o nível', 'data-dc-nivel', E.assinaturaNivel, 'No balanço: 1 = ativo e passivo · 2 = circulante e não circulante · 3 = as contas de cada grupo · 4 e 5 = as de baixo delas') +
+          '<span class="grupo-seg"><span class="seg-rotulo">Modelo</span>' + seg(!E.balancoLado, 'data-bp-modelo="lista"', 'Em lista', 'Ativo em cima, passivo embaixo') +
+          seg(!!E.balancoLado, 'data-bp-modelo="lado"', 'Lado a lado', 'Ativo à esquerda, passivo e patrimônio líquido à direita') + '</span>' +
+          '<span class="grupo-seg"><span class="seg-rotulo">Papel</span>' + seg(!E.balancoPaisagem, 'data-bp-papel="retrato"', 'Retrato', 'Folha em pé') +
+          seg(!!E.balancoPaisagem, 'data-bp-papel="paisagem"', 'Paisagem', 'Folha deitada') + '</span>'
         : '<span class="grupo-seg"><span class="seg-rotulo">Período</span>' + seg(!E.assinaturaSoMes, 'data-dc-periodo="ano"', 'Do começo do ano até o mês') + seg(!!E.assinaturaSoMes, 'data-dc-periodo="mes"', 'Só o mês') + '</span>' +
+          (qual === 'dre' ? nivelSeg('Mostrar até o nível', 'data-dre-nivel', E.nivelDre, 'Na DRE: 1 = só os subtotais · 2 = as linhas da DRE · 3, 4 e 5 = as contas dentro de cada linha') : '') +
           (qual === 'dfc' ? '<span class="grupo-seg"><span class="seg-rotulo">Detalhe</span>' +
             seg(!E.dfcDetalhe, 'data-dfc-detalhe="0"', 'Grupos', 'Só as linhas da demonstração') +
             seg(!!E.dfcDetalhe, 'data-dfc-detalhe="1"', 'Contas', 'Abre as contas que formam cada linha') + '</span>' : '')) +

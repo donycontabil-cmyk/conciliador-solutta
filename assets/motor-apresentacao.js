@@ -1232,6 +1232,57 @@
     });
     const sem = dre.find((l) => l.semLinha && (l.valor || l.anterior));
     if (sem) avisos.push('Há valor em "Outras contas de resultado" (sem linha na DRE): arraste as contas para a linha certa na aba DRE antes de imprimir.');
+    // As contas que formam cada linha da DRE, em árvore, com a PROFUNDIDADE dentro da linha (1 = as contas
+    // mais altas dela, 2 = as de baixo delas…): é o nível que quem usa escolhe na hora de imprimir (Dony,
+    // 24/09/2026: "eu quero poder escolher o nível que eu quiser, um para o balanço e outro para a DRE").
+    const planoDre = planoJunto([rel.contas].concat(comAnt ? [anterior.contas] : []));
+    const porContaDre = new Map(planoDre.map((c) => [c.conta, c]));
+    const analiticasDaLinha = (r, ksAqui) => {
+      const m = new Map();
+      (r.dre.mensal.linhas || []).forEach((l) => {
+        if (l.tipo !== 'analitica') return;
+        if (!m.has(l.grupo)) m.set(l.grupo, []);
+        m.get(l.grupo).push({ conta: l.conta, valor: somaNos(l.valores, ksAqui) || 0 });
+      });
+      return m;
+    };
+    const daLinhaAtual = analiticasDaLinha(rel, ks);
+    const daLinhaAnt = comAnt ? analiticasDaLinha(anterior, ksAnt) : new Map();
+    function arvoreDaLinha(id) {
+      const soma = new Map(); // conta -> { valor, anterior }
+      const somar = (conta, campo, v) => {
+        let x = porContaDre.get(conta);
+        while (x) {
+          if (!soma.has(x.conta)) soma.set(x.conta, { conta: x.conta, titulo: nomeDaDemonstracao(x.titulo), valor: 0, anterior: comAnt ? 0 : null });
+          soma.get(x.conta)[campo] += v;
+          x = x.pai ? porContaDre.get(x.pai) : null;
+        }
+      };
+      (daLinhaAtual.get(id) || []).forEach((c) => somar(c.conta, 'valor', c.valor));
+      (daLinhaAnt.get(id) || []).forEach((c) => somar(c.conta, 'anterior', c.valor));
+      if (!soma.size) return [];
+      const todas = Array.from(soma.values()).sort((a, b) => compararContas(a.conta, b.conta));
+      const paiNoConjunto = (conta) => { const c = porContaDre.get(conta); return c && c.pai && soma.has(c.pai) ? c.pai : null; };
+      // Conta que só tem UMA de baixo e o mesmo valor não acrescenta nada ("03 Receitas" em cima de "Receita
+      // bruta de vendas"): fica a de baixo, que diz mais. Assim o nível 3 já mostra conta de verdade.
+      const filhosDe = new Map();
+      todas.forEach((x) => { const p = paiNoConjunto(x.conta); if (p) { if (!filhosDe.has(p)) filhosDe.set(p, []); filhosDe.get(p).push(x); } });
+      const pular = new Set();
+      todas.forEach((x) => {
+        const fs = filhosDe.get(x.conta) || [];
+        if (fs.length === 1 && fs[0].valor === x.valor && (fs[0].anterior || 0) === (x.anterior || 0)) pular.add(x.conta);
+      });
+      const lista = todas.filter((x) => !pular.has(x.conta));
+      const nivelDe = new Map();
+      lista.forEach((x) => {
+        let p = paiNoConjunto(x.conta);
+        while (p && pular.has(p)) p = paiNoConjunto(p);
+        nivelDe.set(x.conta, p ? nivelDe.get(p) + 1 : 1);
+        x.prof = nivelDe.get(x.conta);
+      });
+      return lista;
+    }
+    dre.forEach((l) => { if (l.tipo === 'grupo') l.detalhe = arvoreDaLinha(l.id); });
 
     // ---------- Fluxo de caixa (método indireto) no período
     const cb = contasDoBalanco(rel.contas);

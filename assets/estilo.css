@@ -1084,3 +1084,13 @@ table.rc-tabela-contas { font-size: 7.6pt; }
 
 /* Nota dentro da demonstração aberta (o que o número quer dizer). */
 .dem-tabela tr.dem-nota td { font-style: italic; color: #6b5d2a; background: #fdf7e3; }
+
+/* ---------- Balanço lado a lado (ativo à esquerda, passivo e PL à direita) e folha deitada ---------- */
+.dem-duas-colunas { display: grid; grid-template-columns: 1fr 1fr; gap: 10mm; align-items: start; }
+.dem-duas-colunas .dem-tabela td.num { width: 30mm; }
+.dem-pagina.dem-deitada { width: 297mm; min-height: 200mm; }
+@media print {
+  @page deitada { size: A4 landscape; margin: 12mm; }
+  body.imprimindo-demonstracao .dem-pagina.dem-deitada { page: deitada; }
+  .dem-duas-colunas { gap: 8mm; }
+}

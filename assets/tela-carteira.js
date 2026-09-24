@@ -12,7 +12,7 @@
 
   async function mostrar(el, conferir) {
     const arm = app().armazenamento;
-    const empresas = app().empresas;
+    let empresas = app().empresas;
     const contagem = {};
     for (const e of empresas) {
       try { contagem[e.codigo] = (await arm.arquivos(e.codigo)).length; } catch (x) { contagem[e.codigo] = 0; }
@@ -48,7 +48,9 @@
         linha: (e) => '<tr><td>' + T.esc(e.codigo) + '</td><td class="nome"><a href="#/empresa/' + encodeURIComponent(e.codigo) + '"><b>' + T.esc(e.nome) + '</b></a></td>' +
           '<td class="num">' + (e.cnpj ? U.formatarCnpj(e.cnpj) : '—') + '</td><td>' + T.nome(e.regime) + '</td><td>' + T.nome(e.atividade) + '</td><td>' + T.nome(e.grupo) + '</td>' +
           '<td class="num' + (contagem[e.codigo] ? '' : ' zero') + '">' + (contagem[e.codigo] || 0) + '</td>' +
-          '<td class="num"><button class="botao pequeno leve" data-editar="' + T.esc(e.codigo) + '">Editar</button> <a class="botao pequeno" href="#/empresa/' + encodeURIComponent(e.codigo) + '">Abrir →</a></td></tr>',
+          '<td class="num"><button class="botao pequeno leve" data-editar="' + T.esc(e.codigo) + '">Editar</button> ' +
+          '<button class="botao pequeno leve" data-excluir="' + T.esc(e.codigo) + '" title="Excluir esta empresa e tudo o que está guardado nela">🗑</button> ' +
+          '<a class="botao pequeno" href="#/empresa/' + encodeURIComponent(e.codigo) + '">Abrir →</a></td></tr>',
       });
     }
     el.querySelector('#busca').addEventListener('input', () => { app().gravarLocal('conciliador-solutta.busca-carteira', el.querySelector('#busca').value); desenhar(); });
@@ -67,11 +69,62 @@
         }
       });
     }
-    lista.addEventListener('click', (ev) => {
+    lista.addEventListener('click', async (ev) => {
       const b = ev.target.closest('[data-editar]');
-      if (b) formulario(empresas.find((e) => String(e.codigo) === b.getAttribute('data-editar')));
+      if (b) { formulario(empresas.find((e) => String(e.codigo) === b.getAttribute('data-editar'))); return; }
+      const x = ev.target.closest('[data-excluir]');
+      if (x) { const apagou = await excluirEmpresa(empresas.find((e) => String(e.codigo) === x.getAttribute('data-excluir'))); if (apagou) { empresas = await app().armazenamento.empresas(); app().empresas = empresas; desenhar(); } }
     });
     desenhar();
+  }
+
+  // ------------------------------------------------------------------
+  // EXCLUIR EMPRESA (Dony, 24/09/2026: "eu quero poder excluir empresa também"). Apaga a pasta dela inteira —
+  // arquivos, conciliações e histórico —, então: mostra o que vai sumir, oferece o backup antes e só libera o
+  // botão depois de digitar o código da empresa. Não tem como desfazer.
+  // ------------------------------------------------------------------
+  async function excluirEmpresa(empresa) {
+    if (!empresa) return false;
+    const arm = app().armazenamento;
+    const codigo = String(empresa.codigo);
+    let arqs = [], concs = [];
+    try { arqs = await arm.arquivos(codigo); concs = await arm.conciliacoes(codigo); } catch (x) { /* empresa sem pasta */ }
+    const temDados = arqs.length || concs.length;
+    const confirmado = await T.janela({
+      titulo: 'Excluir a empresa ' + codigo + '?',
+      corpo: '<p style="line-height:1.6">Vai sumir <b>tudo</b> desta empresa, sem como desfazer:</p>' +
+        '<ul class="pequeno" style="margin:8px 0 12px 18px"><li><b>' + T.esc(empresa.nome || '') + '</b> (código ' + T.esc(codigo) + ')</li>' +
+        '<li><b>' + arqs.length + '</b> arquivo(s) guardado(s)</li><li><b>' + concs.length + '</b> conciliação(ões) e as decisões delas</li>' +
+        '<li>o histórico do que foi feito nesta empresa</li></ul>' +
+        (temDados ? '<div class="aviso ambar" style="margin:0 0 12px"><span class="icone-aviso">💾</span><div><b>Faça um backup antes.</b> ' +
+          'O backup é um arquivo só, que dá para importar depois nesta ou em outra máquina. <button type="button" class="botao pequeno" id="bt-backup-antes">⬇ Gerar o backup agora</button></div></div>' : '') +
+        '<div class="campo"><label for="f-apagar">Para confirmar, digite o código da empresa (<b>' + T.esc(codigo) + '</b>)</label>' +
+        '<input id="f-apagar" autocomplete="off" autofocus placeholder="' + T.esc(codigo) + '"></div><div id="f-apagar-erro"></div>',
+      botoes: [{ texto: 'Cancelar', valor: null }, {
+        texto: '🗑 Excluir a empresa', tipo: 'perigo',
+        antes: (j) => {
+          const digitado = j.querySelector('#f-apagar').value.trim();
+          if (digitado !== codigo) {
+            j.querySelector('#f-apagar-erro').innerHTML = '<div class="aviso vermelho" style="margin-top:10px">Digite <b>' + T.esc(codigo) + '</b> para confirmar.</div>';
+            return false;
+          }
+          return true;
+        },
+      }],
+      aoAbrir: (j) => {
+        const bt = j.querySelector('#bt-backup-antes');
+        if (bt) bt.addEventListener('click', async () => { bt.disabled = true; try { await raiz.TelaBackup.baixarBackup(codigo); } catch (x) { T.avisoRapido(T.mensagemDeErro(x), 'erro'); } bt.disabled = false; });
+      },
+    });
+    if (!confirmado) return false;
+    try {
+      const r = await arm.apagarEmpresa(codigo, { comTudo: true });
+      T.avisoRapido('Empresa ' + codigo + ' excluída' + (r && r.arquivos ? ' com ' + r.arquivos + ' arquivo(s) e ' + r.conciliacoes + ' conciliação(ões)' : '') + '.', 'ok', 7000);
+      return true;
+    } catch (x) {
+      T.avisoRapido('Não deu para excluir: ' + T.mensagemDeErro(x), 'erro', 9000);
+      return false;
+    }
   }
 
   async function formulario(empresa) {
