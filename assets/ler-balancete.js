@@ -310,6 +310,7 @@
   }
 
   const MESES_LONGOS = ['janeiro', 'fevereiro', 'marco', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'];
+  const MESES_EN = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
   // Empresa, CNPJ e período escritos acima das contas. Também no desenho em que o rótulo fica numa célula e
   // o valor na seguinte ("Empresa | NOME DA EMPRESA", "CNPJ: | 00.000…", "Ano: | 2026") e o mês vem por extenso
   // ("Balancete - Julho").
@@ -323,10 +324,18 @@
         if (!t) return;
         const s = Util.semAcento(t).toLowerCase().replace(/[:.]+$/, '').trim();
         if (/^c\.?n\.?p\.?j\.?(\s*\(mf\))?$/.test(s)) { const d = Util.soDigitos(seguinte(k)); if (d.length === 14 && !r.cnpj) r.cnpj = d; }
-        if (/^(empresa|razao social|nome da empresa)$/.test(s) && !r.empresa) r.empresa = seguinte(k);
+        if (/^(empresa|razao social|nome da empresa|razao ou conjunto de razoes|estabelecimento|filial)$/.test(s) && !r.empresa) r.empresa = seguinte(k);
         if (/^(ano|exercicio)$/.test(s)) { const a = Number(seguinte(k)); if (a >= 2000 && a <= 2100) ano = a; }
         const m = MESES_LONGOS.indexOf(s);
         if (m >= 0) mesExtenso = m + 1;
+        // Mês em inglês abreviado, como o Oracle escreve o período contábil: "Aug-26", "Aug-2026" (Dony,
+        // 24/09/2026, o balancete do Centerlar: sem isso a competência só saía do nome do arquivo).
+        const mEn = s.match(/^(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*[-/. ]\s*(\d{2}|\d{4})$/);
+        if (mEn) {
+          mesExtenso = MESES_EN.indexOf(mEn[1]) + 1;
+          const a = Number(mEn[2]);
+          ano = a < 100 ? 2000 + a : a;
+        }
         const mAno = s.match(/^(janeiro|fevereiro|marco|abril|maio|junho|julho|agosto|setembro|outubro|novembro|dezembro)\s*(?:\/|de)?\s*(20\d{2})$/);
         if (mAno) { mesExtenso = MESES_LONGOS.indexOf(mAno[1]) + 1; ano = Number(mAno[2]); }
       });
@@ -340,7 +349,10 @@
         if (cnpj) { r.cnpj = Util.soDigitos(cnpj[1]); continue; }
         const rotulo = s.toLowerCase().replace(/[:.]+$/, '').trim();
         const ehRotulo = /^(empresa|razao social|nome da empresa|ano|exercicio|pag|pagina|folha|data|cnpj|c\.?n\.?p\.?j\.?(\s*\(mf\))?)$/.test(rotulo) || MESES_LONGOS.indexOf(rotulo) >= 0;
-        if (!r.empresa && !ehRotulo && !/emissao|pagina|folha|balancete|periodo|data:/i.test(s) && /[a-z]{3}/i.test(s)) r.empresa = t;
+        // O que é cabeçalho do relatório não é o nome da empresa ("Data do Relatório", "Parâmetros do
+        // Relatório", "Moeda do Razão"…): senão o programa mostra o rótulo no lugar do nome do cliente.
+        const ehCabecalhoDoRelatorio = /emissao|pagina|folha|balancete|periodo|data:|data do relatorio|relatorio de|parametros|moeda|tipo de (moeda|valor|saldo)|segmento|consolidado por|razao ou conjunto|conta natural/i.test(s);
+        if (!r.empresa && !ehRotulo && !ehCabecalhoDoRelatorio && /[a-z]{3}/i.test(s)) r.empresa = t;
       }
     }
     // Mês por extenso + ano ("Balancete - Julho" … "Ano: 2026"): o mês inteiro.
@@ -582,6 +594,19 @@
     if (escolha.como === 'conteudo') avisos.push('As colunas foram achadas pelo conteúdo (o cabeçalho do arquivo não tem os nomes conhecidos).');
 
     const info = topo(linhas, escolha.linhaCabecalho !== undefined ? escolha.linhaCabecalho : Math.max(0, primeiraConta));
+    // Empresa e período podem estar NUMA ABA SÓ DE PARÂMETROS, longe das contas (Dony, 24/09/2026, o balancete
+    // do Centerlar: a aba 1 traz "Período Contábil: Aug-26" e a aba 2, só as contas). Sem isso, a competência
+    // vinha só do nome do arquivo — e sumia se o arquivo fosse renomeado.
+    if (!info.periodo || !info.empresa) {
+      for (const outra of abas || []) {
+        if (!outra || outra === abas[escolha.aba] || !(outra.linhas || []).length) continue;
+        const t = topo(outra.linhas, Math.min(outra.linhas.length, 40));
+        if (!info.periodo && t.periodo) info.periodo = t.periodo;
+        if (!info.empresa && t.empresa) info.empresa = t.empresa;
+        if (!info.cnpj && t.cnpj) info.cnpj = t.cnpj;
+        if (info.periodo && info.empresa) break;
+      }
+    }
     let periodo = info.periodo;
     if (!periodo && opcoes && opcoes.nomeArquivo) {
       // Sem período no conteúdo: tenta o mês pelo nome ("Balancete_07_2026", "jan_26").

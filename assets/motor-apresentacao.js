@@ -93,28 +93,28 @@
   // bruta" é dedução, não receita; "outras receitas não operacionais" é resultado não operacional; "custo dos
   // serviços" é custo, não serviço contratado). Nomes sem acento, em maiúsculas, pontuação vira espaço.
   const REGRAS_NOME = [
-    ['fora', /LUCROS? ?\/? ?(E |OU )?PREJUIZOS?|PREJUIZO DO EXERCICIO|APURACAO DO RESULTADO|RESULTADO DO EXERCICIO|ENCERRAMENTO DO EXERCICIO/],
+    ['fora', /LUCROS? ?\/? ?(E |OU )?PREJUIZOS?|PREJUIZO DO EXERCICIO|APURACAO DO RESULTADO|RESULTADO DO EXERCICIO|ENCERRAMENTO DO EXERCICIO|TRANSITORIA/],
     ['tributos', /IMPOSTO DE RENDA|\bIRPJ\b|\bCSLL\b|CONTRIBUICAO SOCIAL|TRIBUT\w* SOBRE O LUCRO|PROVISO(ES|AO) (S\/ ?|SOBRE )(O )?(RESULTADO|LUCRO)|PROV\w* (P\/ ?|PARA )(O )?(IR\b|IMPOSTOS?)/],
     ['investimentos', /NAO OPERACIONA|GANHOS? (DE|NA) CAPITAL|PERDAS? DE CAPITAL|VENDA D[OE] (ATIVO )?IMOBILIZADO|ALIENACAO D|BAIXA D[OE] (ATIVO )?IMOBILIZADO|PARTIC\w* SOCIETARIA|EQUIVALENCIA PATRIMONIAL|RESULTADOS? D[EO] INVESTIMENTO/],
-    ['receitasFinanceiras', /RECEITAS? FINANCEIRA|RENDIMENTOS? (DE |S\/ ?)?APLICAC|JUROS (RECEBIDOS|ATIVOS|AUFERIDOS)|DESCONTOS? OBTIDOS?|VARIAC\w* (CAMBIA\w*|MONETARIA\w*) ATIVA/],
-    ['despesasFinanceiras', /DESPESAS? FINANCEIRA|ENCARGOS FINANCEIROS|JUROS (PAGOS|PASSIVOS|INCORRIDOS|S\/ ?EMPRESTIMO|S\/ ?FINANCIAMENTO|DE MORA)|DESPESAS BANCARIAS|TARIFAS? BANCARIA|\bIOF\b|DESCONTOS? CONCEDIDOS?|VARIAC\w* (CAMBIA\w*|MONETARIA\w*) PASSIVA/],
+    ['receitasFinanceiras', /RECEITAS? FINANCEIRA|RENDIMENTOS? (DE |S\/ ?)?APLICAC|JUROS (RECEBIDOS|ATIVOS|AUFERIDOS)|DESCONTOS? OBTIDOS?|VARIAC\w* (CAMBIA\w*|MONETARIA\w*) ATIVA|AJUSTE DE MOEDA ESTRANGEIRA/],
+    ['despesasFinanceiras', /DESPESAS? FINANCEIRA|ENCARGOS FINANCEIROS|ENCARGOS (S\/ ?|SOBRE )(EMPRESTIMO|FINANCIAMENTO)|JUROS (PAGOS|PASSIVOS|INCORRIDOS|S\/ ?EMPRESTIMO|S\/ ?FINANCIAMENTO|DE MORA|SOBRE CAPITAL PROPRIO)|DESPESAS BANCARIAS|TARIFAS? BANCARIA|\bIOF\b|\bIOC\b|DESCONTOS? CONCEDIDOS?|VARIAC\w* (CAMBIA\w*|MONETARIA\w*) PASSIVA/],
     ['deducoes', /DEDUC|\bDED\b|DEVOLUC\w* (DE |S\/ ?)?VENDA|VENDAS? CANCELAD|CANCELAMENTO|ABATIMENTO|IMPOSTOS? (INCIDENTES )?(S\/ ?|SOBRE )(AS )?(VENDA|RECEITA|FATURAMENTO)|TRIBUTOS? (INCIDENTES )?(S\/ ?|SOBRE )(A )?(RECEITA|VENDA)|SIMPLES NACIONAL/],
     ['perdas', /AVARIA|PERDAS? (DE |COM |NO |NOS |EM )?(ESTOQUE|PRODUTO|MERCADORIA)|EXTRAVIO|QUEBRAS?\b|CONSUMO (DE PRODUTOS|PROPRIO)/],
     ['cmv', /\bCUSTOS?\b|\bCMV\b|\bCPV\b|\bCSP\b/],
-    ['outrasReceitas', /OUTRAS RECEITAS|RECEITAS? (DIVERSAS|EVENTUA)|RECUP\w* (DE )?DESP|RECEITAS? (DE|COM) ALUGUE|ALUGUEIS RECEBIDOS|BONIFICAC\w* RECEBIDA/],
-    ['receitaBruta', /RECEITA (OPERACIONAL )?BRUTA|\bVENDAS?\b|FATURAMENTO|\bREC SERV|RECEITAS? (DE |COM |C\/ ?)(VENDA|SERVICO|PRESTACAO|MERCADORIA|PRODUTO|LOCACAO|REVENDA)|PRESTACAO DE SERVICO/, /DESPES|CUSTO|COMISS|FRETE|PROMOC/],
+    ['outrasReceitas', /OUTRAS RECEITAS|RECEITAS? (DIVERSAS|EVENTUA)|RECUP\w* (DE )?DESP|RECEITAS? (DE|COM) ALUGUE|ALUGUEIS RECEBIDOS|BONIFICAC\w* (RECEBIDA|OBTIDA)|RECEITAS? (DE |COM |DA )?(BONIFICAC|ACORDOS? COMERCIA|SUCATA|COBRANCAS? DE TERCEIRO|RECUPERACAO)|\bSUCATA\b|SOBRAS? DE CAIXA|ACORDOS? COMERCIAI|RECUPERACAO (JUDICIAL|DE (DESPESA|CUSTO|TRIBUTO))/],
+    ['receitaBruta', /RECEITA (OPERACIONAL )?BRUTA|\bVENDAS?\b|\bREVENDAS?\b|FATURAMENTO|\bREC SERV|RECEITAS? (DE |COM |C\/ ?)(VENDA|SERVICO|PRESTACAO|MERCADORIA|PRODUTO|LOCACAO|REVENDA)|PRESTACAO DE SERVICO|MERCADO (NACIONAL|INTERNO|EXTERNO)/, /DESPES|CUSTO|COMISS|FRETE|PROMOC/],
     ['depreciacao', /DEPREC|AMORTIZ|EXAUST/],
-    ['provisoes', /PROVIS|\bPDD\b|\bPCLD\b|LIQUIDACAO DUVIDOSA|INCOBRAVE|PERDAS? (COM |DE |EM )(CREDITO|CLIENTE|RECEBIVE)|CONTINGENC|CONTIGENC/],
-    ['comerciais', /COMISS|TAXAS? (DE |S\/ ?)?(ADMINISTRACAO DE )?CART|TARIFAS? (DE |S\/ ?)?CART|ANTECIPACAO DE RECEBIVE|MARKETPLACE|ROYALT|FRANQUIA|COMERCIAIS VARIAVE|DESPESAS? COM VENDAS|REPRESENTANTES/],
-    ['propaganda', /PROPAGANDA|PUBLICIDADE|PUPLICIDADE|MARKETING|PROMOC|ANUNCIO|PATROCINIO|FEIRAS|BRINDES|\bPROP E P/],
+    ['provisoes', /PROVIS|\bPDD\b|\bPCLD\b|LIQUIDACAO DUVIDOSA|INCOBRAVE|PERDAS? (COM |DE |EM )(CREDITO|CLIENTE|RECEBIVE)|PERDAS? ESTIMADA|CONTINGENC|CONTIGENC/],
+    ['comerciais', /COMISS|TAXAS? (DE |S\/ ?)?(ADMINISTRACAO DE )?CART|TARIFAS? (DE |S\/ ?)?CART|ANTECIPACAO DE RECEBIVE|MARKETPLACE|ROYALT|FRANQUIA|COMERCIAIS VARIAVE|DESPESAS? COM VENDAS|REPRESENTANTES|BONIFICAC\w* CONCEDIDA/],
+    ['propaganda', /PROPAGANDA|PUBLICIDADE|PUPLICIDADE|MARKETING|PROMOC|ANUNCIO|PATROCINIO|FEIRAS|BRINDES|\bPROP E P|\bMIDIA\b|RADIO E TV|ACOES E EVENTOS/],
     ['servicos', /SERVIC(?!OS? PUBLICOS)|\bSERV\b|HONORAR|\bHONOR\b|ASSESSORIA|CONSULTORIA|AUDITORIA|TERCEIRIZ|PESSOA JURIDICA|PESSOA FISICA|\bPJ\b|ADVOC|CONTABE|CONTABI|SISTEMAS?\b|SOFTWARE|LICENCA DE USO|TECNOLOGIA|INFORMATICA|PROCESSAMENTO DE DADOS/],
-    ['pessoal', /PESSOAL|SALARI|ORDENADO|ENCARGOS SOCIA|\bINSS\b|\bFGTS\b|FERIAS|DECIMO TERCEIRO|PRO LABORE|BENEFICIO|VALE (TRANSPORTE|REFEICAO|ALIMENTACAO)|ASSISTENCIA MEDICA|PLANO DE SAUDE|SAUDE OCUPACIONAL|DIRIGENTE|REMUNERAC|RESCIS|HORAS EXTRAS|GRATIFICAC|TREINAMENTO|UNIFORME|ESTAGIA|APRENDIZ|BOLSA AUXILIO|ALIMENTACAO DO TRABALHADOR/],
+    ['pessoal', /PESSOAL|SALARI|ORDENADO|ENCARGOS SOCIA|\bINSS\b|\bFGTS\b|FERIAS|DECIMO TERCEIRO|\b13\b|PRO LABORE|BENEFICIO|VALE (TRANSPORTE|REFEICAO|ALIMENTACAO)|ASSISTENCIA (MEDICA|ODONTO)|PLANO DE SAUDE|SAUDE OCUPACIONAL|DIRIGENTE|REMUNERAC|RESCIS|HORAS EXTRAS|GRATIFICAC|TREINAMENTO|UNIFORME|ESTAGIA|APRENDIZ|BOLSA AUXILIO|ALIMENTACAO DO TRABALHADOR|REFEIC|REFEITORIO|\bPAT\b|AUXILIO (FARMACIA|MEDICAMENTO|CRECHE|FUNERAL)|FARMACIA E MEDICAMENTO|LAUDOS? E ATESTADO|ADICIONAL NOTURNO|INSALUBRIDADE|PERICULOSIDADE|CONFRATERNIZAC/],
     ['utilidades', /UTILIDADE|SERVICOS? PUBLICOS|ENERGIA|\bAGUA\b|ESGOTO|TELEFON|TELECOM|INTERNET|COMUNICAC|CORREIO|CONTAS DE CONSUMO|\bGAS\b|\bLUZ\b|\bFAX\b/],
     ['ocupacao', /OCUPACAO|ALUGUE|CONDOMINIO|LOCACAO DE (IMOVE|SALA|GALPAO|LOJA|PREDIO)|SEGURANCA|VIGILANCIA|LIMPEZA E CONSERVACAO|MANUTENCAO PREDIAL/],
     ['viagens', /VIAGE|HOSPEDAG|PASSAGE|ESTADIA|REPRESENTACAO|\bREPRES\b|VEICULO|COMBUSTIV|PEDAGIO|ESTACIONAMENTO|LOCOMOCAO|CONDUCAO|\bTAXI|QUILOMETRAG|DIARIAS/],
     ['logistica', /FRETE|TRANSPORTE|ENTREGA|LOGISTIC|CARRETO|ARMAZENAG|MOTOBOY|EXPEDICAO/],
     ['tributarias', /TRIBUTAR|IMPOSTOS? E TAXAS|\bTAXAS?\b|EMOLUMENTO|\bIPTU\b|\bIPVA\b|ALVARA|CONTRIBUIC\w* SINDIC|TRIBUTOS (MUNICIPAIS|ESTADUAIS|FEDERAIS)|MULTAS? FISCA/],
-    ['gerais', /GERAIS|DIVERSA|DIVERSOS|MATERIA\w* (DE )?(EXPEDIENTE|ESCRITORIO|LIMPEZA|CONSUMO|USO)|USO E CONSUMO|\bCOPA\b|CARTOR|DOACO|MULTAS|INDEDUT|NAO DEDUTIVE|SINISTRO|SEGUROS?\b|ASSINATURA|MANUT|REPARO|CONSERVACAO|ASSOCIAC|ARRENDAMENTO|LEASING|MARCAS E PATENTES|APROPRIAC|DIRETORIA|OUTRAS DESPESAS/],
+    ['gerais', /GERAIS|DIVERSA|DIVERSOS|MATERIA\w* (DE )?(EXPEDIENTE|ESCRITORIO|LIMPEZA|CONSUMO|USO)|USO E CONSUMO|\bCOPA\b|CARTOR|DOACO|MULTAS|INDEDUT|NAO DEDUTIVE|SINISTRO|SEGUROS?\b|ASSINATURA|MANUT|REPARO|CONSERVACAO|ASSOCIAC|ARRENDAMENTO|LEASING|MARCAS E PATENTES|APROPRIAC|DIRETORIA|OUTRAS DESPESAS|HIGIENE|CONSULTA A ORGAOS? DE CREDITO|ORGAOS? DE (PROTECAO AO )?CREDITO/],
   ];
   // Contas-mãe que só juntam outras (o nome não diz a linha: decide nas de baixo).
   const GENERICO_RECEITA = /^RECEITAS?( OPERACIONA\w*| LIQUIDA\w*( OPERAC\w*)?| TOTA\w*)?$/;
@@ -141,7 +141,15 @@
 
   // A linha de cada conta de resultado pelos nomes. Map conta -> { linha, fonte }: 'nome' (o nome dela ou
   // de uma de cima disse), 'reserva' (o nome não diz: a linha que sobra no grupo, ex.: despesas gerais).
-  function linhasSugeridas(contas) {
+  // Linhas de receita e de despesa, para conferir a sugestão pelo LADO do movimento da conta.
+  const LINHA_DE_RECEITA = { receitaBruta: 1, outrasReceitas: 1, receitasFinanceiras: 1 };
+  // Tributo sobre a venda escrito sozinho no nome, com o (-) ou o (+) na frente ("(-) ICMS", "(+) ICMS ST
+  // Exclusão Estoque", "(-) Estorno de ICMS Perdas"): é dedução da receita, não despesa tributária.
+  const TRIBUTO_DE_VENDA = /^(ICMS|COFINS|PIS|PIS\/PASEP|ISS|ISSQN|IPI|DIFAL|SIMPLES|SUBSTITUICAO TRIBUTARIA)\b|^(ESTORNO|REVERSAO|EXCLUSAO|AJUSTE|CREDITO)( DE| D[AO])? (ICMS|COFINS|PIS|ISS|IPI)\b/;
+  function linhasSugeridas(contas, movimentoDe) {
+    // O movimento da conta no período (débitos − créditos): devedor > 0, credor < 0. Sem ele, a régua é só
+    // pelos nomes, como era antes.
+    const movDe = typeof movimentoDe === 'function' ? movimentoDe : () => null;
     const filhas = filhasPorMae(contas);
     const res = new Map();
     const reserva = (dica, n) => {
@@ -152,10 +160,31 @@
       return null;
     };
     const dicaDoNome = (n) => (/FINANCEIR/.test(n) ? 'fin' : /RECEITA/.test(n) && !/DESPESA|CUSTO/.test(n) ? 'receita' : /DESPESA|CUSTO|DESP\b/.test(n) ? 'despesa' : null);
+    // O nome diz "receita", mas a conta só teve DÉBITO no período? Então não é receita (Dony, 24/09/2026, o
+    // plano do Centerlar: "Prestação de Serviço Transporte de Valores" é despesa, não receita bruta). O lado
+    // do movimento manda; contas redutoras ("(-)", estorno, reversão) ficam como o nome diz.
+    function conferirPeloLado(c, linha, n) {
+      if (!LINHA_DE_RECEITA[linha] || !c.analitica) return linha;
+      const m = movDe(c.conta);
+      if (m === null || m === undefined || m <= 0) return linha;
+      // Redutoras da receita são devedoras de propósito e ficam onde estão: as marcadas com (-)/(+), os
+      // estornos e os TRIBUTOS SOBRE A RECEITA ("COFINS s/ receitas financeiras" reduz a receita financeira).
+      if (/\(\s*[-+]\s*\)/.test(String(c.titulo || '')) || /ESTORNO|REVERSAO|DEVOLUC|CANCELAD/.test(n)) return linha;
+      if (/(PIS|COFINS|ISS|ISSQN|ICMS|IPI|IRRF|IMPOSTOS?|TRIBUTOS?)\w*\s*(S\/ ?|SOBRE )/.test(n)) return linha;
+      const outras = linhasPeloNome(n).filter((l) => !LINHA_DE_RECEITA[l]);
+      return outras[0] || (linha === 'receitasFinanceiras' ? 'despesasFinanceiras' : reserva('despesa', n) || 'gerais');
+    }
     function visitar(c, herdada, dica) {
       const n = nomeNormal(c.titulo);
       const menos = /\(\s*-\s*\)/.test(String(c.titulo || ''));
+      const sinalado = /\(\s*[-+]\s*\)/.test(String(c.titulo || ''));
       const casadas = linhasPeloNome(n);
+      // "(-) ICMS", "(+) ICMS ST Exclusão Estoque": dedução da receita, mesmo sem a conta-mãe no arquivo.
+      if (sinalado && TRIBUTO_DE_VENDA.test(n) && (!herdada || herdada.linha !== 'tributos')) {
+        res.set(c.conta, { linha: 'deducoes', fonte: 'nome' });
+        (filhas.get(c.conta) || []).forEach((f) => visitar(f, { linha: 'deducoes', fonte: 'nome' }, null));
+        return;
+      }
       let decisao = null, novaDica = dica;
       if (herdada) {
         const h = herdada.linha;
@@ -179,6 +208,7 @@
         const l = reserva(dica || dicaDoNome(n), n);
         if (l) decisao = { linha: l, fonte: 'reserva' };
       } else novaDica = dicaDoNome(n) || dica;
+      if (decisao) decisao = { linha: conferirPeloLado(c, decisao.linha, n), fonte: decisao.fonte };
       if (decisao) res.set(c.conta, decisao);
       (filhas.get(c.conta) || []).forEach((f) => visitar(f, decisao, decisao ? null : novaDica));
     }
@@ -233,8 +263,8 @@
     }
     return null;
   }
-  function sugerirMapaDre(contas) {
-    const sug = linhasSugeridas(contas);
+  function sugerirMapaDre(contas, movimentoDe) {
+    const sug = linhasSugeridas(contas, movimentoDe);
     return compactarMapa(contas, (c) => { const s = sug.get(c.conta); return s ? s.linha : null; });
   }
   function mapaDoModelo(contas) { return compactarMapa(contas, (c) => linhaDoModelo(c.conta)); }
@@ -264,8 +294,8 @@
   // Os nomes batem com o modelo? Compara, conta analítica por conta analítica (pesando pelo movimento), a
   // linha do modelo com a que o nome indica. Serve só se discorda em no máximo 0,1% do movimento (quase nada: na dúvida, pergunta). Conta cujo nome
   // não diz nada fica de fora da comparação; sem nenhuma para comparar, não serve (pergunta a quem usa).
-  function avaliarModelo(contas, peso) {
-    const sug = linhasSugeridas(contas);
+  function avaliarModelo(contas, peso, movimentoDe) {
+    const sug = linhasSugeridas(contas, movimentoDe);
     let total = 0, contra = 0;
     const divergencias = [];
     for (const c of contas) {
@@ -327,7 +357,16 @@
   function anoDe(comp) { const p = Util.partesCompetencia(comp); return p ? p.ano : 0; }
   function rotuloMes(comp) { return NOMES_MES[mesDe(comp) - 1] + '/' + String(anoDe(comp)).slice(-2); }
   // A classe é o primeiro pedaço do código, sem o zero na frente ("01.1.1.01.001" é do ativo, como "1.1.1.01.001").
-  function classeDe(conta) { return String(conta).split('.')[0].replace(/^0+(?=\d)/, ''); }
+  // A CLASSE da conta (1 ativo, 2 passivo, 3 e 4 resultado…). Dois jeitos de código, e os dois têm que valer
+  // (Dony, 24/09/2026, o balancete do Centerlar: "contas com início 1 e 2 não entram em DRE mano"):
+  //   - em árvore, com pontos ("1.1.01.001" ou "01.01.001"): a classe é o primeiro pedaço;
+  //   - COLADO, sem pontos ("1010202001", o plano do Oracle): a classe é o primeiro dígito — senão a conta
+  //     inteira virava a "classe", nenhuma era patrimonial e o ativo e o passivo caíam dentro da DRE.
+  function classeDe(conta) {
+    const c = String(conta || '').trim().replace(/^0+(?=\d)/, '');
+    if (c.indexOf('.') >= 0) return c.split('.')[0].replace(/^0+(?=\d)/, '');
+    return c.charAt(0);
+  }
   function patrimonial(conta) { const c = classeDe(conta); return c === '1' || c === '2'; }
   // Ordem de conta: pedaço por pedaço, como número ("1.10" depois de "1.9").
   function compararContas(a, b) {
@@ -456,14 +495,16 @@
     // ---------- DRE: as linhas pelo mapa da empresa; sem mapa, pelo modelo (se os nomes batem) ou pela
     // sugestão pelos nomes (situação 'sugestao': a tela só mostra a DRE depois de quem usa conferir).
     const peso = (conta) => meses.reduce((s, m) => { const l = linhaDoMes(conta, m); return s + (l ? Math.abs(l.debitos - l.creditos) : 0); }, 0);
+    // O movimento com o lado (devedor > 0, credor < 0): a sugestão usa para não chamar de receita uma conta que só teve débito.
+    const movimentoNoAno = (conta) => meses.reduce((s, m) => { const l = linhaDoMes(conta, m); return s + (l ? l.debitos - l.creditos : 0); }, 0);
     // (rascunho: as linhas que quem usa está escolhendo, mesmo vazias — a prévia da tela)
     const mapaEmpresa = entrada.mapaDre && entrada.mapaDre.contas && (entrada.mapaDre.rascunho || Object.keys(entrada.mapaDre.contas).length) ? entrada.mapaDre : null;
     let situacaoDre, mapaUsado = null, avaliacao = null;
     if (mapaEmpresa) { situacaoDre = 'mapa'; mapaUsado = mapaEmpresa.contas; }
     else {
-      avaliacao = entrada.dreModo === 'modelo' ? { serve: true, forcado: true, divergencias: [] } : avaliarModelo(contas, peso);
+      avaliacao = entrada.dreModo === 'modelo' ? { serve: true, forcado: true, divergencias: [] } : avaliarModelo(contas, peso, movimentoNoAno);
       if (avaliacao.serve) situacaoDre = 'modelo';
-      else { situacaoDre = 'sugestao'; mapaUsado = sugerirMapaDre(contas); }
+      else { situacaoDre = 'sugestao'; mapaUsado = sugerirMapaDre(contas, movimentoNoAno); }
     }
     const rotulosDre = (mapaEmpresa && mapaEmpresa.rotulos) || {};
     const gruposComPrefixo = MODELO_DRE.filter((g) => g.prefixos);
@@ -884,9 +925,14 @@
     const ac = achar(filhas(ativo), /CIRCULANTE/, NAO_CIRC, '1.1');
     const anc = achar(filhas(ativo), /NAO CIRCULANTE/, null, '1.2');
     const pc = achar(filhas(passivo), /CIRCULANTE/, NAO_CIRC, '2.1');
+    // CAIXA E EQUIVALENTES: caixa, bancos e aplicações de liquidez imediata — TODAS as contas, não só uma
+    // (Dony, 24/09/2026: o fluxo de caixa da Hashimoto mostrava "(Aumento) redução de bancos conta movimento"
+    // dentro das atividades operacionais, o que é dupla contagem: banco É caixa). O grupo do plano dele se
+    // chama "DISPONIBILIDADES", que a régua antiga nem reconhecia ("DISPONIVE" não casa "DISPONIBILIDADES").
+    const caixa = contasDeCaixa(ac, filhas);
     return {
-      ativo, passivo, ac, anc, pc,
-      disponivel: acharFundo(ac, /DISPONIVE|CAIXA/, null, '1.1.1'),
+      ativo, passivo, ac, anc, pc, caixa,
+      disponivel: caixa[0] || acharFundo(ac, /DISPONIB|DISPONIVE|CAIXA/, null, '1.1.1'),
       clientes: acharFundo(ac, /CLIENTE|RECEBER/, /ADIANTAMENTO|ADTO/, '1.1.2'),
       estoques: acharFundo(ac, /ESTOQUE/, null, '1.1.4'),
       // No plano antigo o realizável a longo prazo fica direto no ativo ("ATIVO REAL. LONGO PRAZO").
@@ -894,6 +940,21 @@
       pnc: achar(filhas(passivo), NAO_CIRC, null, '2.2'),
       pl: achar(filhas(passivo), /PATRIMONIO/, null, '2.3'),
     };
+  }
+  // Caixa e equivalentes de caixa (CPC 03): o dinheiro, os bancos e as aplicações de liquidez imediata. Ficam de
+  // fora as aplicações presas (vinculadas, caucionadas, judiciais) — essas são direito, não caixa.
+  const EH_CAIXA = /DISPONIB|DISPONIVE|CAIXA|BANCOS?\b|EQUIVALENTE|NUMERARIO|APLICAC\w*( FINANCEIRA\w*)?( DE)? (LIQUIDEZ|IMEDIATA|CURTO PRAZO)|APLICACOES FINANCEIRAS/;
+  const NAO_E_CAIXA = /VINCULAD|CAUCIONAD|JUDICIAL|BLOQUEAD|RESTRIT|GARANTIA|LONGO PRAZO|NAO CIRCULANTE|CONSORCIO|A RECEBER|CARTAO|CARTOES/;
+  // A conta-mãe que já é caixa entra inteira (as de baixo não entram de novo); senão, procura nas de baixo.
+  function contasDeCaixa(ac, filhas) {
+    const achadas = [];
+    const olhar = (lista, fundo) => lista.forEach((c) => {
+      const n = nomeNormal(c.titulo);
+      if (EH_CAIXA.test(n) && !NAO_E_CAIXA.test(n)) { achadas.push(c); return; }
+      if (fundo > 0) olhar(filhas(c), fundo - 1);
+    });
+    olhar(filhas(ac), 2);
+    return achadas;
   }
   const NOMES_CONTAS_BALANCO = { ativo: 'Ativo total', ac: 'Ativo circulante', disponivel: 'Disponível', clientes: 'Clientes', estoques: 'Estoques', anc: 'Ativo não circulante',
     rlp: 'Realizável a longo prazo', pc: 'Passivo circulante', pnc: 'Passivo não circulante', pl: 'Patrimônio líquido (contábil)' };
@@ -1155,7 +1216,8 @@
     // ---------- Fluxo de caixa (método indireto) no período
     const cb = contasDoBalanco(rel.contas);
     let dfc = null;
-    if (!cb.ac || !cb.disponivel) avisos.push('Não achei o ' + (!cb.ac ? 'ativo circulante' : 'disponível (caixa e bancos)') + ' no plano de contas: sem ele não dá para montar o fluxo de caixa.');
+    const caixaContas = (cb.caixa || []).length ? cb.caixa : (cb.disponivel ? [cb.disponivel] : []);
+    if (!cb.ac || !caixaContas.length) avisos.push('Não achei o ' + (!cb.ac ? 'ativo circulante' : 'caixa e equivalentes (caixa, bancos e aplicações de liquidez imediata)') + ' no plano de contas: sem ele não dá para montar o fluxo de caixa.');
     else {
       const saldos = (rotulo, campo) => { const mapa = new Map(); rel.base.forEach((x) => { if (x.mes === rotulo) mapa.set(x.conta, x[campo]); }); return mapa; };
       const abertura = saldos(rel.meses[ini].rotulo, 'saldoAnterior'), fechamento = saldos(m.rotulo, 'saldoAtual');
@@ -1163,8 +1225,11 @@
       const porConta = new Map(rel.contas.map((c) => [c.conta, c]));
       const filhasDe = (c) => (c ? rel.contas.filter((x) => x.pai === c.conta) : []);
       const contem = (c, alvo) => { let x = alvo; while (x && x.pai) { if (x.pai === c.conta) return true; x = porConta.get(x.pai); } return false; };
-      // Os grupos de baixo de uma conta, abrindo o que contém o disponível (o disponível não entra: ele é o caixa).
-      const gruposSem = (pai, fora) => [].concat(...filhasDe(pai).map((c) => (c.conta === fora.conta ? [] : contem(c, fora) ? gruposSem(c, fora) : [c])));
+      // Os grupos de baixo de uma conta, abrindo o que contém alguma conta de CAIXA (o caixa não entra na
+      // variação do capital de giro: ele é o que a demonstração explica).
+      const ehCaixa = new Set(caixaContas.map((c) => c.conta));
+      const temCaixa = (c) => caixaContas.some((x) => contem(c, x));
+      const gruposSem = (pai) => [].concat(...filhasDe(pai).map((c) => (ehCaixa.has(c.conta) ? [] : temCaixa(c) ? gruposSem(c) : [c])));
       // Um grupo só, que se divide em várias contas: vão as de baixo (ex.: obrigações correntes > fornecedores, empréstimos...).
       const abrirUnico = (lista) => { let l = lista; while (l.length === 1 && filhasDe(l[0]).length >= 2) l = filhasDe(l[0]); return l; };
       const nome = (c) => nomeDaDemonstracao(c.titulo);
@@ -1175,7 +1240,7 @@
       const operacionais = [], investimentos = [], financiamentos = [];
       const linha = (lista, rotulo, valor, conta) => { lista.push({ rotulo, valor, conta: conta || null }); };
       // Ativo circulante (fora o disponível): operacional.
-      abrirUnico(gruposSem(cb.ac, cb.disponivel)).forEach((c) => linha(operacionais, '(Aumento) redução de ' + noMeioDaFrase(nome(c)), -delta(c), c.conta));
+      abrirUnico(gruposSem(cb.ac)).forEach((c) => linha(operacionais, '(Aumento) redução de ' + noMeioDaFrase(nome(c)), -delta(c), c.conta));
       // Passivo circulante: operacional, fora empréstimos, financiamentos e dividendos.
       abrirUnico(filhasDe(cb.pc)).forEach((c) => {
         const fin = DE_FINANCIAMENTO.test(nomeNormal(c.titulo));
@@ -1200,13 +1265,17 @@
       const tira0 = (lista) => lista.filter((l) => Math.round(l.valor));
       const totOp = lucro + depreciacao + soma(operacionais.map((l) => l.valor));
       const totInv = soma(investimentos.map((l) => l.valor)), totFin = soma(financiamentos.map((l) => l.valor));
-      const caixaInicio = abertura.get(cb.disponivel.conta) || 0, caixaFim = fechamento.get(cb.disponivel.conta) || 0;
+      const somaCaixa = (mapa) => caixaContas.reduce((t2, c) => t2 + (mapa.get(c.conta) || 0), 0);
+      const caixaInicio = somaCaixa(abertura), caixaFim = somaCaixa(fechamento);
       const aumento = totOp + totInv + totFin;
       const diferenca = caixaFim - caixaInicio - aumento;
       if (Math.abs(diferenca) > 1) avisos.push('O fluxo de caixa não fecha com o disponível por ' + Util.formatarCentavos(diferenca) + ' (o balancete de ' + m.rotulo + ' ou de ' + rel.meses[ini].rotulo + ' pode não estar fechando).');
       dfc = { lucro, depreciacao, operacionais: tira0(operacionais), investimentos: tira0(investimentos), financiamentos: tira0(financiamentos),
         totalOperacional: totOp, totalInvestimento: totInv, totalFinanciamento: totFin, aumento, caixaInicio, caixaFim, diferenca, confere: Math.abs(diferenca) <= 1,
-        dataInicio: dataDoFim(rel.meses[ini].mes === 1 ? ano - 1 : ano, rel.meses[ini].mes === 1 ? 12 : rel.meses[ini].mes - 1), disponivel: cb.disponivel.conta + ' ' + cb.disponivel.titulo };
+        dataInicio: dataDoFim(rel.meses[ini].mes === 1 ? ano - 1 : ano, rel.meses[ini].mes === 1 ? 12 : rel.meses[ini].mes - 1),
+        disponivel: caixaContas.map((c) => c.conta + ' ' + c.titulo).join(' · '),
+        // As contas que são caixa e equivalentes, com o saldo dos dois lados: dá para abrir na tela e conferir.
+        caixa: caixaContas.map((c) => ({ conta: c.conta, titulo: nomeDaDemonstracao(c.titulo), inicio: abertura.get(c.conta) || 0, fim: fechamento.get(c.conta) || 0 })) };
     }
     return {
       k, mes: m, data: dataDoFim(ano, m.mes), periodo, meses: ks, soMes: !!opc.soMes, falta, anterior: ant,
