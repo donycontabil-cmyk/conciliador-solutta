@@ -40,16 +40,17 @@
     { id: 'bp-assinatura', titulo: 'Balanço para assinatura' },
     { id: 'dre-assinatura', titulo: 'DRE para assinatura' },
     { id: 'dfc', titulo: 'Fluxo de caixa' },
+    { id: 'notas', titulo: 'Notas explicativas' },
   ];
   // As DREs num botão só (Dony, 22/09/2026: "como a gente já tem mais de 3 DREs, eu quero poder clicar em DRE e escolher:
   // DRE mensal, trimestral ou simulação"): na barra fica "DRE" e, com uma delas aberta, a escolha aparece embaixo.
   const GRUPO_DRE = ['dre-mensal', 'dre-trimestral', 'simulacao'];
   // Os relatórios num botão só (Dony, 22/09/2026: "você vai colocar assim: relatórios — o relatório do cliente, DRE para
   // assinatura, balanço para assinatura, e já cria também o fluxo de caixa"). Cada grupo lembra a última aba aberta.
-  const GRUPO_RELATORIOS = ['cliente', 'bp-assinatura', 'dre-assinatura', 'dfc'];
+  const GRUPO_RELATORIOS = ['cliente', 'bp-assinatura', 'dre-assinatura', 'dfc', 'notas'];
   const GRUPOS_DE_ABAS = [
     { id: 'dre', abas: GRUPO_DRE, rotulo: 'DRE', dica: 'DRE mensal, trimestral ou simulação', ultima: 'ultimaDre' },
-    { id: 'rel', abas: GRUPO_RELATORIOS, rotulo: '📄 Relatórios', dica: 'Relatório do cliente, balanço e DRE para assinatura e fluxo de caixa', ultima: 'ultimoRelatorio' },
+    { id: 'rel', abas: GRUPO_RELATORIOS, rotulo: '📄 Relatórios', dica: 'Relatório do cliente, balanço e DRE para assinatura, fluxo de caixa e notas explicativas', ultima: 'ultimoRelatorio' },
   ];
   const grupoDaAba = (id) => GRUPOS_DE_ABAS.find((g) => g.abas.indexOf(id) >= 0) || null;
   const REGRAS = { movimento: 'Movimento do mês (conta de resultado)', 'aumento-credor': 'Aumento do saldo credor (conta patrimonial)' };
@@ -231,7 +232,7 @@
       (E.anos.length > 1 ? '<select class="apres-campo" id="apres-ano" title="Ano do relatório (para subir os balancetes de outro ano, escolha o ano aqui)">' +
         E.anos.map((a) => '<option value="' + a + '"' + (a === E.ano ? ' selected' : '') + '>' + a + (E.anosComBalancete.indexOf(a) < 0 ? ' · sem balancete' : '') + '</option>').join('') + '</select>' : '') +
       raiz.TelaSubir.botao(chave) +
-      (semBalancete ? '' : '<button type="button" class="botao" data-aba-grupo="rel" title="O relatório do cliente, o balanço e a DRE para assinatura e o fluxo de caixa">📄 Relatórios</button>' +
+      (semBalancete ? '' : '<button type="button" class="botao" data-aba-grupo="rel" title="O relatório do cliente, o balanço e a DRE para assinatura, o fluxo de caixa e as notas explicativas">📄 Relatórios</button>' +
         '<button type="button" class="botao" id="apres-excel" title="As mesmas abas da planilha modelo">⬇ Excel</button>' +
         '<button type="button" class="botao primario" id="apres-imprimir" title="Na janela de impressão, escolha a impressora ou “Salvar como PDF”">🖨 Imprimir / PDF</button>') +
       '</div></div>' +
@@ -945,7 +946,13 @@
       const bpPapel = ev.target.closest('button[data-bp-papel]');
       if (bpPapel) { E.balancoPaisagem = bpPapel.getAttribute('data-bp-papel') === 'paisagem'; guardarPreferencias(); redesenharFolha(el); return; }
       const dc = ev.target.closest('button[data-dc]');
-      if (dc) { if (dc.getAttribute('data-dc') === 'assinaturas') await editarAssinaturas(el); else await imprimirDocumentos(el, DOCUMENTOS[E.aba]); return; }
+      if (dc) {
+        const q = dc.getAttribute('data-dc');
+        if (q === 'assinaturas') await editarAssinaturas(el);
+        else if (q === 'notas-extras') await editarNotasExtras(el);
+        else await imprimirDocumentos(el, DOCUMENTOS[E.aba]);
+        return;
+      }
       const nivel = ev.target.closest('[data-nivel]');
       if (nivel) { E.nivel = Number(nivel.getAttribute('data-nivel')); guardarPreferencias(); redesenharConteudo(el); return; }
       // Painel dos meses: um mês aparece ou some; os atalhos escolhem vários de uma vez.
@@ -1642,8 +1649,8 @@
   // nome e o CNPJ da empresa, a demonstração e, no fim, o local e a data e as linhas de assinatura do responsável e do
   // contador (guardados no cadastro da empresa: emp.assinaturas). As contas vêm do motor (demonstracoes).
   // ------------------------------------------------------------------
-  const DOCUMENTOS = { 'bp-assinatura': 'balanco', 'dre-assinatura': 'dre', dfc: 'dfc' };
-  const NOME_DOCUMENTO = { balanco: 'Balanço patrimonial', dre: 'DRE', dfc: 'Fluxo de caixa' };
+  const DOCUMENTOS = { 'bp-assinatura': 'balanco', 'dre-assinatura': 'dre', dfc: 'dfc', notas: 'notas' };
+  const NOME_DOCUMENTO = { balanco: 'Balanço patrimonial', dre: 'DRE', dfc: 'Fluxo de caixa', notas: 'Notas explicativas' };
   const CHAVE_CONTADOR = 'conciliador-solutta.contador';
   function mesDaAssinatura() {
     const ms = E.rel.meses.filter((m) => m.tem);
@@ -1654,6 +1661,12 @@
     if (k < 0) return null;
     const comparar = !!E.assinaturaComparar && E.balancetesAnt.length > 0;
     return motor().demonstracoes(E.rel, comparar ? relAnterior() : null, { k, soMes: !!E.assinaturaSoMes, comparar });
+  }
+  // As notas explicativas do mês escolhido (com a coluna do mês anterior, como no modelo do escritório).
+  function notasVisiveis() {
+    const k = E.rel.meses.findIndex((m) => m.comp === mesDaAssinatura());
+    if (k < 0) return null;
+    return motor().notasExplicativas(E.rel, { k, empresa: E.emp });
   }
   // "31/08/2026" → "31 de agosto de 2026".
   function dataPorExtenso(br) {
@@ -1724,6 +1737,35 @@
         if (l.categoria !== categoria) { categoria = l.categoria; if (!SEM_FAIXA[categoria]) faixa = secaoDoc(categoria); }
         return faixa + linha(l.tipo !== 'total' ? 'dem-conta' : l.id === 'lucroLiquido' ? 'dem-total' : 'dem-subtotal', l.rotulo, l) + contasDaLinha(l);
       }).join('');
+    } else if (qual === 'notas') {
+      // NOTAS EXPLICATIVAS (Dony, 24/09/2026, com o modelo de um escritório): o contexto da empresa, como o
+      // balanço foi preparado, as práticas contábeis e a abertura de cada grupo do balanço nas contas.
+      const nx = notasVisiveis();
+      titulo = 'Notas explicativas';
+      sub = 'Às demonstrações contábeis de ' + (nx ? nx.mes.rotulo : '') + ' · ' + valores;
+      cab = '';
+      const colunas = (nx && nx.colunas) || [];
+      const cabNotas = '<tr><th>&nbsp;</th>' + colunas.map((c) => '<th class="num">' + T.esc(c) + '</th>').join('') + '</tr>';
+      corpo = '';
+      const linhaNota = (l) => '<tr class="dem-conta' + (l.destaque ? ' dem-nota-destaque' : '') + '"><td>' + (l.conta ? '' : '') + T.esc(l.titulo) + '</td>' +
+        l.valores.map((v) => '<td class="num">' + dinheiro(v) + '</td>').join('') + '</tr>';
+      const blocos = (nx ? nx.notas : []).map((nota) => '<div class="dem-nota-bloco"><h3>' + nota.n + '. ' + T.esc(nota.titulo) + '</h3>' +
+        (nota.textos || []).map((x) => '<p>' + T.esc(x) + '</p>').join('') +
+        (nota.linhas && nota.linhas.length ? '<table class="dem-tabela"><thead>' + cabNotas + '</thead><tbody>' +
+          nota.linhas.map(linhaNota).join('') +
+          '<tr class="dem-subtotal"><td>TOTAL</td>' + (nota.total || []).map((v) => '<td class="num">' + dinheiro(v) + '</td>').join('') + '</tr></tbody></table>' : '') +
+        '</div>').join('');
+      const escrita = (E.emp.notasExtras || '').trim();
+      const extra = escrita || editavel
+        ? '<div class="dem-nota-bloco"><h3>' + ((nx ? nx.notas.length : 0) + 1) + '. Outras informações</h3>' +
+          (escrita ? escrita.split(/\n+/).map((x) => '<p>' + T.esc(x) + '</p>').join('') : '<p class="dem-vazio nao-imprimir">Sem nada escrito aqui. Clique em <b>✎ Escrever</b> para acrescentar uma nota sua (fica guardada na empresa).</p>') +
+          '</div>'
+        : '';
+      return '<div class="dem dem-pagina"><div class="dem-cab"><div class="dem-empresa">' + T.esc(emp.nome) + '</div>' +
+        (emp.cnpj ? '<div class="dem-cnpj">CNPJ ' + T.esc(U.formatarCnpj(emp.cnpj)) + '</div>' : '') +
+        '<h2>' + T.esc(titulo) + '</h2><div class="dem-sub">' + T.esc(sub) + '</div></div>' +
+        '<div class="dem-notas">' + (blocos || '<p class="suave">Carregue o balancete do mês para montar as notas.</p>') + extra + '</div>' +
+        blocoAssinaturas(editavel) + '</div>';
     } else {
       const f = d.dfc;
       titulo = 'Demonstração dos fluxos de caixa — método indireto';
@@ -1763,7 +1805,9 @@
     return '<div class="rc-barra nao-imprimir">' +
       '<label>' + (qual === 'balanco' ? 'Balanço no fim de' : 'Até o fim de') + ' <select class="apres-campo" id="dc-mes">' +
       ms.map((m) => '<option value="' + m.comp + '"' + (m.comp === comp ? ' selected' : '') + '>' + T.esc(m.rotulo) + '</option>').join('') + '</select></label>' +
-      (qual === 'balanco'
+      (qual === 'notas'
+        ? '<button type="button" class="botao pequeno" data-dc="notas-extras" title="Acrescentar uma nota escrita por você no fim (fica guardada na empresa)">✎ Escrever</button>'
+        : qual === 'balanco'
         ? nivelSeg('Mostrar até o nível', 'data-dc-nivel', E.assinaturaNivel, 'No balanço: 1 = ativo e passivo · 2 = circulante e não circulante · 3 = as contas de cada grupo · 4 e 5 = as de baixo delas') +
           '<span class="grupo-seg"><span class="seg-rotulo">Modelo</span>' + seg(!E.balancoLado, 'data-bp-modelo="lista"', 'Em lista', 'Ativo em cima, passivo embaixo') +
           seg(!!E.balancoLado, 'data-bp-modelo="lado"', 'Lado a lado', 'Ativo à esquerda, passivo e patrimônio líquido à direita') + '</span>' +
@@ -1796,6 +1840,21 @@
       '<div class="rc-previa">' + paginaDocumento(qual, d, true) + '</div>';
   }
   // ✎ Assinaturas: o local e quem assina (o responsável pela empresa e o contador), guardados no cadastro da empresa.
+  // A nota escrita por quem usa, no fim das notas explicativas (fica guardada na empresa e vale para todos os
+  // meses, até ele mudar).
+  async function editarNotasExtras(el) {
+    const atual = E.emp.notasExtras || '';
+    const r = await T.janela({
+      titulo: 'Outras informações (nota escrita por você)', naoFecharFora: true,
+      corpo: '<p class="suave pequeno" style="margin:0 0 8px">Entra como a última nota explicativa, depois das que o programa monta do balancete. ' +
+        'Serve para o que o balancete não diz: processos, garantias dadas, eventos depois do balanço, mudanças no quadro societário…</p>' +
+        '<textarea id="nx-texto" class="apres-campo" rows="9" style="width:100%" maxlength="4000" placeholder="Escreva aqui. Uma linha em branco separa os parágrafos.">' + T.esc(atual) + '</textarea>',
+      botoes: [{ texto: 'Cancelar', valor: null }, { texto: 'Guardar', tipo: 'primario', antes: (j) => ({ texto: j.querySelector('#nx-texto').value.trim() }) }],
+    });
+    if (!r) return;
+    if (await salvarEmpresaCliente({ notasExtras: r.texto }, r.texto ? 'Nota guardada na empresa.' : 'Nota apagada.')) redesenharFolha(el);
+  }
+
   async function editarAssinaturas(el) {
     const a = E.emp.assinaturas || {};
     let contadorLembrado = {};
@@ -1826,7 +1885,7 @@
     const escolha = await T.janela({
       titulo: 'Imprimir ou salvar em PDF',
       corpo: '<p class="suave pequeno" style="margin:0 0 8px">Cada demonstração sai numa folha A4 em pé, com as linhas de assinatura. Data: ' + T.esc(qual === 'balanco' ? d.data : d.periodo.de + ' a ' + d.periodo.ate) + '.</p>' +
-        ['balanco', 'dre', 'dfc'].map((q) => '<label class="item-aba"><input type="checkbox" value="' + q + '"' + (q === qual ? ' checked' : '') + (q === 'dfc' && !d.dfc ? ' disabled' : '') + '> ' +
+        ['balanco', 'dre', 'dfc', 'notas'].map((q) => '<label class="item-aba"><input type="checkbox" value="' + q + '"' + (q === qual ? ' checked' : '') + (q === 'dfc' && !d.dfc ? ' disabled' : '') + '> ' +
           NOME_DOCUMENTO[q] + (q === 'dfc' && !d.dfc ? ' (não dá para montar: veja o aviso na aba)' : '') + '</label>').join(''),
       botoes: [{ texto: 'Cancelar', valor: null }, { texto: '🖨 Imprimir', tipo: 'primario', antes: (j) => {
         const lista = Array.from(j.querySelectorAll('input[type=checkbox]:checked')).map((x) => x.value);

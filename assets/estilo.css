@@ -1094,3 +1094,13 @@ table.rc-tabela-contas { font-size: 7.6pt; }
   body.imprimindo-demonstracao .dem-pagina.dem-deitada { page: deitada; }
   .dem-duas-colunas { gap: 8mm; }
 }
+
+/* ---------- Notas explicativas: blocos numerados, texto justificado e as tabelas de abertura ---------- */
+.dem-notas { text-align: left; }
+.dem-nota-bloco { margin: 0 0 6mm; break-inside: avoid; }
+.dem-nota-bloco h3 { font-size: 10pt; font-weight: 700; margin: 0 0 2mm; color: #111; }
+.dem-nota-bloco p { margin: 0 0 2mm; text-align: justify; line-height: 1.45; }
+.dem-nota-bloco .dem-tabela { margin: 3mm 0 0; }
+.dem-nota-bloco .dem-tabela td:first-child { padding-left: 4mm; }
+.dem-tabela tr.dem-nota-destaque td { font-style: italic; }
+.dem-vazio { color: var(--texto-suave); font-style: italic; }

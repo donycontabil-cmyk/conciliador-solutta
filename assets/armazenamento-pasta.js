@@ -524,6 +524,10 @@
       if (typeof cor === 'string' && /^#[0-9a-fA-F]{6}$/.test(cor)) registro.corRelatorio = cor.toLowerCase();
       const assinaturas = limparAssinaturas(empresa.assinaturas !== undefined ? empresa.assinaturas : (anterior && anterior.assinaturas));
       if (assinaturas) registro.assinaturas = assinaturas;
+      // A nota escrita por quem usa, no fim das notas explicativas (Dony, 24/09/2026): texto puro, até 4.000
+      // letras. Sem o campo na chamada, fica o que já estava; vazio tira.
+      const notasExtras = empresa.notasExtras !== undefined ? empresa.notasExtras : (anterior && anterior.notasExtras);
+      if (typeof notasExtras === 'string' && notasExtras.trim()) registro.notasExtras = notasExtras.slice(0, 4000);
       if (i >= 0) lista[i] = registro; else lista.push(registro);
       await gravar(raiz, 'empresas.json', JSON.stringify(lista, null, 2));
       await pastaDaEmpresa(codigo, true);

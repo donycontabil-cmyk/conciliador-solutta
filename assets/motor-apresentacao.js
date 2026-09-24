@@ -1630,6 +1630,144 @@
   }
 
 
-  return { montar, compararBalancetes, indicadores, comparativo, simulacao, lalurSimulacao, demonstracoes, nomeDaDemonstracao, noMeioDaFrase, INDICADORES, contasDoBalanco, MODELO_DRE, FORA_DA_DRE, PARAMETROS, AJUSTES_MODELO, CONTA_PAT_MODELO, PREMISSAS, rotuloMes, compararContas, valorUsado,
+  // ------------------------------------------------------------------
+  // NOTAS EXPLICATIVAS (Dony, 24/09/2026, com o modelo de um escritório na mão: "eu quero que você monte um
+  // relatório estilo notas explicativas lá dentro do nosso sistema"). São as notas que acompanham as
+  // demonstrações: o contexto da empresa, como o balanço foi preparado, as práticas contábeis e, para cada
+  // grupo do balanço com saldo, o texto do que aquilo é e a abertura nas contas, no mês e no mês anterior.
+  // Tudo sai do balancete e do cadastro da empresa — nada é inventado.
+  // ------------------------------------------------------------------
+  // [o que o nome casa, título da nota, texto, lado ('A' só no ativo, 'P' só no passivo, vazio = qualquer)].
+  // O lado importa: "empréstimos" no ativo é direito a receber; no passivo, obrigação com o banco.
+  const TEXTO_DA_NOTA = [
+    [/DISPONIB|CAIXA|BANCO|EQUIVALENTE/, 'Caixa e equivalentes de caixa',
+      'Compreende o dinheiro em caixa, os saldos em conta corrente e as aplicações financeiras de liquidez imediata, conversíveis em caixa sem perda de valor.', 'A'],
+    [/CARTAO|CARTOES/, 'Cartões de crédito', 'Vendas com cartão já realizadas e ainda não repassadas pela administradora.', 'A'],
+    [/DEDUC\w* DOS DIREITOS|PERDAS? ESTIMADA|\bPDD\b|\bPECLD\b|LIQUIDACAO DUVIDOSA/, 'Perdas estimadas em créditos',
+      'Estimativa de perda com créditos de liquidação duvidosa, redutora das contas a receber.', 'A'],
+    [/CLIENTE|DUPLICATAS? A RECEBER|CONTAS? A RECEBER|REALIZAVE/, 'Contas a receber de clientes',
+      'Correspondem às vendas e aos serviços já entregues e ainda não recebidos, registrados pelo valor original.', 'A'],
+    [/ESTOQUE/, 'Estoques', 'Avaliados ao custo de aquisição.', 'A'],
+    [/TRIBUTOS? (E CONTRIBUIC\w* )?A (RECUPERAR|COMPENSAR)|IMPOSTOS? A RECUPERAR/, 'Tributos a recuperar',
+      'Créditos de tributos pagos ou retidos a maior, a compensar com tributos da mesma espécie.', 'A'],
+    [/EMPRESTIMO|MUTUO/, 'Empréstimos a receber', 'Valores emprestados a terceiros, a receber nas condições contratadas.', 'A'],
+    [/ADIANTAMENTO/, 'Adiantamentos', 'Valores entregues antes do recebimento da mercadoria, do serviço ou da prestação de contas.', 'A'],
+    [/IMOBILIZ|INTANGIV/, 'Imobilizado',
+      'Registrado pelo custo de aquisição, deduzido da depreciação acumulada. A depreciação é calculada pelo método linear, pelas taxas admitidas para cada bem.', 'A'],
+    [/INVESTIMENTO/, 'Investimentos', 'Participações e aplicações mantidas de forma permanente, registradas pelo custo.', 'A'],
+    [/FORNECEDOR/, 'Fornecedores', 'Obrigações com fornecedores de mercadorias e serviços, pelo valor contratado.', 'P'],
+    [/EMPRESTIMO|FINANCIAMENTO|DEBENTURE|MUTUO/, 'Empréstimos e financiamentos',
+      'Obrigações com instituições financeiras, pelo valor contratado acrescido dos encargos incorridos até a data do balanço.', 'P'],
+    [/OBRIGAC\w* (TRABALHISTA|SOCIA)|FOLHA DE PAGAMENTO|SALARIO|PROVIS\w* DA FOLHA/, 'Obrigações trabalhistas',
+      'Salários, férias, décimo terceiro e encargos sociais apurados e ainda não pagos.', 'P'],
+    [/OBRIGAC\w* TRIBUTARIA|IMPOSTOS? A RECOLHER|TRIBUTOS? A RECOLHER|IMPOSTOS? E CONTRIBUIC/, 'Obrigações tributárias',
+      'Tributos apurados e ainda não recolhidos.', 'P'],
+    [/ADIANTAMENTO DE CLIENTE|ADIANTAMENTO/, 'Adiantamentos de clientes', 'Valores recebidos antes da entrega da mercadoria ou da prestação do serviço.', 'P'],
+    [/CONTAS? A PAGAR|OUTRAS OBRIGAC/, 'Contas a pagar', 'Obrigações com terceiros que não decorrem de compra de mercadoria nem de folha de pagamento.', 'P'],
+    [/PATRIMONIO/, 'Patrimônio líquido',
+      'Composto pelo capital social integralizado pelos sócios e pelos resultados acumulados de exercícios anteriores. O resultado do período corrente é apresentado em linha própria, apurado das contas de receita e despesa do balancete.', 'P'],
+  ];
+  function notasExplicativas(rel, op) {
+    const opc = op || {};
+    const k = opc.k;
+    const m = rel.meses[k];
+    if (!m || !m.tem) return null;
+    const emp = opc.empresa || {};
+    let anteriorK = -1;
+    for (let i = k - 1; i >= 0; i--) if (rel.meses[i].tem) { anteriorK = i; break; }
+    const colunas = (anteriorK >= 0 ? [rel.meses[anteriorK]] : []).concat([m]).map((x) => ({ rotulo: x.rotulo.toUpperCase(), k: rel.meses.indexOf(x) }));
+    const plano = rel.contas;
+    const porConta = new Map(plano.map((c) => [c.conta, c]));
+    const saldos = new Map(rel.mensal.linhas.map((l) => [l.conta, l.valores]));
+    const saldoDe = (conta, kk, sinal) => sinal * ((saldos.get(conta) || [])[kk] || 0);
+    const filhasDe = (conta) => plano.filter((c) => c.pai === conta);
+    const analiticasDe = (conta, saida) => {
+      const fs = filhasDe(conta);
+      if (!fs.length) { const c = porConta.get(conta); if (c) saida.push(c); return saida; }
+      fs.forEach((f) => analiticasDe(f.conta, saida));
+      return saida;
+    };
+    const cb = contasDoBalanco(plano);
+    // Os grupos que viram nota: o que aparece no balanço abaixo do circulante / não circulante / PL.
+    const grupos = [];
+    const textoDe = (c, sinal) => TEXTO_DA_NOTA.find(([re, , , lado]) => re.test(nomeNormal(c.titulo)) && (!lado || lado === (sinal > 0 ? 'A' : 'P'))) || null;
+    // Um grupo do plano pode juntar naturezas diferentes ("DIREITOS REALIZÁVEIS A CURTO PRAZO" tem clientes,
+    // estoques e tributos a recuperar dentro). Nesse caso, cada um de baixo vira a sua nota — como no modelo
+    // do escritório, em que as notas são por natureza, não pelo desenho do plano.
+    const abrirGrupo = (c, sinal, fundo) => {
+      const fs = filhasDe(c.conta);
+      const textos = fs.map((f) => textoDe(f, sinal)).filter(Boolean);
+      const diferentes = new Set(textos.map((t) => t[1]));
+      if (fundo > 0 && fs.length > 1 && diferentes.size > 1) { fs.forEach((f) => abrirGrupo(f, sinal, fundo - 1)); return; }
+      grupos.push({ conta: c, sinal });
+    };
+    const juntar = (pai, sinal) => { if (pai) filhasDe(pai.conta).forEach((c) => abrirGrupo(c, sinal, 2)); };
+    juntar(cb.ac, 1); juntar(cb.anc, 1); juntar(cb.pc, -1); juntar(cb.pnc, -1);
+    if (cb.pl) grupos.push({ conta: cb.pl, sinal: -1, pl: true });
+    const notas = [];
+    const numero = () => notas.length + 1;
+    const periodo = (() => {
+      let ini = k;
+      while (ini > 0 && rel.meses[ini - 1].tem) ini--;
+      return { de: rel.meses[ini].rotulo, ate: m.rotulo };
+    })();
+    // 1 a 3: as notas de texto.
+    const atividade = emp.atividade ? String(emp.atividade).trim() : '';
+    const regime = emp.regime ? String(emp.regime).trim() : '';
+    notas.push({ n: numero(), titulo: 'Contexto operacional', textos: [
+      (emp.nome || '') + (emp.cnpj ? ', inscrita no CNPJ ' + Util.formatarCnpj(emp.cnpj) : '') + (atividade ? ', tem por atividade ' + atividade.toLowerCase() : '') + '.',
+    ].concat(regime ? ['A empresa é tributada pelo ' + regime.toUpperCase() + '.'] : []) });
+    notas.push({ n: numero(), titulo: 'Base de preparação', textos: [
+      'As demonstrações contábeis foram elaboradas a partir dos balancetes mensais de ' + periodo.de + ' a ' + periodo.ate +
+        ', escriturados de acordo com as práticas contábeis adotadas no Brasil e com a legislação societária.',
+      'Os valores estão expressos em reais e seguem o regime de competência: receitas e despesas são reconhecidas quando ocorrem, e não quando são recebidas ou pagas.',
+      'O balancete mensal mantém o resultado do exercício em aberto nas contas de receita e despesa. Para que o balanço apresentado feche, o resultado apurado até ' +
+        periodo.ate + ' é demonstrado em linha própria dentro do patrimônio líquido.',
+    ] });
+    notas.push({ n: numero(), titulo: 'Principais práticas contábeis', textos: [
+      'Ativos e passivos são classificados em circulante e não circulante conforme se realizem ou sejam exigíveis dentro ou depois de doze meses da data do balanço.',
+      'Os direitos e as obrigações são registrados pelos valores originais. Os estoques são avaliados ao custo de aquisição e o imobilizado, ao custo deduzido da depreciação acumulada.',
+      'As receitas de venda são reconhecidas na entrega da mercadoria ou na prestação do serviço, líquidas dos tributos incidentes.',
+    ] });
+    // 4 em diante: uma nota por grupo do balanço com saldo, com a abertura nas contas.
+    grupos.forEach((g) => {
+      const nome = nomeNormal(g.conta.titulo);
+      const casada = textoDe(g.conta, g.sinal);
+      const linhas = analiticasDe(g.conta.conta, []).map((c) => ({
+        conta: c.conta, titulo: nomeDaDemonstracao(c.titulo),
+        valores: colunas.map((col) => saldoDe(c.conta, col.k, g.sinal)),
+      })).filter((l) => l.valores.some((v) => Math.round(v)));
+      const total = colunas.map((col) => saldoDe(g.conta.conta, col.k, g.sinal));
+      if (!linhas.length && !total.some((v) => Math.round(v))) return;
+      // Dois grupos do plano podem casar o mesmo texto (adiantamento a funcionários e a fornecedores): aí vale
+      // o nome do plano, que diz qual é qual.
+      const jaTem = casada && notas.some((x) => x.titulo === casada[1]);
+      let titulo = casada && !jaTem ? casada[1] : nomeDaDemonstracao(g.conta.titulo);
+      // Ainda repetido (o nome do plano é igual ao da nota que já existe)? Diz de onde vem, para não ficarem
+      // duas notas com o mesmo nome no meio da folha.
+      if (notas.some((x) => x.titulo === titulo)) {
+        const mae = g.conta.pai ? porConta.get(g.conta.pai) : null;
+        titulo += mae ? ' (' + nomeDaDemonstracao(mae.titulo) + ')' : ' (' + g.conta.conta + ')';
+      }
+      const nota = { n: numero(), titulo,
+        textos: [casada ? casada[2] : 'Composição do saldo desta conta no balancete.'], linhas, total, conta: g.conta.conta };
+      // No patrimônio líquido, o resultado do período ainda não encerrado entra em linha própria (é o que faz
+      // o balanço fechar) — como o modelo do escritório mostra.
+      if (g.pl && rel.balanco) {
+        const res = rel.balanco.linhas.find((l) => l.id === 'resultado');
+        if (res) {
+          const valores = colunas.map((col) => res.valores[col.k] || 0);
+          if (valores.some((v) => Math.round(v))) {
+            nota.linhas = nota.linhas.concat([{ conta: '', titulo: 'Resultado do exercício (apurado até ' + periodo.ate + ')', destaque: true, valores }]);
+            nota.total = colunas.map((col, i) => total[i] + valores[i]);
+          }
+        }
+      }
+      notas.push(nota);
+    });
+    return { mes: m, data: dataDoFim(rel.ano, m.mes), colunas: colunas.map((c) => c.rotulo), periodo, notas };
+  }
+
+  return { montar, compararBalancetes, indicadores, comparativo, simulacao, lalurSimulacao, demonstracoes, notasExplicativas, nomeDaDemonstracao, noMeioDaFrase, INDICADORES, contasDoBalanco, MODELO_DRE, FORA_DA_DRE, PARAMETROS, AJUSTES_MODELO, CONTA_PAT_MODELO, PREMISSAS, rotuloMes, compararContas, valorUsado,
     LINHAS_DO_MAPA, sugerirMapaDre, mapaDoModelo, reclassificarConta, planoJunto, linhaNoMapa, linhaDoModelo, avaliarModelo, linhasSugeridas, nomeNormal };
 });
