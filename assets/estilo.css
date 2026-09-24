@@ -925,6 +925,12 @@ table.apres.ajustes-sim td.txt { white-space: normal; }
 .dem-tabela tr.dem-secao td { font-weight: 700; padding-top: 3.5mm; border-bottom: 0.3mm solid #111; text-transform: uppercase; font-size: 9pt; letter-spacing: 0.03em; }
 .dem-tabela tr.dem-grupo td { font-weight: 700; }
 .dem-tabela tr.dem-conta td:first-child { padding-left: 6mm; }
+/* As contas de baixo, quando quem usa abre o detalhe do balanço ou do fluxo de caixa: cada nível entra mais. */
+.dem-tabela tr.dem-fundo td { color: #45505e; font-size: 8.5pt; }
+.dem-tabela tr.dem-fundo.n4 td:first-child { padding-left: 11mm; }
+.dem-tabela tr.dem-fundo.n5 td:first-child { padding-left: 16mm; }
+.dem-tabela tr.dem-fundo.n6 td:first-child { padding-left: 21mm; }
+.dem-tabela tr.dem-fundo.n7 td:first-child { padding-left: 26mm; }
 .dem-tabela tr.dem-subtotal td { font-weight: 700; border-top: 0.25mm solid #111; }
 .dem-tabela tr.dem-total td { font-weight: 700; border-top: 0.35mm solid #111; border-bottom: 0.9mm double #111; background: #f2f2f2; }
 .dem-assinaturas { margin-top: auto; padding-top: 12mm; break-inside: avoid; }
@@ -1075,3 +1081,6 @@ table.rc-tabela-contas { font-size: 7.6pt; }
   padding: 8px 16px; background: linear-gradient(#fff8e1, #ffeeba); color: #6b4a12; border-bottom: 1px solid #e3cf9f; font-size: 13.5px; box-shadow: 0 2px 8px rgba(20,30,40,.12); }
 .faixa-versao .botao { min-height: 26px; }
 @media print { .faixa-versao { display: none; } }
+
+/* Nota dentro da demonstração aberta (o que o número quer dizer). */
+.dem-tabela tr.dem-nota td { font-style: italic; color: #6b5d2a; background: #fdf7e3; }

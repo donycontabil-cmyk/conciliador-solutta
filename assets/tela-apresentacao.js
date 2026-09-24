@@ -59,7 +59,7 @@
   const E = { codigo: null, ano: null, emp: null, rel: null, registro: null, config: {}, lugares: [], metas: [],
     aba: 'dre-mensal', avah: true, nivel: 5, semZeradas: false, abertos: new Set(), selecao: null, marcarLalur: false, balancetes: [], fila: null, clienteMes: null, cacheCliente: null, ultimoCliente: null, casas: 2, milhar: false,
     dreEdicao: null, balancetesAnt: [], relAnt: null, ultimaDre: 'dre-mensal', ultimoRelatorio: 'cliente',
-    assinaturaMes: null, assinaturaSoMes: false, assinaturaComparar: false, assinaturaNivel: 3 };
+    assinaturaMes: null, assinaturaSoMes: false, assinaturaComparar: false, assinaturaNivel: 3, dfcDetalhe: false };
   (function lerPreferencias() {
     try {
       const p = JSON.parse((raiz.localStorage && raiz.localStorage.getItem(CHAVE_PREF)) || '{}') || {};
@@ -931,6 +931,8 @@
       if (dcPeriodo) { E.assinaturaSoMes = dcPeriodo.getAttribute('data-dc-periodo') === 'mes'; redesenharFolha(el); return; }
       const dcNivel = ev.target.closest('button[data-dc-nivel]');
       if (dcNivel) { E.assinaturaNivel = Number(dcNivel.getAttribute('data-dc-nivel')); redesenharFolha(el); return; }
+      const dcDet = ev.target.closest('button[data-dfc-detalhe]');
+      if (dcDet) { E.dfcDetalhe = dcDet.getAttribute('data-dfc-detalhe') === '1'; redesenharFolha(el); return; }
       const dc = ev.target.closest('button[data-dc]');
       if (dc) { if (dc.getAttribute('data-dc') === 'assinaturas') await editarAssinaturas(el); else await imprimirDocumentos(el, DOCUMENTOS[E.aba]); return; }
       const nivel = ev.target.closest('[data-nivel]');
@@ -1675,9 +1677,11 @@
       titulo = 'Balanço patrimonial';
       sub = 'Levantado em ' + dataPorExtenso(d.data) + ' · ' + valores;
       cab = '<th>&nbsp;</th><th class="num">' + T.esc(d.data) + '</th>' + (comAnt ? '<th class="num">' + T.esc(d.anterior.data || '—') + '</th>' : '');
-      corpo = d.balanco.linhas.filter((l) => l.tipo === 'secao' || l.tipo === 'total' || (!zero(l) && !(l.tipo === 'conta' && E.assinaturaNivel === 2))).map((l) => {
+      // O nível de detalhe escolhido: 2 = só os grupos, 3 = as contas de cada grupo, 9 = tudo até a analítica.
+      corpo = d.balanco.linhas.filter((l) => l.tipo === 'secao' || l.tipo === 'total' || (!zero(l) && (l.nivel || 2) <= E.assinaturaNivel)).map((l) => {
         if (l.tipo === 'secao') return secaoDoc(l.rotulo);
-        return linha(l.tipo === 'total' ? 'dem-total' : l.tipo === 'grupo' ? 'dem-grupo' : 'dem-conta', l.rotulo, l);
+        const cls = l.tipo === 'total' ? 'dem-total' : l.tipo === 'grupo' ? 'dem-grupo' : 'dem-conta' + (l.detalhe ? ' dem-fundo n' + Math.min(l.nivel || 4, 7) : '');
+        return linha(cls, l.rotulo, l);
       }).join('');
     } else if (qual === 'dre') {
       const exercicio = d.periodo.de.slice(0, 5) === '01/01' && d.periodo.ate.slice(0, 5) === '31/12';
@@ -1697,7 +1701,11 @@
       sub = 'Período de ' + d.periodo.de + ' a ' + d.periodo.ate + ' · ' + valores;
       cab = '<th>&nbsp;</th><th class="num">' + periodoEmDuasLinhas(d.periodo) + '</th>';
       const v = (x) => ({ valor: x, anterior: null });
-      const lista = (ls) => ls.map((l) => linha('dem-conta', l.rotulo, v(l.valor))).join('');
+      // Com o detalhe ligado, cada linha abre nas contas que a formam (Dony, 24/09/2026).
+      const abertas = (l) => (E.dfcDetalhe ? (l.detalhe || []).filter((x) => Math.round(x.valor))
+        .map((x) => linha('dem-conta dem-fundo n' + Math.min((x.nivel || 1) + 3, 7), (x.conta ? x.conta + ' · ' : '') + x.titulo, v(x.valor))).join('') +
+        (l.aviso ? '<tr class="dem-conta dem-fundo n4 dem-nota"><td colspan="' + nCol + '">⚠️ ' + T.esc(l.aviso) + '</td></tr>' : '') : '');
+      const lista = (ls) => ls.map((l) => linha('dem-conta', l.rotulo, v(l.valor)) + abertas(l)).join('');
       corpo = secaoDoc('Atividades operacionais') + linha('dem-conta', 'Lucro (prejuízo) líquido do período', v(f.lucro)) +
         (Math.round(f.depreciacao) ? linha('dem-conta', 'Depreciação e amortização', v(f.depreciacao)) : '') + lista(f.operacionais) +
         linha('dem-subtotal', 'Caixa líquido gerado (consumido) nas atividades operacionais', v(f.totalOperacional)) +
@@ -1705,7 +1713,9 @@
         secaoDoc('Atividades de financiamento') + lista(f.financiamentos) + linha('dem-subtotal', 'Caixa líquido gerado (consumido) nas atividades de financiamento', v(f.totalFinanciamento)) +
         linha('dem-total', 'Aumento (redução) líquido de caixa e equivalentes', v(f.aumento)) +
         linha('dem-conta', 'Caixa e equivalentes no início do período (' + f.dataInicio + ')', v(f.caixaInicio)) +
-        linha('dem-conta', 'Caixa e equivalentes no fim do período (' + d.data + ')', v(f.caixaFim));
+        (E.dfcDetalhe ? (f.caixa || []).map((c) => linha('dem-conta dem-fundo n4', c.conta + ' · ' + c.titulo, v(c.inicio))).join('') : '') +
+        linha('dem-conta', 'Caixa e equivalentes no fim do período (' + d.data + ')', v(f.caixaFim)) +
+        (E.dfcDetalhe ? (f.caixa || []).map((c) => linha('dem-conta dem-fundo n4', c.conta + ' · ' + c.titulo, v(c.fim))).join('') : '');
     }
     return '<div class="dem dem-pagina"><div class="dem-cab"><div class="dem-empresa">' + T.esc(emp.nome) + '</div>' +
       (emp.cnpj ? '<div class="dem-cnpj">CNPJ ' + T.esc(U.formatarCnpj(emp.cnpj)) + '</div>' : '') +
@@ -1721,8 +1731,12 @@
       ms.map((m) => '<option value="' + m.comp + '"' + (m.comp === comp ? ' selected' : '') + '>' + T.esc(m.rotulo) + '</option>').join('') + '</select></label>' +
       (qual === 'balanco'
         ? '<span class="grupo-seg"><span class="seg-rotulo">Detalhe</span>' + seg(E.assinaturaNivel === 2, 'data-dc-nivel="2"', 'Grupos', 'Circulante, não circulante e patrimônio líquido') +
-          seg(E.assinaturaNivel !== 2, 'data-dc-nivel="3"', 'Contas', 'Também as contas de cada grupo') + '</span>'
-        : '<span class="grupo-seg"><span class="seg-rotulo">Período</span>' + seg(!E.assinaturaSoMes, 'data-dc-periodo="ano"', 'Do começo do ano até o mês') + seg(!!E.assinaturaSoMes, 'data-dc-periodo="mes"', 'Só o mês') + '</span>') +
+          seg(E.assinaturaNivel === 3, 'data-dc-nivel="3"', 'Contas', 'Também as contas de cada grupo') +
+          seg(E.assinaturaNivel >= 4, 'data-dc-nivel="9"', 'Tudo', 'Abre todas as contas de baixo, até a analítica') + '</span>'
+        : '<span class="grupo-seg"><span class="seg-rotulo">Período</span>' + seg(!E.assinaturaSoMes, 'data-dc-periodo="ano"', 'Do começo do ano até o mês') + seg(!!E.assinaturaSoMes, 'data-dc-periodo="mes"', 'Só o mês') + '</span>' +
+          (qual === 'dfc' ? '<span class="grupo-seg"><span class="seg-rotulo">Detalhe</span>' +
+            seg(!E.dfcDetalhe, 'data-dfc-detalhe="0"', 'Grupos', 'Só as linhas da demonstração') +
+            seg(!!E.dfcDetalhe, 'data-dfc-detalhe="1"', 'Contas', 'Abre as contas que formam cada linha') + '</span>' : '')) +
       (qual !== 'dfc' && E.balancetesAnt.length ? '<label class="caixa-opcao" title="' + (qual === 'balanco' ? 'Ao lado, o balanço do fim de ' + (E.ano - 1) : 'Ao lado, os mesmos meses de ' + (E.ano - 1)) + '"><input type="checkbox" id="dc-comparar"' +
         (E.assinaturaComparar ? ' checked' : '') + '> Comparar com ' + (E.ano - 1) + '</label>' : '') +
       '<button type="button" class="botao pequeno" data-dc="assinaturas" title="O local e quem assina: o responsável pela empresa e o contador (fica guardado na empresa)">✎ Assinaturas</button>' +

@@ -1197,6 +1197,26 @@
       bal.splice(i + 1, 1, ...netas.map((c) => ({ tipo: 'conta', nivel: 3, conta: c.conta, rotulo: nomeDaDemonstracao(c.titulo), valor: saldoDaConta(rel, c.conta, k, sinal),
         anterior: comAnt ? (jFim === undefined ? 0 : saldoDaConta(anterior, c.conta, jFim, sinal)) : null })));
     }
+    // As contas de baixo de cada linha do balanço, marcadas com o nível (4, 5, …): a tela mostra até o nível
+    // que quem usa escolher (Dony, 24/09/2026: "dentro do BP também, quero poder escolher o nível de detalhe").
+    const abaixoNoBalanco = (conta, nivel, sinalAqui, saida) => {
+      plano.filter((c) => c.pai === conta).forEach((c) => {
+        saida.push({ tipo: 'conta', nivel, conta: c.conta, rotulo: nomeDaDemonstracao(c.titulo), detalhe: true,
+          valor: saldoDaConta(rel, c.conta, k, sinalAqui),
+          anterior: comAnt ? (jFim === undefined ? 0 : saldoDaConta(anterior, c.conta, jFim, sinalAqui)) : null });
+        abaixoNoBalanco(c.conta, nivel + 1, sinalAqui, saida);
+      });
+      return saida;
+    };
+    const comDetalhe = [];
+    let sinalDet = 1;
+    bal.forEach((l) => {
+      if (l.tipo === 'secao') sinalDet = l.rotulo === 'PASSIVO' ? -1 : 1;
+      comDetalhe.push(l);
+      if (l.conta && l.tipo === 'conta' && !l.detalhe) abaixoNoBalanco(l.conta, (l.nivel || 3) + 1, sinalDet, comDetalhe);
+    });
+    bal.length = 0;
+    Array.prototype.push.apply(bal, comDetalhe);
     const totalPl = (bal.find((l) => l.id === 'totalPassivoPl') || {});
     const difBal = (totalAtivo || 0) - (totalPl.valor || 0);
     const difBalAnt = comAnt ? (totalAtivoAnt || 0) - (totalPl.anterior || 0) : 0;
@@ -1234,6 +1254,16 @@
       const abrirUnico = (lista) => { let l = lista; while (l.length === 1 && filhasDe(l[0]).length >= 2) l = filhasDe(l[0]); return l; };
       const nome = (c) => nomeDaDemonstracao(c.titulo);
       const soma = (vs) => vs.reduce((s, v) => s + v, 0);
+      // As contas de baixo de cada linha, com a variação de cada uma — para abrir na tela e conferir de onde
+      // veio o número (Dony, 24/09/2026: "quero poder ver as contas que cada grupo do fluxo de caixa tem
+      // dentro, e dentro do BP também, quero poder escolher o nível de detalhe").
+      const abaixoDe = (c, nivel, saida) => {
+        filhasDe(c).forEach((f) => {
+          saida.push({ conta: f.conta, titulo: nomeDaDemonstracao(f.titulo), nivel, valor: -delta(f) });
+          abaixoDe(f, nivel + 1, saida);
+        });
+        return saida;
+      };
       const serie = (id) => (rel.dre.mensal.linhas.find((l) => l.id === id) || {}).valores || [];
       const lucro = somaNos(serie('lucroLiquido'), ks) || 0;
       const depreciacao = -(somaNos(serie('depreciacao'), ks) || 0);
@@ -1250,7 +1280,15 @@
       const naoCirc = abrirUnico(filhasDe(cb.anc));
       const imob = naoCirc.filter((c) => IMOBILIZADO.test(nomeNormal(c.titulo)));
       naoCirc.filter((c) => imob.indexOf(c) < 0).forEach((c) => linha(investimentos, '(Aumento) redução de ' + noMeioDaFrase(nome(c)), -delta(c), c.conta));
-      if (imob.length || depreciacao) linha(investimentos, 'Aquisição de imobilizado e intangível (líquida de baixas)', -(soma(imob.map(delta)) + depreciacao));
+      if (imob.length || depreciacao) {
+        linha(investimentos, 'Aquisição de imobilizado e intangível (líquida de baixas)', -(soma(imob.map(delta)) + depreciacao));
+        // Esta linha é a variação contábil do imobilizado com a depreciação somada de volta — não é o caixa
+        // pago, conta por conta. Abrir mostra de onde ela vem (compra, baixa, transferência…).
+        const ultima = investimentos[investimentos.length - 1];
+        ultima.detalhe = [].concat(...imob.map((c) => [{ conta: c.conta, titulo: nome(c), nivel: 1, valor: -delta(c) }].concat(abaixoDe(c, 2, []))));
+        if (Math.round(depreciacao)) ultima.detalhe.push({ conta: '', titulo: 'Depreciação e amortização do período (somada de volta)', nivel: 1, valor: -depreciacao });
+        ultima.aviso = 'É a variação contábil do imobilizado com a depreciação somada de volta, não o caixa pago: confira as compras e as baixas do período.';
+      }
       // Passivo não circulante: financiamento.
       abrirUnico(filhasDe(cb.pnc)).forEach((c) => linha(financiamentos, 'Aumento (redução) de ' + noMeioDaFrase(nome(c)) + ' (longo prazo)', -delta(c), c.conta));
       // Outros grupos do ativo e do passivo (planos com o realizável ou o exigível a longo prazo direto no 1º nível).
@@ -1262,6 +1300,20 @@
       const resultadoAberto = (mapa) => -soma(doResultado.map((c) => mapa.get(c.conta) || 0));
       const plTotal = (mapa) => (cb.pl ? -(mapa.get(cb.pl.conta) || 0) : 0) + resultadoAberto(mapa);
       linha(financiamentos, 'Outras variações do patrimônio líquido (capital, distribuição de lucros e ajustes)', plTotal(fechamento) - plTotal(abertura) - lucro);
+      // A composição dessa linha: as contas do patrimônio líquido que mexeram (capital integralizado, lucros
+      // distribuídos, ajustes). O que não vier das contas fica numa linha "outros ajustes", para não esconder nada.
+      if (cb.pl) {
+        const ultimaPl = financiamentos[financiamentos.length - 1];
+        const contasPl = abaixoDe(cb.pl, 1, []).filter((x) => Math.round(x.valor));
+        const resto = ultimaPl.valor - soma(contasPl.map((x) => x.valor));
+        ultimaPl.detalhe = contasPl.concat(Math.round(resto) ? [{ conta: '', titulo: 'Outros ajustes do patrimônio líquido (diferença)', nivel: 1, valor: resto }] : []);
+      }
+      // Cada linha que veio de um grupo do balanço pode ser aberta nas contas de baixo.
+      operacionais.concat(investimentos, financiamentos).forEach((l) => {
+        if (l.detalhe || !l.conta) return;
+        const c = porConta.get(l.conta);
+        if (c) l.detalhe = abaixoDe(c, 1, []);
+      });
       const tira0 = (lista) => lista.filter((l) => Math.round(l.valor));
       const totOp = lucro + depreciacao + soma(operacionais.map((l) => l.valor));
       const totInv = soma(investimentos.map((l) => l.valor)), totFin = soma(financiamentos.map((l) => l.valor));
