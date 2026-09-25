@@ -884,6 +884,26 @@
 
     async function exportarTudo() { return montarPacote(null); }
     async function exportarEmpresa(codigo) { return montarPacote(codigo); }
+    // O que a empresa guarda de TRABALHO CONFERIDO, além do cadastro: as linhas da DRE, as colunas do
+    // balancete, as assinaturas, o logo, as conciliações livres, os papéis de conta, as contas do diário, as
+    // abas escondidas e a nota escrita à mão. Numa importação, isso nunca se perde: se o lado de cá não tem,
+    // vem do backup; se os dois têm, fica o do cadastro mais novo.
+    const CONFIG_DA_EMPRESA = ['mapaDre', 'mapaBalancete', 'assinaturas', 'logo', 'corRelatorio', 'conciliacoesLivres',
+      'papeisDeConta', 'contasDoDiario', 'abasOcultas', 'notasExtras'];
+    const semConteudo = (x) => x === undefined || x === null || x === '' ||
+      (Array.isArray(x) && !x.length) ||
+      (typeof x === 'object' && !Array.isArray(x) && !Object.keys(x).length) ||
+      (x && typeof x === 'object' && x.contas !== undefined && !Object.keys(x.contas || {}).length);
+    function juntarCadastro(aqui, doPacote, substituir) {
+      const manda = substituir || Util.paraMs(doPacote.atualizadoEm) > Util.paraMs(aqui.atualizadoEm) ? doPacote : aqui;
+      const outro = manda === doPacote ? aqui : doPacote;
+      const junto = Object.assign({}, outro, manda);
+      CONFIG_DA_EMPRESA.forEach((k) => {
+        const valor = semConteudo(manda[k]) ? outro[k] : manda[k];
+        if (semConteudo(valor)) delete junto[k]; else junto[k] = valor;
+      });
+      return junto;
+    }
     // opcoes.substituir = true: o que vem no pacote vale, mesmo que o daqui esteja mais novo (o que existia vira
     // versão em _versoes, nada some). Sem isso, a regra é a de sempre: fica o mais recente e nada é apagado.
     async function importarTudo(pacote, opcoes) {
@@ -894,10 +914,13 @@
       const listaAtual = (await lerJson(raiz, 'empresas.json')) || [];
       for (const e of pacote.empresas || []) {
         const i = listaAtual.findIndex((x) => String(x.codigo) === String(e.codigo));
-        if (i < 0 || substituir || Util.paraMs(e.atualizadoEm) > Util.paraMs(listaAtual[i].atualizadoEm)) {
-          if (i < 0) listaAtual.push(e); else listaAtual[i] = e;
-          r.empresas++;
-        }
+        if (i < 0) { listaAtual.push(e); r.empresas++; continue; }
+        // A empresa já existe aqui: JUNTA os dois cadastros em vez de escolher um. O mais novo manda no que os
+        // dois têm; o que só um tem entra assim mesmo. Sem isso, quem recebia um backup numa empresa que já
+        // estava cadastrada perdia as LINHAS DA DRE conferidas que vinham nele e tinha de conferir tudo de
+        // novo (Dony, 25/09/2026: "quando a pessoa importar, a validação da DRE já tem que estar feita").
+        const junto = juntarCadastro(listaAtual[i], e, substituir);
+        if (JSON.stringify(junto) !== JSON.stringify(listaAtual[i])) { listaAtual[i] = junto; r.empresas++; }
       }
       await gravar(raiz, 'empresas.json', JSON.stringify(listaAtual, null, 2));
       for (const e of pacote.empresas || []) await pastaDaEmpresa(e.codigo, true);

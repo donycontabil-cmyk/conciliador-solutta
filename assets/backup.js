@@ -66,6 +66,11 @@
       conciliacoes: (pacote.conciliacoes || []).length, congelados: (pacote.congelados || []).length, log: (pacote.log || []).length,
       meses, de: meses[0] || '', ate: meses[meses.length - 1] || '',
       conciliacoesLivres: (emp.conciliacoesLivres || []).length,
+      // O trabalho conferido que vai junto com a empresa: quem recebe não refaz (Dony, 25/09/2026).
+      linhasDaDre: Object.keys((emp.mapaDre || {}).contas || {}).length,
+      temAssinaturas: !!((emp.assinaturas || {}).contador || {}).nome,
+      temLogo: !!emp.logo, temColunasDoBalancete: !!emp.mapaBalancete,
+      contasDoDiario: Object.keys(emp.contasDoDiario || {}).length,
     };
   }
 

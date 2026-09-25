@@ -141,6 +141,13 @@
       linha('Conciliações', n(r.conciliacoes), n(comparacao.conciliacoes.novas) + ' novas · ' + n(comparacao.conciliacoes.maisNovasNoBackup) + ' mais novas no backup · ' +
         n(comparacao.conciliacoes.maisNovasAqui) + ' mais novas aqui · ' + n(comparacao.conciliacoes.iguais) + ' iguais') +
       linha('Conciliações livres', n(r.conciliacoesLivres), 'entram no cadastro da empresa') +
+      // O trabalho conferido que vai junto: é o que evita a outra pessoa refazer tudo (Dony, 25/09/2026).
+      linha('Linhas da DRE conferidas', r.linhasDaDre ? n(r.linhasDaDre) + ' conta(s)' : '—',
+        r.linhasDaDre ? 'a DRE, os indicadores e o relatório do cliente já abrem prontos aqui — sem conferir de novo'
+          : 'o backup não traz as linhas da DRE: quem gerou ainda não confirmou') +
+      linha('Configuração da empresa', [r.temAssinaturas ? 'assinaturas' : '', r.temLogo ? 'logo' : '',
+        r.temColunasDoBalancete ? 'colunas do balancete' : '', r.contasDoDiario ? 'contas do diário' : ''].filter(Boolean).join(', ') || '—',
+        'o que faltar aqui é preenchido pelo backup; o que você já tem fica') +
       linha('Congelados', n(r.congelados), 'entram os que faltarem (cópia imutável nunca é trocada)') +
       linha('Linhas de log', n(r.log), 'as que faltarem são acrescentadas') +
       (r.meses.length ? linha('Meses', T.esc(r.meses[0] + ' a ' + r.meses[r.meses.length - 1]), n(r.meses.length) + ' mês(es) com arquivo') : '') +
