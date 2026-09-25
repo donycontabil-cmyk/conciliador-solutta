@@ -909,7 +909,24 @@
         '<span class="suave pequeno">Os valores entram na Parte A na hora (compensação limitada a 30% e IR retido abatido do IRPJ).</span></div>' : '');
     const premissas = '<div class="apres-caixa"><table class="apres simples premissas"><thead><tr><th class="fixa">Tema</th><th>Premissa usada</th><th>Fonte / Base</th><th>Status</th><th>Comentário</th></tr></thead><tbody>' +
       L.premissas.map((p) => '<tr><td class="fixa">' + T.esc(p[0]) + '</td>' + p.slice(1).map((x) => '<td class="txt">' + T.esc(x) + '</td>').join('') + '</tr>').join('') + '</tbody></table></div>';
-    return tituloSecao('LALUR Parte A: apuração do lucro real e da CSLL', 'Apuração trimestral a partir da DRE; adições e exclusões pela lista de ajustes; incentivo PAT e Parte B.') + parteA +
+    // LALUR ANUAL ao lado da soma dos trimestres: o imposto do ano não é a soma dos trimestres (o adicional de
+    // 10% e a trava de 30% da compensação mudam de conta), e é essa diferença que diz qual regime compensa
+    // (Dony, 25/09/2026: "eu quero o LALUR trimestral e o anual, porque é diferente um do outro").
+    const A = L.anual;
+    const anual = !A ? '' : (function () {
+      const colAn = A.colunas.map((c) => Object.assign({}, c, { cls: c.anual ? 'acum' : '' }));
+      const tab = tabelaSimples(['Linha', 'Bloco'], colAn, A.linhas.map((l) => ({ cls: l.destaque ? 'total' : '',
+        cab: [T.esc(l.rotulo), '<span class="suave">' + T.esc(l.bloco) + '</span>'], valores: l.valores })));
+      const dif = A.diferenca;
+      const conta = Math.abs(dif) < 1 ? 'Nos dois jeitos o IRPJ + CSLL dá o mesmo valor.'
+        : dif < 0 ? 'Pela apuração <b>anual</b> o IRPJ + CSLL fica <b>' + T.moeda(Math.abs(dif)) + ' menor</b> do que somando os trimestres.'
+          : 'Pela apuração anual o IRPJ + CSLL fica <b>' + T.moeda(dif) + ' maior</b> do que somando os trimestres — neste caso o trimestral é melhor.';
+      return '<h3 class="apres-sub">LALUR anual <small>o ano inteiro como um período só · o adicional de 10% é sobre o que passa de ' +
+        T.esc(U.formatarCentavos(2000000 * A.meses)) + ' (R$ 20.000,00 por mês do período) e a compensação é 30% do lucro real do ano</small></h3>' + tab +
+        '<p class="apres-nota">' + conta + (A.completo ? '' : ' <b>Atenção:</b> o ano tem ' + A.meses + ' mês(es) de balancete carregado — para a apuração anual de verdade, carregue janeiro a dezembro.') +
+        ' O prejuízo fiscal e a base negativa usados são os saldos informados no 1º trimestre da Parte B; o IR retido é a soma dos trimestres (' + T.moeda(A.irRetido) + ').</p>';
+    })();
+    return tituloSecao('LALUR Parte A: apuração do lucro real e da CSLL', 'Apuração trimestral e anual a partir da DRE; adições e exclusões pela lista de ajustes; incentivo PAT e Parte B.') + parteA + anual +
       '<h3 class="apres-sub">Ajustes mensais e trimestrais <small>as contas marcadas na DRE ou no balancete · valor positivo = adição · valor negativo = exclusão</small></h3>' + ajustes +
       '<h3 class="apres-sub">Incentivo fiscal PAT <small>conta ' + T.esc(L.contaPAT || '—') + (L.pat.titulo ? ' · ' + T.esc(L.pat.titulo) : '') + ' · menor entre o incentivo potencial e 3,6% do IRPJ principal (15%)</small></h3>' + pat +
       '<h3 class="apres-sub">LALUR Parte B: controles fiscais <small>saldos de prejuízo fiscal e base negativa (zerados até você informar) e IR retido</small></h3>' + parteB +
@@ -1670,7 +1687,8 @@
   function mutacoesVisiveis() {
     const k = E.rel.meses.findIndex((m) => m.comp === mesDaAssinatura());
     if (k < 0) return null;
-    return motor().mutacoesPl(E.rel, { k });
+    const comparar = !!E.assinaturaComparar && E.balancetesAnt.length > 0;
+    return motor().mutacoesPlComparada(E.rel, { k, anterior: comparar ? relAnterior() : null });
   }
   // As notas explicativas do mês escolhido (com a coluna do mês anterior, como no modelo do escritório).
   function notasVisiveis() {
@@ -1699,7 +1717,7 @@
   // Uma folha (balanço, DRE ou fluxo de caixa) para a data escolhida.
   function paginaDocumento(qual, d, editavel) {
     const emp = E.emp;
-    const comAnt = !!d.anterior && qual !== 'dfc';
+    const comAnt = !!d.anterior && (qual !== 'dfc' || !!(d.dfc && d.dfc.anterior));
     const zero = (l) => !Math.round(l.valor || 0) && !Math.round(l.anterior || 0);
     const cel = (l) => '<td class="num">' + dinheiro(l.valor) + '</td>' + (comAnt ? '<td class="num">' + dinheiro(l.anterior) + '</td>' : '');
     const nCol = comAnt ? 3 : 2;
@@ -1797,23 +1815,24 @@
       const f = d.dfc;
       titulo = 'Demonstração dos fluxos de caixa — método indireto';
       sub = 'Período de ' + d.periodo.de + ' a ' + d.periodo.ate + ' · ' + valores;
-      cab = '<th>&nbsp;</th><th class="num">' + periodoEmDuasLinhas(d.periodo) + '</th>';
-      const v = (x) => ({ valor: x, anterior: null });
+      cab = '<th>&nbsp;</th><th class="num">' + periodoEmDuasLinhas(d.periodo) + '</th>' + (comAnt ? '<th class="num">' + periodoEmDuasLinhas(f.anterior.periodo) + '</th>' : '');
+      const a = f.anterior || {};
+      const v = (x, y) => ({ valor: x, anterior: comAnt ? (y || 0) : null });
       // Com o detalhe ligado, cada linha abre nas contas que a formam (Dony, 24/09/2026).
       const abertas = (l) => (E.dfcDetalhe ? (l.detalhe || []).filter((x) => Math.round(x.valor))
-        .map((x) => linha('dem-conta dem-fundo n' + Math.min((x.nivel || 1) + 3, 7), (x.conta ? x.conta + ' · ' : '') + x.titulo, v(x.valor))).join('') +
+        .map((x) => linha('dem-conta dem-fundo n' + Math.min((x.nivel || 1) + 3, 7), (x.conta ? x.conta + ' · ' : '') + x.titulo, v(x.valor, null))).join('') +
         (l.aviso ? '<tr class="dem-conta dem-fundo n4 dem-nota"><td colspan="' + nCol + '">⚠️ ' + T.esc(l.aviso) + '</td></tr>' : '') : '');
-      const lista = (ls) => ls.map((l) => linha('dem-conta', l.rotulo, v(l.valor)) + abertas(l)).join('');
-      corpo = secaoDoc('Atividades operacionais') + linha('dem-conta', 'Lucro (prejuízo) líquido do período', v(f.lucro)) +
-        (Math.round(f.depreciacao) ? linha('dem-conta', 'Depreciação e amortização', v(f.depreciacao)) : '') + lista(f.operacionais) +
-        linha('dem-subtotal', 'Caixa líquido gerado (consumido) nas atividades operacionais', v(f.totalOperacional)) +
-        secaoDoc('Atividades de investimento') + lista(f.investimentos) + linha('dem-subtotal', 'Caixa líquido gerado (consumido) nas atividades de investimento', v(f.totalInvestimento)) +
-        secaoDoc('Atividades de financiamento') + lista(f.financiamentos) + linha('dem-subtotal', 'Caixa líquido gerado (consumido) nas atividades de financiamento', v(f.totalFinanciamento)) +
-        linha('dem-total', 'Aumento (redução) líquido de caixa e equivalentes', v(f.aumento)) +
-        linha('dem-conta', 'Caixa e equivalentes no início do período (' + f.dataInicio + ')', v(f.caixaInicio)) +
-        (E.dfcDetalhe ? (f.caixa || []).map((c) => linha('dem-conta dem-fundo n4', c.conta + ' · ' + c.titulo, v(c.inicio))).join('') : '') +
-        linha('dem-conta', 'Caixa e equivalentes no fim do período (' + d.data + ')', v(f.caixaFim)) +
-        (E.dfcDetalhe ? (f.caixa || []).map((c) => linha('dem-conta dem-fundo n4', c.conta + ' · ' + c.titulo, v(c.fim))).join('') : '');
+      const lista = (ls) => ls.map((l) => linha('dem-conta', l.rotulo, v(l.valor, l.anterior)) + abertas(l)).join('');
+      corpo = secaoDoc('Atividades operacionais') + linha('dem-conta', 'Lucro (prejuízo) líquido do período', v(f.lucro, a.lucro)) +
+        (Math.round(f.depreciacao) || Math.round(a.depreciacao || 0) ? linha('dem-conta', 'Depreciação e amortização', v(f.depreciacao, a.depreciacao)) : '') + lista(f.operacionais) +
+        linha('dem-subtotal', 'Caixa líquido gerado (consumido) nas atividades operacionais', v(f.totalOperacional, a.totalOperacional)) +
+        secaoDoc('Atividades de investimento') + lista(f.investimentos) + linha('dem-subtotal', 'Caixa líquido gerado (consumido) nas atividades de investimento', v(f.totalInvestimento, a.totalInvestimento)) +
+        secaoDoc('Atividades de financiamento') + lista(f.financiamentos) + linha('dem-subtotal', 'Caixa líquido gerado (consumido) nas atividades de financiamento', v(f.totalFinanciamento, a.totalFinanciamento)) +
+        linha('dem-total', 'Aumento (redução) líquido de caixa e equivalentes', v(f.aumento, a.aumento)) +
+        linha('dem-conta', 'Caixa e equivalentes no início do período (' + f.dataInicio + ')', v(f.caixaInicio, a.caixaInicio)) +
+        (E.dfcDetalhe ? (f.caixa || []).map((c) => linha('dem-conta dem-fundo n4', c.conta + ' · ' + c.titulo, v(c.inicio, null))).join('') : '') +
+        linha('dem-conta', 'Caixa e equivalentes no fim do período (' + d.data + ')', v(f.caixaFim, a.caixaFim)) +
+        (E.dfcDetalhe ? (f.caixa || []).map((c) => linha('dem-conta dem-fundo n4', c.conta + ' · ' + c.titulo, v(c.fim, null))).join('') : '');
     }
     return '<div class="dem dem-pagina' + (qual === 'balanco' && E.balancoPaisagem ? ' dem-deitada' : '') + '"><div class="dem-cab"><div class="dem-empresa">' + T.esc(emp.nome) + '</div>' +
       (emp.cnpj ? '<div class="dem-cnpj">CNPJ ' + T.esc(U.formatarCnpj(emp.cnpj)) + '</div>' : '') +
@@ -1848,7 +1867,7 @@
           (qual === 'dfc' ? '<span class="grupo-seg"><span class="seg-rotulo">Detalhe</span>' +
             seg(!E.dfcDetalhe, 'data-dfc-detalhe="0"', 'Grupos', 'Só as linhas da demonstração') +
             seg(!!E.dfcDetalhe, 'data-dfc-detalhe="1"', 'Contas', 'Abre as contas que formam cada linha') + '</span>' : '')) +
-      (qual !== 'dfc' && E.balancetesAnt.length ? '<label class="caixa-opcao" title="' + (qual === 'balanco' ? 'Ao lado, o balanço do fim de ' + (E.ano - 1) : 'Ao lado, os mesmos meses de ' + (E.ano - 1)) + '"><input type="checkbox" id="dc-comparar"' +
+      (E.balancetesAnt.length && qual !== 'notas' ? '<label class="caixa-opcao" title="' + (qual === 'balanco' ? 'Ao lado, o balanço do fim de ' + (E.ano - 1) : qual === 'dfc' ? 'Ao lado, o fluxo de caixa do EXERCÍCIO INTEIRO de ' + (E.ano - 1) + ' (janeiro a dezembro)' : 'Ao lado, os mesmos meses de ' + (E.ano - 1)) + '"><input type="checkbox" id="dc-comparar"' +
         (E.assinaturaComparar ? ' checked' : '') + '> Comparar com ' + (E.ano - 1) + '</label>' : '') +
       '<button type="button" class="botao pequeno" data-dc="assinaturas" title="O local e quem assina: o responsável pela empresa e o contador (fica guardado na empresa)">✎ Assinaturas</button>' +
       '<span class="rc-direita"><button type="button" class="botao primario" data-dc="imprimir" title="Na janela de impressão, escolha a impressora ou “Salvar como PDF”">🖨 Imprimir / salvar PDF</button></span></div>';

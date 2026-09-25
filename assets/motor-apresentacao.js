@@ -777,6 +777,34 @@
     const patMes = (m) => (m.tem ? Math.abs(valor(contaPAT, m) || 0) : null);
     const lucroMes = (m) => { const k = meses.indexOf(m); return dreMensal.totais.get('antesTributos')[k] || 0; };
 
+    // A apuração de um período (um trimestre ou o ano inteiro). O que muda no ANUAL: o adicional de 10% é
+    // sobre o que passa de R$ 20.000 por mês do período (R$ 240.000 no ano fechado) e a compensação de
+    // prejuízo é 30% do lucro real DO ANO — por isso o imposto anual não é a soma dos trimestres
+    // (Dony, 25/09/2026: "eu quero o LALUR trimestral e o anual, porque é diferente um do outro").
+    const apurar = (t, lista, b, mesesDoPeriodo) => {
+      const lucroContabil = lista.reduce((s, m) => s + (m.tem ? lucroMes(m) : 0), 0);
+      const adicoes = ajustes.reduce((s, a) => s + Math.max(0, somaDe(lista.map((m) => a.porMes.get(m.comp))) || 0), 0);
+      const exclusoes = ajustes.reduce((s, a) => s + Math.max(0, -(somaDe(lista.map((m) => a.porMes.get(m.comp))) || 0)), 0);
+      const lrAntes = lucroContabil + adicoes - exclusoes;
+      const compPrejuizo = Math.min(Math.max(0, lrAntes * P.compensacao), Number(b.prejuizoFiscal) || 0);
+      const lrIrpj = Math.max(0, lrAntes - compPrejuizo);
+      const irpj15 = lrIrpj * P.irpj;
+      const adicional = Math.max(0, lrIrpj - P.limiteAdicionalMes * mesesDoPeriodo) * P.adicional;
+      const irpjTotal = irpj15 + adicional;
+      const irRetido = Number(b.irRetido) || 0;
+      const compBaseNegativa = Math.min(Math.max(0, lrAntes * P.compensacao), Number(b.baseNegativa) || 0);
+      const baseCsll = Math.max(0, lrAntes - compBaseNegativa);
+      const csll = baseCsll * P.csll;
+      const estimado = irpjTotal + csll - irRetido;
+      const patDespesa = lista.reduce((s, m) => s + (patMes(m) || 0), 0);
+      const patPotencial = patDespesa * P.patPercentual * P.patRedutor;
+      const patLimite = irpj15 * P.patLimite;
+      const patAproveitavel = Math.min(patPotencial, patLimite);
+      const irpjLiquido = Math.max(0, irpjTotal - irRetido - patAproveitavel);
+      return { t, lucroContabil, adicoes, exclusoes, lrAntes, compPrejuizo, lrIrpj, irpj15, adicional, irpjTotal, irRetido, compBaseNegativa, baseCsll, csll, estimado,
+        patDespesa, patPotencial, patLimite, patAproveitavel, irpjLiquido, total: irpjLiquido + csll, mesesDoPeriodo };
+    };
+
     // Parte A por trimestre.
     const porTrimestre = trimestres.map((t) => {
       const b = parteB[t.id] || {};
@@ -846,6 +874,37 @@
       linhas: LINHAS_A.map(([bloco, rotulo, campo, destaque]) => ({ bloco, rotulo, campo, destaque: !!destaque, valores: colunasParteA.map((c) => c[campo]) })),
     };
 
+    // ---------- LALUR ANUAL (lucro real anual, o ano inteiro como um período só)
+    // Ao lado, a soma dos trimestres: a diferença entre as duas colunas é o que a empresa ganha ou perde
+    // escolhendo um regime ou o outro (o adicional de 10% e a trava de 30% da compensação mudam de conta).
+    const mesesComDado = meses.filter((m) => m.tem);
+    let anual = null;
+    if (mesesComDado.length) {
+      const primeiro = parteB[(trimestres[0] || {}).id] || {};
+      // No anual, o prejuízo a compensar é o saldo do COMEÇO DO ANO (o que foi informado no 1º trimestre) e o
+      // IR retido é o do ano inteiro (a soma do que foi informado em cada trimestre).
+      const bAnual = {
+        prejuizoFiscal: parteB.anual && parteB.anual.prejuizoFiscal !== undefined ? parteB.anual.prejuizoFiscal : primeiro.prejuizoFiscal,
+        baseNegativa: parteB.anual && parteB.anual.baseNegativa !== undefined ? parteB.anual.baseNegativa : primeiro.baseNegativa,
+        irRetido: parteB.anual && parteB.anual.irRetido !== undefined ? parteB.anual.irRetido
+          : trimestres.reduce((s, t) => s + (Number((parteB[t.id] || {}).irRetido) || 0), 0),
+      };
+      const doAno = apurar(null, mesesComDado, bAnual, mesesComDado.length);
+      const soma = somar(porTrimestre);
+      const colunasAnual = [
+        Object.assign({ id: 'anual', rotulo: 'Apuração anual · ' + rotuloAcumulado(meses), anual: true }, doAno),
+        Object.assign({ id: 'soma-trimestres', rotulo: 'Soma dos trimestres', soma: true }, soma),
+      ];
+      anual = {
+        completo: mesesComDado.length === 12,
+        meses: mesesComDado.length,
+        colunas: colunasAnual.map((c) => ({ id: c.id, rotulo: c.rotulo, soma: !!c.soma, anual: !!c.anual })),
+        linhas: LINHAS_A.map(([bloco, rotulo, campo, destaque]) => ({ bloco, rotulo, campo, destaque: !!destaque, valores: colunasAnual.map((c) => c[campo]) })),
+        diferenca: doAno.total - soma.total,
+        irRetido: bAnual.irRetido, prejuizoFiscal: Number(bAnual.prejuizoFiscal) || 0, baseNegativa: Number(bAnual.baseNegativa) || 0,
+      };
+    }
+
     // PAT (tabela própria): os meses, os trimestres, o semestre e o acumulado.
     const colunasPat = meses.map((m) => ({ id: m.comp, rotulo: m.rotulo, mes: m, falta: !m.tem })).concat(colunasParteA.map((c) => ({ id: c.id, rotulo: c.rotulo, lalur: c })));
     const pat = {
@@ -875,7 +934,7 @@
     return {
       parametros: P, contaPAT,
       ajustes: { colunas: colunasAjustes.map((c) => ({ id: c.id, rotulo: c.rotulo, trimestre: !!c.trimestre, falta: !!c.falta })), linhas: ajustes, adicoes: adicoesCol, exclusoes: exclusoesCol },
-      pat, parteA, parteB: parteBTabela, premissas: PREMISSAS, porTrimestre,
+      pat, parteA, anual, parteB: parteBTabela, premissas: PREMISSAS, porTrimestre,
       ajustesSemConta: ajustes.filter((a) => !a.noBalancete).map((a) => a.conta),
     };
   }
@@ -1284,12 +1343,18 @@
     }
     dre.forEach((l) => { if (l.tipo === 'grupo') l.detalhe = arvoreDaLinha(l.id); });
 
-    // ---------- Fluxo de caixa (método indireto) no período
-    const cb = contasDoBalanco(rel.contas);
-    let dfc = null;
-    const caixaContas = (cb.caixa || []).length ? cb.caixa : (cb.disponivel ? [cb.disponivel] : []);
-    if (!cb.ac || !caixaContas.length) avisos.push('Não achei o ' + (!cb.ac ? 'ativo circulante' : 'caixa e equivalentes (caixa, bancos e aplicações de liquidez imediata)') + ' no plano de contas: sem ele não dá para montar o fluxo de caixa.');
-    else {
+    // ---------- Fluxo de caixa (método indireto). A mesma conta serve para o período atual e para o do ano
+    // anterior (o comparativo), por isso vira função: rel/ini/m/ks entram como parâmetro.
+    function fluxoDe(rel, ini, ks, avisos) {
+      const m = rel.meses[ks[ks.length - 1]];
+      const ano = rel.ano;
+      const cb = contasDoBalanco(rel.contas);
+      const caixaContas = (cb.caixa || []).length ? cb.caixa : (cb.disponivel ? [cb.disponivel] : []);
+      if (!cb.ac || !caixaContas.length) {
+        avisos.push('Não achei o ' + (!cb.ac ? 'ativo circulante' : 'caixa e equivalentes (caixa, bancos e aplicações de liquidez imediata)') + ' no plano de contas: sem ele não dá para montar o fluxo de caixa.');
+        return null;
+      }
+      {
       const saldos = (rotulo, campo) => { const mapa = new Map(); rel.base.forEach((x) => { if (x.mes === rotulo) mapa.set(x.conta, x[campo]); }); return mapa; };
       const abertura = saldos(rel.meses[ini].rotulo, 'saldoAnterior'), fechamento = saldos(m.rotulo, 'saldoAtual');
       const delta = (c) => (fechamento.get(c.conta) || 0) - (abertura.get(c.conta) || 0);
@@ -1373,12 +1438,41 @@
       const aumento = totOp + totInv + totFin;
       const diferenca = caixaFim - caixaInicio - aumento;
       if (Math.abs(diferenca) > 1) avisos.push('O fluxo de caixa não fecha com o disponível por ' + Util.formatarCentavos(diferenca) + ' (o balancete de ' + m.rotulo + ' ou de ' + rel.meses[ini].rotulo + ' pode não estar fechando).');
-      dfc = { lucro, depreciacao, operacionais: tira0(operacionais), investimentos: tira0(investimentos), financiamentos: tira0(financiamentos),
+      return { lucro, depreciacao, operacionais: tira0(operacionais), investimentos: tira0(investimentos), financiamentos: tira0(financiamentos),
         totalOperacional: totOp, totalInvestimento: totInv, totalFinanciamento: totFin, aumento, caixaInicio, caixaFim, diferenca, confere: Math.abs(diferenca) <= 1,
         dataInicio: dataDoFim(rel.meses[ini].mes === 1 ? ano - 1 : ano, rel.meses[ini].mes === 1 ? 12 : rel.meses[ini].mes - 1),
         disponivel: caixaContas.map((c) => c.conta + ' ' + c.titulo).join(' · '),
         // As contas que são caixa e equivalentes, com o saldo dos dois lados: dá para abrir na tela e conferir.
-        caixa: caixaContas.map((c) => ({ conta: c.conta, titulo: nomeDaDemonstracao(c.titulo), inicio: abertura.get(c.conta) || 0, fim: fechamento.get(c.conta) || 0 })) };
+        caixa: caixaContas.map((c) => ({ conta: c.conta, titulo: nomeDaDemonstracao(c.titulo), inicio: abertura.get(c.conta) || 0, fim: fechamento.get(c.conta) || 0 })),
+        periodo: { de: dataDoComeco(ano, rel.meses[ini].mes), ate: dataDoFim(ano, m.mes) } };
+      }
+    }
+    const dfc = fluxoDe(rel, ini, ks, avisos);
+    // COMPARATIVO DO FLUXO DE CAIXA: o ANO INTEIRO anterior, não o mesmo pedaço de ano (Dony, 25/09/2026: "o
+    // fluxo de caixa é diferente… tem que ser de janeiro a 31 do 12 com o que você tem agora de 26"). O
+    // balanço compara data com data e a DRE compara os mesmos meses; aqui a coluna de trás é o exercício
+    // fechado. Se faltar mês no ano anterior, o período da coluna diz até onde ele vai e o programa avisa.
+    if (dfc && comAnt && anterior) {
+      const ksAno = anterior.meses.map((x, i) => (x.tem ? i : -1)).filter((i) => i >= 0);
+      const dfcAnt = ksAno.length ? fluxoDe(anterior, ksAno[0], ksAno, []) : null;
+      if (dfcAnt) {
+        const chave = (l) => l.conta || l.rotulo;
+        const casar = (la, lb) => mesclar(la, lb, chave).map(({ a, b }) => Object.assign({}, a || { rotulo: b.rotulo, conta: b.conta || null, valor: 0 }, { anterior: b ? b.valor : 0 }));
+        dfc.operacionais = casar(dfc.operacionais, dfcAnt.operacionais);
+        dfc.investimentos = casar(dfc.investimentos, dfcAnt.investimentos);
+        dfc.financiamentos = casar(dfc.financiamentos, dfcAnt.financiamentos);
+        dfc.anterior = {
+          lucro: dfcAnt.lucro, depreciacao: dfcAnt.depreciacao, totalOperacional: dfcAnt.totalOperacional,
+          totalInvestimento: dfcAnt.totalInvestimento, totalFinanciamento: dfcAnt.totalFinanciamento,
+          aumento: dfcAnt.aumento, caixaInicio: dfcAnt.caixaInicio, caixaFim: dfcAnt.caixaFim,
+          confere: dfcAnt.confere, periodo: dfcAnt.periodo, dataInicio: dfcAnt.dataInicio, caixa: dfcAnt.caixa,
+          anoTodo: ksAno.length === 12,
+        };
+        if (ksAno.length !== 12) {
+          avisos.push('O fluxo de caixa de ' + anterior.ano + ' foi montado com ' + ksAno.length + ' mês(es) de balancete (' +
+            dfcAnt.periodo.de + ' a ' + dfcAnt.periodo.ate + '): para o exercício inteiro, carregue os balancetes de janeiro a dezembro de ' + anterior.ano + '.');
+        }
+      }
     }
     return {
       k, mes: m, data: dataDoFim(ano, m.mes), periodo, meses: ks, soMes: !!opc.soMes, falta, anterior: ant,
@@ -1644,6 +1738,33 @@
     [/AJUSTE|AVALIACAO PATRIMONIAL/, 'Ajustes de avaliação patrimonial', 'Ajustes de avaliação patrimonial'],
     [/ACOES? EM TESOURARIA/, 'Alienação de ações em tesouraria', 'Aquisição de ações em tesouraria'],
   ];
+  // Com o ano anterior junto (op.anterior), a DMPL fica comparativa do jeito que se usa: primeiro os saldos e
+  // as mutações do exercício anterior, depois os do período atual, na mesma tabela e nas mesmas colunas.
+  function mutacoesPlComparada(rel, op) {
+    const opc = op || {};
+    const atual = mutacoesPl(rel, { k: opc.k });
+    const anterior = opc.anterior;
+    if (!atual || !anterior) return atual;
+    const ksAno = anterior.meses.map((x, i) => (x.tem ? i : -1)).filter((i) => i >= 0);
+    const antes = ksAno.length ? mutacoesPl(anterior, { k: ksAno[ksAno.length - 1] }) : null;
+    if (!antes) return atual;
+    // As colunas dos dois anos, casadas pela conta (o nome pode ter mudado; a conta não).
+    const chave = (c) => c.conta || (c.resultado ? '#resultado' : c.titulo);
+    const colunas = atual.colunas.slice();
+    antes.colunas.forEach((c) => { if (!colunas.some((x) => chave(x) === chave(c))) colunas.push(c); });
+    const ondeNo = (cols) => colunas.map((c) => cols.findIndex((x) => chave(x) === chave(c)));
+    const deAtual = ondeNo(atual.colunas), deAntes = ondeNo(antes.colunas);
+    const espalhar = (linha, onde) => {
+      const valores = colunas.map((c, i) => (onde[i] >= 0 ? linha.valores[onde[i]] || 0 : 0));
+      return Object.assign({}, linha, { valores, total: valores.reduce((s, v) => s + v, 0) });
+    };
+    const linhas = antes.linhas.map((l) => espalhar(l, deAntes)).concat(atual.linhas.slice(1).map((l) => espalhar(l, deAtual)));
+    return Object.assign({}, atual, {
+      colunas, linhas, comparada: true, anoAnterior: anterior.ano, anoTodoAnterior: ksAno.length === 12,
+      periodo: { de: antes.periodo.de, ate: atual.periodo.ate },
+      confere: atual.confere && antes.confere, falhas: (antes.falhas || []).concat(atual.falhas || []),
+    });
+  }
   function mutacoesPl(rel, op) {
     const opc = op || {};
     const k = opc.k;
@@ -1846,6 +1967,6 @@
     return { mes: m, data: dataDoFim(rel.ano, m.mes), colunas: colunas.map((c) => c.rotulo), periodo, notas };
   }
 
-  return { montar, compararBalancetes, indicadores, comparativo, simulacao, lalurSimulacao, demonstracoes, notasExplicativas, mutacoesPl, nomeDaDemonstracao, noMeioDaFrase, INDICADORES, contasDoBalanco, MODELO_DRE, FORA_DA_DRE, PARAMETROS, AJUSTES_MODELO, CONTA_PAT_MODELO, PREMISSAS, rotuloMes, compararContas, valorUsado,
+  return { montar, compararBalancetes, indicadores, comparativo, simulacao, lalurSimulacao, demonstracoes, notasExplicativas, mutacoesPl, mutacoesPlComparada, nomeDaDemonstracao, noMeioDaFrase, INDICADORES, contasDoBalanco, MODELO_DRE, FORA_DA_DRE, PARAMETROS, AJUSTES_MODELO, CONTA_PAT_MODELO, PREMISSAS, rotuloMes, compararContas, valorUsado,
     LINHAS_DO_MAPA, sugerirMapaDre, mapaDoModelo, reclassificarConta, planoJunto, linhaNoMapa, linhaDoModelo, avaliarModelo, linhasSugeridas, nomeNormal };
 });
