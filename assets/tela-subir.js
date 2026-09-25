@@ -71,6 +71,16 @@
     return app().armazenamento.guardarArquivo(codigo, meta, { tipo: 'balancete', empresa: b.empresa, cnpj: b.cnpj, periodo: b.periodo, contas: b.contas, total: b.total }, r.bytes);
   }
 
+  // Guarda o PLANO DE CONTAS da empresa (opcional, um por empresa: o mais novo vale e os outros viram
+  // versões). Dony, 25/09/2026, a Zelco: "o balancete saiu com os nomes tudo cortado; quero salvar o plano de
+  // contas dessa empresa para ele puxar o nome pelo plano".
+  function guardarPlano(codigo, r, comp, extra) {
+    const p = r.plano;
+    const meta = Object.assign({ tipo: 'plano', arquivo: r.nomeArquivo, competencia: comp, contas: p.total,
+      empresaNoArquivo: p.empresa, hashDoConteudo: r.hash }, extra || {});
+    return app().armazenamento.guardarArquivo(codigo, meta, { tipo: 'plano', empresa: p.empresa, contas: p.contas }, r.bytes);
+  }
+
   // Guarda um livro diário no lugar do ano (competência = janeiro do ano do fim do diário). dJunto: o diário
   // do ano DEPOIS de juntar com o que já estava guardado — o arquivo pode trazer só alguns meses.
   function guardarDiario(codigo, r, comp, extra, dJunto) {
@@ -86,6 +96,7 @@
   // competência; razão = mesma competência e papel — e a mesma conta no lugar de várias contas (①);
   // livro diário = o do mesmo ano. Sem o lugar, o razão é o da mesma conta.
   function doMesmoLugar(metas, m, lugar) {
+    if (m.tipo === 'plano') return metas.filter((x) => x.tipo === 'plano');   // um plano por empresa, sem mês
     if (m.tipo === 'diario') return metas.filter((x) => x.tipo === 'diario' && String(x.competencia).slice(0, 4) === String(m.competencia).slice(0, 4));
     if (m.tipo !== 'razao') return metas.filter((x) => x.tipo === m.tipo && x.competencia === m.competencia);
     const porConta = !lugar || lugar.varias;
@@ -267,6 +278,7 @@
       return (m.contas || 0) + ' contas · ' + (m.resultado >= 0 ? 'lucro' : 'prejuízo') + ' do mês ' + T.moeda(Math.abs(m.resultado || 0)) +
         (m.confere === false ? ' · <span class="falta">não fecha</span>' : '');
     }
+    if (m.tipo === 'plano') return (m.contas || 0) + ' contas · o nome vem daqui';
     return m.tipo === 'razao'
       ? 'conta ' + T.esc(m.conta.codigo + ' ' + (m.conta.nome || '')) + ' · ' + (m.lancamentos || 0) + ' lanç.' + (m.periodo ? ' · ' + T.esc(m.periodo.de + ' a ' + m.periodo.ate) : '')
       : (m.titulos || 0) + ' títulos · ' + T.moeda(m.total || 0);
@@ -688,6 +700,36 @@
         const mesesDoArquivo = (r.diario.meses || []).filter((m) => m.lancamentos).map((m) => U.nomeCompetencia(m.comp));
         if (mesesDoArquivo.length) T.avisoRapido('Entrou em ' + mesesDoArquivo.join(', ') + '.', null, 4000);
         resumo = d.lancamentos.length.toLocaleString('pt-BR') + ' lançamentos · ' + d.periodo.de + ' a ' + d.periodo.ate + (d.confere ? ' · débitos = créditos' : '');
+      } else if (lugar.tipo === 'plano') {
+        // PLANO DE CONTAS da empresa. No lugar do plano o programa lê mesmo sem o título no arquivo: quem
+        // soltou ali já disse o que é.
+        if (r.tipo !== 'plano' || !r.plano) {
+          let abas = r.abas || null;
+          try { if (!abas) abas = raiz.LerPlanilha.abrir(r.bytes).abas; } catch (e) { abas = null; }
+          let p = null;
+          try { p = abas && raiz.LerPlano.ler(abas, { nomeArquivo: arquivo.name, aceitar: true }); } catch (e) { p = null; }
+          if (!p || !p.contas.length) { await naoServe('um plano de contas', r.tipo !== 'desconhecido' && r.tipo !== 'plano'); return false; }
+          r.tipo = 'plano';
+          r.plano = p;
+          r.avisos = (r.avisos || []).concat(p.avisos || []);
+        }
+        const p = r.plano;
+        const emp = app().empresas.find((e) => String(e.codigo) === String(codigo)) || {};
+        if (p.empresa && emp.nome && U.semAcento(p.empresa).slice(0, 10).toUpperCase() !== U.semAcento(emp.nome).slice(0, 10).toUpperCase()) {
+          const ok = await T.confirmar({ titulo: 'Esse plano é de outra empresa?',
+            texto: 'O plano diz <b>' + T.esc(p.empresa) + '</b>, e esta empresa é <b>' + T.esc(emp.nome) + '</b>.',
+            botao: 'Guardar mesmo assim', perigo: true });
+          if (!ok) return false;
+        }
+        const ativo = emUsoNoLugar(lugar);
+        if (!(ativo && ativo.hashDoConteudo === r.hash)) {
+          jaEra = false;
+          let g = await guardarPlano(codigo, r, lugar.competencia);
+          if (g.jaExistia && (!ativo || g.meta.id !== ativo.id)) g = await guardarPlano(codigo, r, lugar.competencia, { recarga: U.agoraISO() });
+          await versaoNova(g, ativo, null);
+        }
+        resumo = p.total + ' contas' + (p.empresa ? ' · ' + p.empresa : '');
+        T.avisoRapido('Plano de contas guardado: daqui para a frente o nome das contas sai dele (' + p.total + ' contas).', 'ok', 6000);
       } else if (lugar.tipo === 'balancete') {
         // Balancete que o leitor geral não entendeu (ou em que a conta não fecha): as colunas guardadas na
         // empresa; senão pelo conteúdo ou indicadas por quem usa (Dony, 18/09/2026: "vários tipos de
@@ -785,6 +827,31 @@
     return { id: 'diario', parte: 'Contabilidade', titulo: 'Livro diário de ' + ano, sub: 'o ano todo ou um pedaço (jan a mar, jan a out…)', nome: 'livro diário de ' + ano,
       log: 'diario', tipo: 'diario', competencia: ano + '-01-01', arquivos: doAno.length ? [doAno[0]] : [] };
   }
+  // O lugar do PLANO DE CONTAS: um por empresa, opcional. Serve para empresa cujo sistema imprime o nome da
+  // conta cortado no balancete (Dony, 25/09/2026, a Zelco): com o plano guardado, o nome de cada conta sai
+  // dele. Nas outras empresas o cartão fica vazio e ninguém precisa mexer.
+  function lugarDoPlano(ano, metas) {
+    const doTipo = (metas || []).filter((m) => m.tipo === 'plano').sort((a, b) => U.paraMs(b.enviadoEm) - U.paraMs(a.enviadoEm));
+    return { id: 'plano', parte: 'Plano de contas · opcional', titulo: 'Plano de contas', sub: 'o nome completo de cada conta',
+      nome: 'plano de contas', log: 'plano', tipo: 'plano', competencia: String(ano) + '-01-01',
+      arquivos: doTipo.length ? [doTipo[0]] : [], opcional: true };
+  }
+  // O plano de contas da empresa, pronto para procurar o nome de uma conta. null quando não tem.
+  async function planoDaEmpresa(metas) {
+    const m = (metas || []).filter((x) => x.tipo === 'plano').sort((a, b) => U.paraMs(b.enviadoEm) - U.paraMs(a.enviadoEm))[0];
+    if (!m || !raiz.LerPlano) return null;
+    try {
+      const c = await app().armazenamento.conteudoDoArquivo(m.id);
+      if (!c || !c.contas || !c.contas.length) return null;
+      const p = raiz.LerPlano.paraProcurar(c);
+      return p.quantas ? Object.assign(p, { meta: m }) : null;
+    } catch (e) { return null; }
+  }
+  // As contas de um balancete com o nome do plano no lugar do nome cortado do arquivo.
+  function comNomesDoPlano(contas, plano) {
+    return plano && raiz.LerPlano ? raiz.LerPlano.comOsNomes(contas, plano) : (contas || []);
+  }
+
   // Os cartões do diário MÊS A MÊS (Dony, 25/09/2026: "quero poder salvar mês a mês o diário, assim como o
   // balancete"). O arquivo guardado é um só — o diário do ano —, então o cartão do mês mostra o que aquele mês
   // tem e de qual arquivo ele veio; carregar em qualquer mês junta tudo no mesmo diário do ano.
@@ -840,9 +907,10 @@
   // Os que trazem o código reduzido (o diário usa esse código): o saldo inicial e a conferência saem deles.
   async function balancetesDoDiario(metas, periodo) {
     const lista = [];
+    const plano = await planoDaEmpresa(metas);   // nome da conta pelo plano, quando a empresa tem um
     for (const m of metasDosBalancetes(metas, periodo)) {
       const c = await app().armazenamento.conteudoDoArquivo(m.id);
-      if (c && c.contas && c.contas.some((x) => String(x.reduzido || '').trim())) lista.push({ competencia: m.competencia, contas: c.contas, arquivo: m.arquivo });
+      if (c && c.contas && c.contas.some((x) => String(x.reduzido || '').trim())) lista.push({ competencia: m.competencia, contas: comNomesDoPlano(c.contas, plano), arquivo: m.arquivo });
     }
     return lista;
   }
@@ -1286,6 +1354,7 @@
   }
 
   raiz.TelaSubir = { painel, botao, ligar, ligarBotao, subir, apagar, verVersao, guardarContaDoRazao, guardarTitulos, guardarBalancete, guardarDiario, doMesmoLugar, versoesDoArquivo,
-    htmlComparacao, contagensDaComparacao, lugarDoDiario, lugaresDoDiarioPorMes, diariosEmUso, diarioDoLugar, balancetesDoDiario, doDiario,
+    htmlComparacao, contagensDaComparacao, lugarDoDiario, lugaresDoDiarioPorMes, lugarDoPlano, planoDaEmpresa, comNomesDoPlano,
+    diariosEmUso, diarioDoLugar, balancetesDoDiario, doDiario,
     sincronizarDoDiario, prepararDoDiario, cartaoDaEscolha, ligarCartaoDaEscolha, textoSemDiario, lugarDoBalanceteDoDiario, contasEscolhidas, resumoDoDiario };
 })(self);

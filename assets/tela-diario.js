@@ -62,7 +62,8 @@
     // Um cartão por mês do diário (e outro por mês do balancete): dá para carregar o ano todo num arquivo só
     // ou mês a mês, e o programa popula os meses que vierem no arquivo.
     const lugaresDia = raiz.TelaSubir.lugaresDoDiarioPorMes(anoEscolhido, diario);
-    E = { codigo, emp, ano: anoEscolhido, metas, md, diario, balancetes, lugares: [lugarDiario].concat(lugaresDia).concat(lugaresBal),
+    const lugarPlano = raiz.TelaSubir.lugarDoPlano(anoEscolhido, metas);
+    E = { codigo, emp, ano: anoEscolhido, metas, md, diario, balancetes, lugares: [lugarDiario].concat(lugaresDia).concat(lugaresBal).concat([lugarPlano]),
       anos: Array.from(new Set(anosComDiario.concat([anoAtual, anoAtual - 1, anoEscolhido]))).sort((a, b) => b - a), anosComDiario,
       razao: mesmo ? E.razao : null };
     if (diario) {

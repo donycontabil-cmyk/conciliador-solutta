@@ -8,11 +8,11 @@
  */
 (function (raiz, fabrica) {
   if (typeof module === 'object' && module.exports) {
-    module.exports = fabrica(require('./util.js'), require('./ler-planilha.js'), require('./ler-razao.js'), require('./ler-financeiro.js'), require('./familias.js'), require('./ler-balancete.js'), require('./ler-diario.js'));
+    module.exports = fabrica(require('./util.js'), require('./ler-planilha.js'), require('./ler-razao.js'), require('./ler-financeiro.js'), require('./familias.js'), require('./ler-balancete.js'), require('./ler-diario.js'), require('./ler-plano.js'));
   } else {
-    raiz.Leitor = fabrica(raiz.Util, raiz.LerPlanilha, raiz.LerRazao, raiz.LerFinanceiro, raiz.Familias, raiz.LerBalancete, raiz.LerDiario);
+    raiz.Leitor = fabrica(raiz.Util, raiz.LerPlanilha, raiz.LerRazao, raiz.LerFinanceiro, raiz.Familias, raiz.LerBalancete, raiz.LerDiario, raiz.LerPlano);
   }
-})(typeof self !== 'undefined' ? self : this, function (Util, LerPlanilha, LerRazao, LerFinanceiro, Familias, LerBalancete, LerDiario) {
+})(typeof self !== 'undefined' ? self : this, function (Util, LerPlanilha, LerRazao, LerFinanceiro, Familias, LerBalancete, LerDiario, LerPlano) {
   'use strict';
 
   const NOMES_DOS_TIPOS = {
@@ -22,6 +22,7 @@
     financeiro_receber: 'Contas a receber em aberto',
     financeiro_adiantamento: 'Adiantamentos a fornecedores em aberto',
     balancete: 'Balancete',
+    plano: 'Plano de contas',
     extrato: 'Extrato bancário',
     desconhecido: 'Arquivo não reconhecido',
   };
@@ -96,6 +97,20 @@
       }
       r.contas = razao.contas.map((c) => Object.assign({ papel: Familias.papelDaConta(c, { nomeArquivo }) }, c));
       return fechar(r);
+    }
+    // Plano de contas (só código e nome, sem valor nenhum): vem antes do balancete, que também tem código e
+    // nome. O reconhecimento é estreito de propósito — pede o título "Plano de contas" / "Relação das contas
+    // contábeis" e nenhuma coluna de dinheiro.
+    const recPlano = LerPlano && LerPlano.reconhecer(planilha.abas, { nomeArquivo });
+    if (recPlano) {
+      try {
+        const p = LerPlano.ler(planilha.abas, { nomeArquivo });
+        r.tipo = 'plano';
+        r.motivo = recPlano.motivo;
+        r.plano = p;
+        r.avisos = r.avisos.concat(p.avisos);
+        return fechar(r);
+      } catch (e) { /* não era: segue para o balancete */ }
     }
     // Balancete (relatório de apresentação): lido conta por conta quando o cabeçalho é reconhecido.
     const recBal = LerBalancete && LerBalancete.reconhecer(planilha.abas);

@@ -61,10 +61,11 @@
     const metasBal = metas.filter((m) => m.tipo === 'balancete' && String(m.competencia).slice(0, 4) === anoDoDiario)
       .sort((a, b) => String(a.competencia).localeCompare(String(b.competencia)));
     const balancetes = [];
+    const planoDaEmp = await raiz.TelaSubir.planoDaEmpresa(metas);   // nome da conta pelo plano, quando tem
     for (const b of metasBal) {
       const c = await arm.conteudoDoArquivo(b.id);
       if (conferir && !conferir()) return null;
-      balancetes.push({ competencia: b.competencia, contas: (c.balancete && c.balancete.contas) || c.contas || [] });
+      balancetes.push({ competencia: b.competencia, contas: raiz.TelaSubir.comNomesDoPlano((c.balancete && c.balancete.contas) || c.contas || [], planoDaEmp) });
     }
     return { meta, diario: conteudo.diario || conteudo, balancetes, plano: MD().planoDosBalancetes(balancetes), metas };
   }

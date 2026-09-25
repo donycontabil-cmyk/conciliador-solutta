@@ -43,6 +43,27 @@
   const ARREDONDAR = 2; // casas do x/y usadas para juntar (o PDF tem frações de ponto)
   const arred = (v) => Math.round(v * ARREDONDAR) / ARREDONDAR;
 
+  // PALAVRA PARTIDA NO MEIO ("Banco Saf ra", "Cof ins", "Imóv eis", "Dev edora"). Alguns sistemas mandam a
+  // letra com um ajuste de espaçamento depois do v, do f, do y e do w, e o leitor de PDF entende aquilo como
+  // espaço — o espaço está no próprio arquivo, não na montagem das linhas (Dony, 25/09/2026, o plano de contas
+  // da Zelco). Em português nenhuma palavra termina nessas quatro letras, então: letra minúscula v/f/y/w no
+  // fim de um pedaço de três letras ou mais, espaço, e a próxima começando com letra minúscula = uma palavra
+  // só. "Banco do Itau" e "Nota fiscal de..." não mudam (o "do" e o "de" não terminam em v/f/y/w).
+  const SO_LETRAS = /^[A-Za-zÀ-ÿ]+$/;
+  const TERMINA_PARTIDO = /[vfyw]$/;      // minúsculas: "Saf", "Móv", "Day", "Ny", "v"
+  const COMECA_MINUSCULA = /^[a-zà-ÿ]/;
+  function palavraInteira(t) {
+    if (t.indexOf(' ') < 0) return t;
+    const partes = t.split(' ');
+    const saida = [partes[0]];
+    for (let i = 1; i < partes.length; i++) {
+      const antes = saida[saida.length - 1], agora = partes[i];
+      if (SO_LETRAS.test(antes) && TERMINA_PARTIDO.test(antes) && COMECA_MINUSCULA.test(agora)) saida[saida.length - 1] = antes + agora;
+      else saida.push(agora);
+    }
+    return saida.join(' ');
+  }
+
   // ------------------------------------------------------------------
   // Uma página: os pedaços de texto viram linhas e colunas.
   // itens: [{ str, x, y, largura, altura }]
@@ -85,7 +106,7 @@
           ultimo.largura = it.x + larguraDele - ultimo.x;
         } else juntos.push({ str: it.str, x: it.x, largura: larguraDele, altura: it.altura });
       });
-      l.pedacos = juntos.map((p) => ({ x: arred(p.x), largura: arred(p.largura || 0), texto: String(p.str).replace(/\s+/g, ' ').trim() })).filter((p) => p.texto);
+      l.pedacos = juntos.map((p) => ({ x: arred(p.x), largura: arred(p.largura || 0), texto: palavraInteira(String(p.str).replace(/\s+/g, ' ').trim()) })).filter((p) => p.texto);
     });
     return porY.filter((l) => l.pedacos.length);
   }

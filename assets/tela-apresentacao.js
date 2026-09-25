@@ -190,11 +190,15 @@
         nome: 'balancete de ' + U.nomeCompetencia(comp), log: 'apresentacao/balancete', tipo: 'balancete', competencia: comp,
         arquivos: doMes.length ? [doMes[0]] : [], opcional: true };
     });
+    // O plano de contas da empresa (opcional): quando existe, o nome de cada conta sai dele — tem sistema que
+    // imprime o nome cortado no balancete (Dony, 25/09/2026, a Zelco).
+    const plano = await raiz.TelaSubir.planoDaEmpresa(metas);
+    lugares.push(raiz.TelaSubir.lugarDoPlano(anoEscolhido, metas));
     const balancetes = [];
     for (const l of lugares) {
-      if (!l.arquivos.length) continue;
+      if (l.tipo !== 'balancete' || !l.arquivos.length) continue;
       const c = await arm.conteudoDoArquivo(l.arquivos[0].id);
-      if (c && c.contas) balancetes.push({ competencia: l.competencia, contas: c.contas });
+      if (c && c.contas) balancetes.push({ competencia: l.competencia, contas: raiz.TelaSubir.comNomesDoPlano(c.contas, plano) });
     }
     // Os balancetes do ano anterior, para a aba Comparativo.
     const balancetesAnt = [];
@@ -203,7 +207,7 @@
       const doMes = doTipo.filter((m) => m.competencia === comp).sort((a, b) => U.paraMs(b.enviadoEm) - U.paraMs(a.enviadoEm));
       if (!doMes.length) continue;
       const c = await arm.conteudoDoArquivo(doMes[0].id);
-      if (c && c.contas) balancetesAnt.push({ competencia: comp, contas: c.contas });
+      if (c && c.contas) balancetesAnt.push({ competencia: comp, contas: raiz.TelaSubir.comNomesDoPlano(c.contas, plano) });
     }
     const registro = (await arm.conciliacoes(codigo, anoEscolhido + '-01-01')).find((r) => r.id === idRegistro(codigo, anoEscolhido)) || null;
     if (conferir && !conferir()) return;
@@ -229,7 +233,8 @@
     const painel = raiz.TelaSubir.painel({ chave, titulo: 'Balancetes de ' + E.ano, lugares: E.lugares, metas: E.metas, fixo: semBalancete,
       resumo: carregados.length + ' de 12 meses',
       antes: '<p class="suave pequeno" style="margin:-4px 0 10px">Um balancete por mês (período do dia 1º ao último dia do mês). ' +
-        'O relatório usa do começo do trimestre do primeiro balancete até o último: faltando um mês no meio, ele fica vazio e o trimestre fica parcial.</p>' });
+        'O relatório usa do começo do trimestre do primeiro balancete até o último: faltando um mês no meio, ele fica vazio e o trimestre fica parcial.<br>' +
+        'O <b>plano de contas</b> é opcional e serve para empresa cujo sistema imprime o nome da conta cortado no balancete: com ele guardado, o nome sai do plano.</p>' });
     // Tudo dentro de um "apres-raiz" novo a cada desenho: os cliques ficam ligados nele e somem com ele
     // (ligar no próprio `el`, que é o mesmo a cada tela, somaria um ouvinte a cada redesenho).
     el.innerHTML = '<div class="apres-raiz">' +
