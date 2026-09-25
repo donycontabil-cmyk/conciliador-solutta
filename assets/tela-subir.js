@@ -339,7 +339,7 @@
           '<div class="linha-flex" style="margin-top:auto"><button type="button" class="botao pequeno' + (tem || l.opcional ? '' : ' primario') + '" data-subir-lugar="' + l.id + '"' + dica + '>' + rotulo + '</button>' +
           (doDiarioNo.has(l.id) ? '<button type="button" class="botao pequeno" data-do-diario="' + l.id + '" title="Montar o razão das contas deste lugar a partir do livro diário guardado, com o saldo inicial do balancete">📒 Tirar do diário</button>' : '') +
           '<span class="suave pequeno">ou arraste o arquivo aqui</span></div>' +
-          '<input type="file" class="escondido" data-arquivo-lugar="' + l.id + '"' + (l.varias ? ' multiple' : '') + ' accept=".xls,.xlsx,.xlsm,.csv,.txt"></div>';
+          '<input type="file" class="escondido" data-arquivo-lugar="' + l.id + '"' + (l.varias ? ' multiple' : '') + ' accept=".xls,.xlsx,.xlsm,.csv,.txt,.pdf"></div>';
       }).join('') + '</div>' +
       (op.depois || '') +
       '</section>';
@@ -537,7 +537,12 @@
       T.avisoRapido('Lendo ' + arquivo.name + '…', null, 2500);
       try {
         const bytes = await T.lerArquivoComoBytes(arquivo);
-        r = raiz.Leitor.ler(bytes, arquivo.name);
+        // PDF demora mais (é página por página): avisa o andamento, senão parece travado.
+        const ehPdf = raiz.Leitor.ehPdf && raiz.Leitor.ehPdf(bytes);
+        if (ehPdf) T.avisoRapido('Abrindo o PDF ' + arquivo.name + '… isso pode levar alguns segundos.', null, 6000);
+        r = await raiz.Leitor.lerArquivo(bytes, arquivo.name, {
+          pdf: { aoAndar: (feitas, total) => { if (total > 8 && feitas % 25 === 0) T.avisoRapido('Lendo o PDF: página ' + feitas + ' de ' + total + '…', null, 2500); } },
+        });
         r.bytes = bytes;
       } catch (e) { T.avisoRapido('Não consegui ler ' + arquivo.name + ': ' + T.mensagemDeErro(e), 'erro'); return false; }
     }

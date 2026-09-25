@@ -49,10 +49,13 @@
     if (/^(red|reduzido|reduzida|codreduzido|contareduzida|codigoreduzido|codred|reduz|codigored|creduzido)$/.test(k)) return 'reduzido';
     // "Cta. Contábil" (Dony, 25/09/2026, o balancete da Zelco) é o mesmo que "Conta contábil".
     if (/^(contacontabil|ctacontabil|ctacontab|ctacont|cta|conta|classificacao|classificacaocontabil|classif|codigodaconta|contaclassificacao|codconta|contacodigo|numerodaconta|numeroconta|nconta|mascara|estrutura|codigocontabil|contas)$/.test(k)) return 'conta';
+    // Cabeçalho que junta a conta e o nome numa coluna só ("Cta.Contábil Descrição conta", no balancete em PDF
+    // da Zelco). A célula vem "1.1.1.001.0001 - Caixa" e o leitor já sabe separar código e nome.
+    if (/^(ctacontabil|ctacont|cta|contacontabil|conta|classificacao)(descricao|titulo|nome)\w*$/.test(k)) return 'contaComTitulo';
     if (/^(codigo|cod|codig)$/.test(k)) return 'codigo';
     if (/^(titulodaconta|titulo|descricaodaconta|descricao|descricaoconta|nomedaconta|nome|nomeconta|denominacao|especificacao|discriminacao|contadescricao|historicodaconta|contanome|nomedacontacontabil|descricaodacontacontabil)$/.test(k)) return 'titulo';
     if (/^saldoem/.test(k)) return 'saldoEm';
-    if ((/anterior|inicial|abertura/.test(k) || /^(saldoant|sldant|sdoant|sdant|salant|ant|saldoini|sldini)$/.test(k)) && !/debit|credit/.test(k)) return 'saldoAnterior';
+    if ((/anterior|inicial|incial|abertura/.test(k) || /^(saldoant|sldant|sdoant|sdant|salant|ant|saldoini|sldini)$/.test(k)) && !/debit|credit/.test(k)) return 'saldoAnterior';
     if (/debit|^debs?$/.test(k)) return 'debitos';
     if (/credit|^creds?$/.test(k)) return 'creditos';
     if (/atual|final|encerramento|fim$|^saldos?$|^sld$/.test(k)) return 'saldoAtual';
@@ -66,6 +69,8 @@
     chaves.forEach((k, i) => {
       const campo = campoDoTitulo(k);
       if (!campo) return;
+      // A coluna que traz a conta E o nome juntos vale pelas duas: o título sai do próprio texto da célula.
+      if (campo === 'contaComTitulo') { contas.push(i); m.contaComTitulo = true; return; }
       if (campo === 'dc') dcs.push(i);
       else if (campo === 'saldoEm') saldoEm.push(i);
       else if (campo === 'codigo') codigos.push(i);
@@ -98,7 +103,7 @@
     m.temMes = chaves.some((c) => /^(mes|competencia|periodo|mesano|anomes)$/.test(c));
     return m;
   }
-  const completo = (m) => CAMPOS.every((k) => m[k] !== undefined);
+  const completo = (m) => CAMPOS.every((k) => m[k] !== undefined || (k === 'titulo' && m.contaComTitulo && m.conta !== undefined));
 
   // Duas linhas de cabeçalho numa só ("Saldo" + "Anterior"); preencher = o título de cima vale para as
   // colunas vazias à direita dele (célula mesclada).
@@ -535,7 +540,9 @@
       if (!cod) { linhasIgnoradas++; continue; }
       const va = lerValor(l[col.saldoAnterior]), vd = lerValor(l[col.debitos]), vc = lerValor(l[col.creditos]), vf = lerValor(l[col.saldoAtual]);
       if (!va || !vd || !vc || !vf) { linhasIgnoradas++; continue; } // valor que não é número: não é linha de conta
-      if (escolha.como === 'conteudo' && va.vazio && vd.vazio && vc.vazio && vf.vazio) { linhasIgnoradas++; continue; }
+      // Linha com código mas sem nenhum valor: é título de grupo, não conta. (No balancete da Zelco o grupo
+      // aparece duas vezes: em cima só o nome e embaixo o total — o que vale é o de baixo.)
+      if (va.vazio && vd.vazio && vc.vazio && vf.vazio) { linhasIgnoradas++; continue; }
       if (vistas.has(cod.codigo)) { repetidas++; continue; } // cabeçalho de página repetido ou conta em dobro
       vistas.add(cod.codigo);
       if (primeiraConta < 0) primeiraConta = r;

@@ -37,15 +37,29 @@
    * @param nomeArquivo nome original (só para mostrar e para o período do desenho B)
    * @returns { nomeArquivo, hash, tipo, nomeDoTipo, motivo, avisos, razao?, financeiro?, previa, competencia?, contas? }
    */
+  // PDF? (a assinatura do arquivo é "%PDF"). O programa lê PDF desde 25/09/2026, porque o sistema de um
+  // cliente (a Zelco) só emite assim.
+  function ehPdf(bytes) {
+    return !!bytes && bytes.length > 4 && bytes[0] === 0x25 && bytes[1] === 0x50 && bytes[2] === 0x44 && bytes[3] === 0x46;
+  }
+
   function ler(bytes, nomeArquivo) {
     const r = { nomeArquivo, hash: Util.hashBytes(bytes), tipo: 'desconhecido', motivo: '', avisos: [], previa: [] };
     let planilha;
     try {
+      if (ehPdf(bytes)) throw new Error('Este arquivo é um PDF. Use a leitura que abre PDF (o programa faz isso sozinho ao subir o arquivo).');
       planilha = LerPlanilha.abrir(bytes);
     } catch (e) {
       r.motivo = e.message;
       return fechar(r);
     }
+    return lerAbas(planilha.abas, r, planilha.avisos.slice());
+  }
+
+  // A mesma leitura, com o arquivo já aberto em abas (planilha ou PDF).
+  function lerAbas(abasDoArquivo, r, avisosAbertura) {
+    const nomeArquivo = r.nomeArquivo;
+    const planilha = { abas: abasDoArquivo, avisos: avisosAbertura || [] };
     r.avisos = planilha.avisos.slice();
     r.previa = previa(planilha.abas);
 
@@ -132,5 +146,24 @@
     return r;
   }
 
-  return { ler, NOMES_DOS_TIPOS };
+  // A leitura que serve para qualquer arquivo: planilha ou PDF. É assíncrona porque abrir PDF é assíncrono.
+  // op: { pdf: { pdfjs, aoAndar, maximoPaginas } }
+  async function lerArquivo(bytes, nomeArquivo, op) {
+    if (!ehPdf(bytes)) return ler(bytes, nomeArquivo);
+    const r = { nomeArquivo, hash: Util.hashBytes(bytes), tipo: 'desconhecido', motivo: '', avisos: [], previa: [], dePdf: true };
+    const LerPdf = (op && op.lerPdf) || (typeof self !== 'undefined' ? self.LerPdf : null);
+    if (!LerPdf) { r.motivo = 'Não achei o leitor de PDF.'; return fechar(r); }
+    let lido;
+    try {
+      lido = await LerPdf.abas(bytes, Object.assign({ nome: nomeArquivo }, (op && op.pdf) || {}));
+    } catch (e) {
+      r.motivo = 'Não consegui abrir este PDF: ' + (e && e.message ? e.message : e);
+      return fechar(r);
+    }
+    r.paginas = lido.paginas;
+    const avisos = lido.lidas < lido.paginas ? ['O PDF tem ' + lido.paginas + ' páginas e foram lidas ' + lido.lidas + '.'] : [];
+    return lerAbas(lido.abas, r, avisos);
+  }
+
+  return { ler, lerArquivo, lerAbas, ehPdf, NOMES_DOS_TIPOS };
 });
