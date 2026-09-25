@@ -59,7 +59,10 @@
     }
     if (conferir && !conferir()) return;
     const mesmo = E && E.codigo === codigo && E.ano === anoEscolhido && E.md && md && E.md.id === md.id;
-    E = { codigo, emp, ano: anoEscolhido, metas, md, diario, balancetes, lugares: [lugarDiario].concat(lugaresBal),
+    // Um cartão por mês do diário (e outro por mês do balancete): dá para carregar o ano todo num arquivo só
+    // ou mês a mês, e o programa popula os meses que vierem no arquivo.
+    const lugaresDia = raiz.TelaSubir.lugaresDoDiarioPorMes(anoEscolhido, diario);
+    E = { codigo, emp, ano: anoEscolhido, metas, md, diario, balancetes, lugares: [lugarDiario].concat(lugaresDia).concat(lugaresBal),
       anos: Array.from(new Set(anosComDiario.concat([anoAtual, anoAtual - 1, anoEscolhido]))).sort((a, b) => b - a), anosComDiario,
       razao: mesmo ? E.razao : null };
     if (diario) {
@@ -79,7 +82,9 @@
     const painel = raiz.TelaSubir.painel({ chave, titulo: 'Livro diário e balancetes de ' + E.ano, lugares: E.lugares, metas: E.metas, fixo: !d,
       resumo: d ? d.periodo.de + ' a ' + d.periodo.ate : 'sem diário',
       antes: '<p class="suave pequeno" style="margin:-4px 0 10px">O <b>livro diário</b> traz os lançamentos de todas as contas; o <b>balancete</b> de um mês dá o saldo inicial ' +
-        'e confere o diário (os balancetes são os mesmos do relatório de apresentação). Com o balancete do último mês do diário, o programa confere também o saldo final de cada conta.</p>' });
+        'e confere o diário (os balancetes são os mesmos do relatório de apresentação). Com o balancete do último mês do diário, o programa confere também o saldo final de cada conta.<br>' +
+        'O diário pode vir <b>de uma vez</b> (o ano todo, ou de janeiro a outubro) ou <b>mês a mês</b>: carregue no cartão que quiser, que o programa vê o período do arquivo e ' +
+        'preenche os meses que ele traz — os outros meses continuam como estavam.</p>' });
     el.innerHTML = '<div class="diario-raiz">' +
       '<a class="voltar" href="#/empresa/' + encodeURIComponent(E.codigo) + '">← ' + T.esc(emp.nome) + '</a>' +
       '<div class="cabecalho"><div class="titulos"><h1>📒 Livro diário</h1>' +
@@ -89,7 +94,7 @@
         (E.anosComDiario.indexOf(a) < 0 ? ' · sem diário' : '') + '</option>').join('') + '</select>' : '') +
       raiz.TelaSubir.botao(chave) + '</div></div>' +
       painel +
-      (d ? corpo() : '<div class="aviso info"><span class="icone-aviso">📒</span><div><b>Guarde aqui o livro diário do ano</b> (todas as contas, do primeiro mês ao último que já tem). ' +
+      (d ? corpo() : '<div class="aviso info"><span class="icone-aviso">📒</span><div><b>Guarde aqui o livro diário</b> (todas as contas) — de uma vez ou mês a mês, como vier do sistema. ' +
         'Com ele, nos passos de fornecedores o botão <b>📒 Tirar do diário</b> monta o razão das contas sem subir conta por conta, e o programa confere cada mês com o balancete. ' +
         'É opcional: os passos continuam aceitando o razão como sempre.</div></div>') +
       '</div>';

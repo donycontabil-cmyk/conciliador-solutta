@@ -31,6 +31,18 @@
     credito: ['credito', 'contacredito', 'creditoconta', 'contadecredito', 'ccredito', 'ctacredito'],
     valor: ['valor', 'valorlancamento', 'valordolancamento', 'vlr', 'valorr'],
   };
+  // DESENHO "UMA LINHA POR PERNA" (Dony, 25/09/2026, o diário da Zelco): cada linha traz UMA conta e o valor
+  // em Débitos OU em Créditos — em vez de trazer as duas contas e um valor só. As pernas do mesmo lançamento
+  // andam juntas pelo lote/número do lançamento.
+  const NOMES_PERNA = {
+    conta: ['ctacontab', 'ctacontabil', 'contacontabil', 'conta', 'contareduzida', 'codigoconta', 'ctacont', 'cta'],
+    debito: ['debito', 'debitos', 'valordebito', 'vlrdebito', 'debitors'],
+    credito: ['credito', 'creditos', 'valorcredito', 'vlrcredito', 'creditors'],
+    historico: ['historico', 'historicopadrao', 'complemento', 'historicocomplemento', 'descricaodolancamento'],
+    lote: ['lote', 'lotelcto', 'lotelancamento', 'lancamento', 'lcto', 'nlancamento', 'numerolancamento', 'lotelan'],
+    documento: ['ndocto', 'numerodocto', 'documento', 'ndocumento', 'numerodocumento', 'doc', 'ndoc'],
+    nomeDaConta: ['descricao', 'descricaoconta', 'nomedaconta', 'nomeconta', 'descricaodaconta'],
+  };
   // O cabeçalho: Histórico, Débito, Crédito e Valor, sem Saldo (no diário, Débito e Crédito são CONTAS).
   // A coluna DATA é opcional: há relatório que põe a data numa linha só dela, antes dos lançamentos do dia
   // (Dony, 23/09/2026, o diário da Felix). Sem a coluna, c.data fica -1 e a data vem da linha do dia.
@@ -50,6 +62,32 @@
     return c;
   }
 
+  // O cabeçalho do desenho "uma linha por perna": precisa da conta e das DUAS colunas de valor (débitos e
+  // créditos). Se as colunas de débito e crédito trouxessem CONTAS (o desenho de sempre), não haveria uma
+  // coluna de conta separada — é isso que separa um do outro.
+  function cabecalhoPorPerna(linha) {
+    const ch = (linha || []).map(chave);
+    if (ch.indexOf('saldo') >= 0) return null;
+    const achar = (lista) => ch.findIndex((x) => lista.indexOf(x) >= 0);
+    const conta = achar(NOMES_PERNA.conta);
+    const debito = achar(NOMES_PERNA.debito);
+    const credito = achar(NOMES_PERNA.credito);
+    if (conta < 0 || debito < 0 || credito < 0 || debito === conta || credito === conta) return null;
+    const c = { porPerna: true, conta, debito, credito,
+      historico: achar(NOMES_PERNA.historico), lote: achar(NOMES_PERNA.lote), documento: achar(NOMES_PERNA.documento),
+      nomeDaConta: achar(NOMES_PERNA.nomeDaConta) };
+    const iData = achar(NOMES.data);
+    c.data = iData;
+    c.semColunaDeData = iData < 0;
+    // Sem coluna de histórico, o nome da conta serve de histórico (é o que o relatório mostra).
+    if (c.historico < 0) c.historico = c.nomeDaConta;
+    // O que identifica o LANÇAMENTO: tudo o que vem entre a data e a conta (lote e número). Num PDF essas
+    // colunas às vezes se partem em duas, por isso vale a faixa inteira e não uma coluna só.
+    c.identificacao = [];
+    for (let i = Math.max(0, iData) + 1; i < conta; i++) c.identificacao.push(i);
+    return c;
+  }
+
   // Linha que só traz a DATA DO DIA ("18/05/2026" e o resto vazio): dali para a frente, os lançamentos são
   // desse dia. É assim que alguns relatórios separam os dias em vez de repetir a data em cada linha.
   function dataDoDia(linha) {
@@ -62,6 +100,17 @@
   }
   // Linha de fechamento do relatório: total do dia, total do mês, transporte, página.
   const LINHA_DE_TOTAL = /^\s*(total|totais|transporte|soma|p[aá]gina|folha)\b/i;
+
+  // Uma PERNA do lançamento: a linha traz UMA conta e o valor em Débitos ou em Créditos (o desenho da Zelco).
+  function lerPerna(l, c) {
+    const conta = contaDe(l[c.conta]);
+    if (!conta) return { debito: '', credito: '', valor: null };
+    const vd = valorDe(l[c.debito]);
+    const vc = valorDe(l[c.credito]);
+    if (vd) return { debito: conta, credito: '', valor: vd };
+    if (vc) return { debito: '', credito: conta, valor: vc };
+    return { debito: '', credito: '', valor: null };
+  }
 
   // A PARTIDA DE UMA LINHA (conta de débito, conta de crédito e valor).
   // Primeiro pelas colunas do cabeçalho. Quando não bate — há relatório que muda o número de colunas no meio
@@ -105,7 +154,9 @@
     if (v === null || v === undefined) return '';
     if (typeof v === 'number') return Number.isInteger(v) && v > 0 && v < 1e12 ? String(v) : '';
     const s = String(v).trim();
-    return /^\d{1,12}$/.test(s) ? s.replace(/^0+(?=\d)/, '') : '';
+    if (/^\d{1,12}$/.test(s)) return s.replace(/^0+(?=\d)/, '');
+    // Conta escrita com pontos, como o diário da Zelco ("2.1.50.010.001").
+    return /^\d{1,4}(\.\d{1,6}){1,6}$/.test(s) ? s : '';
   }
   function valorDe(v) {
     if (typeof v === 'number') return isFinite(v) ? Util.centavos(v) : null;
@@ -123,6 +174,27 @@
     const tituloNoNome = /diario/i.test(Util.semAcento(String(opc.nomeArquivo || '')));
     for (const aba of abas || []) {
       const linhas = aba.linhas || [];
+      // O desenho "uma linha por perna" (a Zelco): conta numa coluna e o valor em Débitos ou em Créditos.
+      const rp = linhas.slice(0, 40).findIndex((l) => l && !cabecalho(l) && cabecalhoPorPerna(l));
+      if (rp >= 0) {
+        const cp = cabecalhoPorPerna(linhas[rp]);
+        let pernas = 0, comConta = 0;
+        for (const l of linhas.slice(rp + 1, rp + 120)) {
+          if (!l || cabecalhoPorPerna(l)) continue;
+          const p = lerPerna(l, cp);
+          if (p.valor === null) continue;
+          pernas++;
+          if (p.debito || p.credito) comConta++;
+        }
+        if (pernas >= 4 && comConta >= pernas * 0.9) {
+          const tituloP = tituloNoNome || linhas.slice(0, rp).some((l) => l && l.some((x) => /\bdiario\b/i.test(Util.semAcento(String(x === null || x === undefined ? '' : x)))));
+          if (tituloP || opc.semTitulo) {
+            return { tipo: 'diario', porPerna: true,
+              motivo: 'Livro diário com uma linha por lançamento: a conta numa coluna e o valor em Débitos ou em Créditos; as pernas da mesma partida andam juntas pelo lote.' };
+          }
+          return { tipo: null, semTitulo: true, motivo: 'Tem conta, débitos e créditos linha a linha, mas não o título de livro diário.' };
+        }
+      }
       const r = linhas.slice(0, 40).findIndex((l) => l && cabecalho(l));
       if (r < 0) continue;
       const c = cabecalho(linhas[r]);
@@ -164,7 +236,7 @@
         const texto = l.map((x) => (x === null || x === undefined ? '' : String(x))).join(' ');
         if (!empresa) { const m = texto.match(/Empresa:\s*(?:\d+\s*-\s*)?(.+?)(?:\s{2,}|$)/); if (m) empresa = m[1].replace(/\s+/g, ' ').trim(); }
         if (!cnpj) { const m = texto.match(/CNPJ\s*:?\s*(\d{2}\.?\d{3}\.?\d{3}\/?\d{4}-?\d{2})/i); if (m && Util.cnpjValido(Util.limparCnpj(m[1]))) cnpj = Util.limparCnpj(m[1]); }
-        const cab = cabecalho(l);
+        const cab = cabecalho(l) || cabecalhoPorPerna(l);
         if (cab) {
           // Cabeçalho repetido no alto de cada página. Há relatório que, da segunda página em diante, põe a DATA
           // no lugar da palavra "Data" ("05/01/2026 | Histórico | … "): nesse caso o cabeçalho continua o mesmo
@@ -195,7 +267,7 @@
           continue;
         }
         const d = c.data >= 0 ? Util.lerData(l[c.data]) : null;
-        const partida = lerPartida(l, c);
+        const partida = c.porPerna ? lerPerna(l, c) : lerPartida(l, c);
         const debito = partida.debito, credito = partida.credito;
         const v = partida.valor;
         // Linha só com texto no histórico, depois de uma partida: a continuação do histórico (o relatório quebra o
@@ -213,13 +285,27 @@
         const troca = v < 0;
         ultima = { n: lancamentos.length + 1, linha: r + 1, data: data.texto, dia: data.dia, mes: data.mes, ano: data.ano, historico: hist,
           debito: troca ? credito : debito, credito: troca ? debito : credito, valor: Math.abs(v) };
+        // O lote/número do lançamento junta as pernas da mesma partida (no desenho por perna).
+        if (c.porPerna && (c.identificacao || []).length) {
+          ultima.lote = c.identificacao.map((i) => (l[i] === null || l[i] === undefined ? '' : String(l[i]))).join(' ').replace(/s+/g, ' ').trim();
+        }
+        if (c.porPerna && c.nomeDaConta >= 0 && c.nomeDaConta !== c.historico) ultima.nomeDaConta = limparHistorico(l[c.nomeDaConta]);
         lancamentos.push(ultima);
       }
     }
     // Os lançamentos: a linha com os dois lados é um lançamento; as linhas seguidas de um lado só formam um lançamento
     // quando a soma (débitos − créditos) volta a zero.
     let grupos = 0, aberto = null, abertosNoFim = 0;
+    const porLote = new Map();
     for (const x of lancamentos) {
+      // Com lote/número do lançamento, as pernas do mesmo lançamento andam juntas por ele (é o que o relatório
+      // imprime); sem lote, vale a regra de sempre: linhas seguidas de um lado só até a soma voltar a zero.
+      if (x.lote) {
+        const k = x.data + '|' + x.lote;
+        if (!porLote.has(k)) porLote.set(k, ++grupos);
+        x.grupo = porLote.get(k);
+        continue;
+      }
       if (x.debito && x.credito) { x.grupo = ++grupos; continue; }
       if (!aberto) aberto = { id: ++grupos, soma: 0 };
       x.grupo = aberto.id;
@@ -253,7 +339,7 @@
       periodo = { de: '01/' + String(mes(a)).padStart(2, '0') + '/' + ano(a), ate: String(new Date(ano(b), mes(b), 0).getDate()).padStart(2, '0') + '/' + String(mes(b)).padStart(2, '0') + '/' + ano(b) };
       for (let k = a; k <= b; k++) {
         const doMes = lancamentos.filter((x) => x.ano * 12 + x.mes === k);
-        meses.push({ comp: ano(k) + '-' + String(mes(k)).padStart(2, '0') + '-01', lancamentos: doMes.length });
+        meses.push({ comp: ano(k) + '-' + String(mes(k)).padStart(2, '0') + '-01', lancamentos: doMes.length, arquivo: nomeArquivo });
       }
       const vazios = meses.filter((m) => !m.lancamentos).map((m) => Util.nomeCompetencia(m.comp));
       if (vazios.length) avisos.push('Sem lançamento em ' + vazios.join(', ') + ': confira se o diário está completo.');

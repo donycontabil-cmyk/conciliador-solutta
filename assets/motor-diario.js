@@ -446,10 +446,68 @@
       naoBatem: conferidas.filter((c) => !c.confere), semPlano: lista.filter((c) => !c.noPlano).length };
   }
 
+  // ------------------------------------------------------------------
+  // JUNTAR DIÁRIOS: o diário da empresa vai sendo montado MÊS A MÊS (Dony, 25/09/2026: "se eu carregar o
+  // diário de janeiro a março, ele popula janeiro a março; se carregar de janeiro a outubro, popula até
+  // outubro — ele tem que entender o que eu estou carregando, e não me obrigar a carregar o que ele quer").
+  // Os meses que vêm no arquivo novo entram no lugar dos que havia; os outros meses continuam como estavam.
+  // ------------------------------------------------------------------
+  function juntarDiarios(antigo, novo) {
+    const vazio = (d) => !d || !d.lancamentos || !d.lancamentos.length;
+    if (vazio(antigo)) return novo;
+    if (vazio(novo)) return antigo;
+    const compDe = (l) => l.ano + '-' + String(l.mes).padStart(2, '0') + '-01';
+    // Só os meses COM LANÇAMENTO no arquivo novo entram no lugar dos que havia. Um arquivo de janeiro a junho
+    // sem nada em abril não apaga o abril que já estava guardado: ele traz o que traz.
+    const quantos = (m) => (Array.isArray(m.lancamentos) ? m.lancamentos.length : m.lancamentos) || 0;
+    const mesesNovos = new Set((novo.meses || []).filter(quantos).map((m) => m.comp));
+    const ficam = antigo.lancamentos.filter((l) => !mesesNovos.has(compDe(l)));
+    if (!ficam.length) return novo;   // o arquivo novo cobre tudo o que já havia: ele é o diário
+    const de = (d, l) => l.deQualArquivo || d.nomeArquivo || '';
+    const todos = ficam.map((l) => Object.assign({}, l, { deQualArquivo: de(antigo, l) }))
+      .concat(novo.lancamentos.map((l) => Object.assign({}, l, { deQualArquivo: de(novo, l) })));
+    // Por mês, na ordem; dentro do mês fica a ordem do arquivo (a partida não se desmancha: ela é de um dia só).
+    todos.sort((a, b) => (a.ano * 12 + a.mes) - (b.ano * 12 + b.mes));
+    let grupo = 0, antesGrupo = null;
+    todos.forEach((l) => {
+      const marca = l.deQualArquivo + '|' + l.grupo;
+      if (marca !== antesGrupo) { grupo++; antesGrupo = marca; }
+      l.grupo = grupo;
+    });
+    const totalDebitos = todos.reduce((s, x) => s + (x.debito ? x.valor : 0), 0);
+    const totalCreditos = todos.reduce((s, x) => s + (x.credito ? x.valor : 0), 0);
+    const nums = todos.map((x) => x.ano * 12 + x.mes);
+    const a = Math.min.apply(null, nums), b = Math.max.apply(null, nums);
+    const anoDe = (k) => Math.floor((k - 1) / 12), mesDe = (k) => ((k - 1) % 12) + 1;
+    const meses = [];
+    for (let k = a; k <= b; k++) {
+      const doMes = todos.filter((x) => x.ano * 12 + x.mes === k);
+      meses.push({ comp: anoDe(k) + '-' + String(mesDe(k)).padStart(2, '0') + '-01', lancamentos: doMes.length,
+        arquivo: doMes.length ? doMes[0].deQualArquivo : '' });
+    }
+    const periodo = { de: '01/' + String(mesDe(a)).padStart(2, '0') + '/' + anoDe(a),
+      ate: String(new Date(anoDe(b), mesDe(b), 0).getDate()).padStart(2, '0') + '/' + String(mesDe(b)).padStart(2, '0') + '/' + anoDe(b) };
+    const avisos = [];
+    if (totalDebitos !== totalCreditos) avisos.push('Os débitos (' + Util.formatarCentavos(totalDebitos) + ') não batem com os créditos (' + Util.formatarCentavos(totalCreditos) + '): diferença de ' + Util.formatarCentavos(totalDebitos - totalCreditos) + '.');
+    const semNada = meses.filter((m) => !m.lancamentos).map((m) => Util.nomeCompetencia(m.comp));
+    if (semNada.length) avisos.push('Sem lançamento em ' + semNada.join(', ') + ': carregue o diário desses meses quando tiver.');
+    const arquivos = [];
+    meses.forEach((m) => { if (m.arquivo && arquivos.indexOf(m.arquivo) < 0) arquivos.push(m.arquivo); });
+    if (arquivos.length > 1) avisos.push('Diário montado de ' + arquivos.length + ' arquivos: ' + arquivos.join(', ') + '.');
+    const naoBatem = (antigo.diasQueNaoBatem || 0) + (novo.diasQueNaoBatem || 0);
+    return { tipo: 'diario', empresa: novo.empresa || antigo.empresa, cnpj: novo.cnpj || antigo.cnpj, nomeArquivo: novo.nomeArquivo,
+      periodo, meses, lancamentos: todos, lancamentosDeVarias: todos.filter((x) => !x.debito || !x.credito).length,
+      grupos: grupo, contas: Array.from(new Set([].concat.apply([], todos.map((x) => [x.debito, x.credito])).filter(Boolean))).sort((x, y) => Number(x) - Number(y)),
+      totalDebitos, totalCreditos, confere: totalDebitos === totalCreditos && !naoBatem, avisos,
+      linhasIgnoradas: (antigo.linhasIgnoradas || 0) + (novo.linhasIgnoradas || 0),
+      diasConferidos: (antigo.diasConferidos || 0) + (novo.diasConferidos || 0), diasQueNaoBatem: naoBatem, deVariosArquivos: arquivos };
+  }
+
   // O diário do jeito que fica guardado (sem o número de ordem, que é a posição na lista).
   function paraGuardar(d) {
     return { tipo: 'diario', empresa: d.empresa, cnpj: d.cnpj, nomeArquivo: d.nomeArquivo, periodo: d.periodo, meses: d.meses,
-      lancamentos: (d.lancamentos || []).map((l) => ({ linha: l.linha, data: l.data, dia: l.dia, mes: l.mes, ano: l.ano, historico: l.historico, debito: l.debito, credito: l.credito, valor: l.valor, grupo: l.grupo })),
+      deVariosArquivos: d.deVariosArquivos,
+      lancamentos: (d.lancamentos || []).map((l) => ({ linha: l.linha, data: l.data, dia: l.dia, mes: l.mes, ano: l.ano, historico: l.historico, debito: l.debito, credito: l.credito, valor: l.valor, grupo: l.grupo, deQualArquivo: l.deQualArquivo })),
       grupos: d.grupos, contas: d.contas, lancamentosDeVarias: d.lancamentosDeVarias, totalDebitos: d.totalDebitos, totalCreditos: d.totalCreditos,
       confere: d.confere, avisos: d.avisos || [], linhasIgnoradas: d.linhasIgnoradas };
   }
@@ -487,5 +545,5 @@
     return linhas.join('\r\n');
   }
 
-  return { planoDosBalancetes, movimentos, conferir, saldoNoComeco, razaoDaConta, contasDasConciliacoes, saldosDasContas, paraGuardar, compararDiarios, csvDoRazao, nomeDoHistorico, lerHistorico };
+  return { planoDosBalancetes, movimentos, conferir, saldoNoComeco, razaoDaConta, contasDasConciliacoes, saldosDasContas, paraGuardar, juntarDiarios, compararDiarios, csvDoRazao, nomeDoHistorico, lerHistorico };
 });

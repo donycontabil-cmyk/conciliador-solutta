@@ -71,10 +71,13 @@
     return app().armazenamento.guardarArquivo(codigo, meta, { tipo: 'balancete', empresa: b.empresa, cnpj: b.cnpj, periodo: b.periodo, contas: b.contas, total: b.total }, r.bytes);
   }
 
-  // Guarda um livro diário no lugar do ano (competência = janeiro do ano do fim do diário).
-  function guardarDiario(codigo, r, comp, extra) {
-    const d = r.diario;
+  // Guarda um livro diário no lugar do ano (competência = janeiro do ano do fim do diário). dJunto: o diário
+  // do ano DEPOIS de juntar com o que já estava guardado — o arquivo pode trazer só alguns meses.
+  function guardarDiario(codigo, r, comp, extra, dJunto) {
+    const d = dJunto || r.diario;
+    const comLancamento = (x) => (x.meses || []).filter((m) => m.lancamentos).map((m) => m.comp);
     const meta = Object.assign({ tipo: 'diario', arquivo: r.nomeArquivo, competencia: comp, periodo: d.periodo, lancamentos: d.lancamentos.length, contas: d.contas.length, codigosDasContas: d.contas,
+      meses: comLancamento(d), mesesDoArquivo: comLancamento(r.diario), deVariosArquivos: d.deVariosArquivos || null,
       totalDebitos: d.totalDebitos, totalCreditos: d.totalCreditos, confere: d.confere, empresaNoArquivo: d.empresa, cnpjNoArquivo: d.cnpj, hashDoConteudo: r.hash }, extra || {});
     return app().armazenamento.guardarArquivo(codigo, meta, raiz.MotorDiario.paraGuardar(d), r.bytes);
   }
@@ -106,8 +109,9 @@
   // ------------------------------------------------------------------
   const balanceteBom = (b) => !!b && !!b.contas && b.contas.length >= 3 && b.qualidade >= 0.9;
   async function balanceteDoArquivo(r, arquivo, codigo) {
-    let abas;
-    try { abas = raiz.LerPlanilha.abrir(r.bytes).abas; } catch (e) { return null; }
+    let abas = r.abas || null;   // o arquivo já aberto pelo leitor (planilha ou PDF): abrir de novo estraga o PDF
+    try { if (!abas) abas = raiz.LerPlanilha.abrir(r.bytes).abas; } catch (e) { return null; }
+    if (!abas) return null;
     const L = raiz.LerBalancete;
     const tentar = (op) => { try { return L.ler(abas, Object.assign({ nomeArquivo: arquivo.name }, op)); } catch (e) { return null; } };
     const emp = app().empresas.find((e) => String(e.codigo) === String(codigo)) || {};
@@ -294,8 +298,8 @@
   //       "Fechar": quando falta arquivo) }
   function painel(op) {
     const lugares = op.lugares;
-    const faltam = lugares.filter((l) => !l.opcional && !l.arquivos.length).length;
-    const guardados = lugares.reduce((s, l) => s + l.arquivos.length, 0);
+    const faltam = lugares.filter((l) => !l.opcional && !l.arquivos.length && !l.resumo).length;
+    const guardados = lugares.reduce((s, l) => s + (l.arquivos.length || (l.resumo ? 1 : 0)), 0);
     if (op.aberto && op.chave) abertos.add(op.chave);
     const visivel = op.fixo || (op.chave && abertos.has(op.chave));
     // Livro diário guardado que cobre o período dos razões: eles podem sair dele (opcional — o razão continua subindo
@@ -329,12 +333,16 @@
       (op.antes || '') + avisoDiario +
       '<div class="lugares">' + lugares.map((l) => {
         const tem = l.arquivos.length > 0;
-        const rotulo = !tem ? '⬆ Carregar' : l.varias ? '⬆ Carregar outra conta ou versão' : '🔄 Carregar nova versão';
-        const dica = !tem ? '' : l.varias ? ' title="A mesma conta vira uma versão nova (a anterior fica guardada); outra conta soma"' : ' title="A nova versão passa a ser a usada; a anterior continua guardada e dá para ver o que mudou"';
-        return '<div class="lugar' + (tem ? ' ok' : '') + '" data-lugar="' + l.id + '">' +
+        // l.resumo: o lugar está preenchido, mas o arquivo não mora nele (o mês do diário sai do diário do
+        // ano, que é um arquivo só). Aí o cartão mostra o resumo em vez do arquivo, sem 🗑 nem versões.
+        const cheio = tem || !!l.resumo;
+        const rotulo = l.rotulo || (!cheio ? '⬆ Carregar' : l.varias ? '⬆ Carregar outra conta ou versão' : '🔄 Carregar nova versão');
+        const dica = !cheio ? '' : l.varias ? ' title="A mesma conta vira uma versão nova (a anterior fica guardada); outra conta soma"' : ' title="A nova versão passa a ser a usada; a anterior continua guardada e dá para ver o que mudou"';
+        return '<div class="lugar' + (cheio ? ' ok' : '') + '" data-lugar="' + l.id + '">' +
           '<div class="parte">' + T.esc(l.parte) + '</div>' +
-          '<h4>' + (tem ? '✓ ' : '') + T.esc(l.titulo) + '</h4><div class="pequeno"><b>' + T.esc(l.sub) + '</b></div>' +
+          '<h4>' + (cheio ? '✓ ' : '') + T.esc(l.titulo) + '</h4><div class="pequeno"><b>' + T.esc(l.sub) + '</b></div>' +
           '<div class="arquivos-do-lugar pequeno">' + (tem ? l.arquivos.map((m) => descreverArquivo(m, l, op.metas)).join('')
+            : l.resumo ? l.resumo
             : l.opcional ? '<span class="suave">opcional</span>' : '<span class="falta">falta</span>') + '</div>' +
           '<div class="linha-flex" style="margin-top:auto"><button type="button" class="botao pequeno' + (tem || l.opcional ? '' : ' primario') + '" data-subir-lugar="' + l.id + '"' + dica + '>' + rotulo + '</button>' +
           (doDiarioNo.has(l.id) ? '<button type="button" class="botao pequeno" data-do-diario="' + l.id + '" title="Montar o razão das contas deste lugar a partir do livro diário guardado, com o saldo inicial do balancete">📒 Tirar do diário</button>' : '') +
@@ -463,8 +471,9 @@
   // diário — pode ser uma planilha de lançamentos (importação, reclassificação): pergunta se é o diário completo.
   // Devolve o diário lido, false (não é) ou null (nem tem lançamentos assim).
   async function diarioSemTitulo(r, arquivo) {
-    let abas;
-    try { abas = raiz.LerPlanilha.abrir(r.bytes).abas; } catch (e) { return null; }
+    let abas = r.abas || null;   // o arquivo já aberto pelo leitor (planilha ou PDF)
+    try { if (!abas) abas = raiz.LerPlanilha.abrir(r.bytes).abas; } catch (e) { return null; }
+    if (!abas) return null;
     if (raiz.LerDiario.reconhecer(abas, { semTitulo: true }).tipo !== 'diario') return null;
     const d = raiz.LerDiario.ler(abas, { nomeArquivo: arquivo.name });
     if (!d.lancamentos.length) return null;
@@ -612,7 +621,7 @@
           if (lido === false) return false;
           if (lido) { r.tipo = 'diario'; r.diario = lido; }
         }
-        const d = r.diario;
+        let d = r.diario;   // depois de guardar, o diário do ANO (o do arquivo mais os meses que já estavam)
         if (r.tipo !== 'diario' || !d || !d.lancamentos.length) { await naoServe('um livro diário', r.tipo !== 'diario' && r.tipo !== 'desconhecido'); return false; }
         const emp = app().empresas.find((e) => String(e.codigo) === String(codigo)) || {};
         if (d.cnpj && emp.cnpj && String(d.cnpj).slice(0, 8) !== String(emp.cnpj).slice(0, 8)) {
@@ -634,24 +643,29 @@
             botao: 'Guardar assim mesmo', perigo: true });
           if (!ok) return false;
         }
-        const ativo = emUsoNoLugar(lugar);
+        // O diário do ano é o mesmo, venha num arquivo só ou em vários: o que está guardado é o de todos os
+        // meses. Por isso o arquivo entra sempre no lugar do ANO, mesmo quando ele é solto no cartão de um mês.
+        const doAno = ano + '-01-01';
+        const ativo = diariosEmUso(await arm.arquivos(codigo)).find((m) => String(m.competencia).slice(0, 4) === ano) || null;
         if (!(ativo && ativo.hashDoConteudo === r.hash)) {
           jaEra = false;
-          // O diário novo tem menos meses que o em uso: confirma (a versão nova passa a ser a usada).
-          const dia = (t) => { const x = U.lerData(t); return x ? x.numero : 0; };
-          if (ativo && ativo.periodo && (dia(d.periodo.de) > dia(ativo.periodo.de) || dia(d.periodo.ate) < dia(ativo.periodo.ate))) {
-            const ok = await T.confirmar({ titulo: 'O diário novo tem menos meses',
-              texto: 'O diário em uso vai de <b>' + T.esc(ativo.periodo.de + ' a ' + ativo.periodo.ate) + '</b>; o novo, de <b>' + T.esc(d.periodo.de + ' a ' + d.periodo.ate) + '</b>. ' +
-                'O novo passa a ser o usado (o anterior continua guardado). Continuar?',
-              botao: 'Usar o novo', perigo: true });
-            if (!ok) return false;
+          // MÊS A MÊS: os meses que vêm no arquivo entram no lugar dos que havia; os outros continuam como
+          // estavam (Dony, 25/09/2026: "ele tá me obrigando a salvar o ano inteiro… tem que entender o que eu
+          // estou carregando e ir populando"). Antes, um diário com menos meses apagava os outros.
+          let junto = d, antes = null;
+          if (ativo) {
+            try { antes = await arm.conteudoDoArquivo(ativo.id); } catch (e) { antes = null; }
+            if (antes && antes.lancamentos && antes.lancamentos.length) junto = raiz.MotorDiario.juntarDiarios(antes, d);
           }
-          const comparacao = ativo ? await compararComEmUso(ativo, 'diario', d) : null;
+          const comparacao = ativo ? await compararComEmUso(ativo, 'diario', junto) : null;
           const extra = comparacao ? { comparacao } : {};
-          let g = await guardarDiario(codigo, r, lugar.competencia, extra);
-          if (g.jaExistia && (!ativo || g.meta.id !== ativo.id)) g = await guardarDiario(codigo, r, lugar.competencia, Object.assign({ recarga: U.agoraISO() }, extra));
+          let g = await guardarDiario(codigo, r, doAno, extra, junto);
+          if (g.jaExistia && (!ativo || g.meta.id !== ativo.id)) g = await guardarDiario(codigo, r, doAno, Object.assign({ recarga: U.agoraISO() }, extra), junto);
           await versaoNova(g, ativo, comparacao);
+          d = junto;
         }
+        const mesesDoArquivo = (r.diario.meses || []).filter((m) => m.lancamentos).map((m) => U.nomeCompetencia(m.comp));
+        if (mesesDoArquivo.length) T.avisoRapido('Entrou em ' + mesesDoArquivo.join(', ') + '.', null, 4000);
         resumo = d.lancamentos.length.toLocaleString('pt-BR') + ' lançamentos · ' + d.periodo.de + ' a ' + d.periodo.ate + (d.confere ? ' · débitos = créditos' : '');
       } else if (lugar.tipo === 'balancete') {
         // Balancete que o leitor geral não entendeu (ou em que a conta não fecha): as colunas guardadas na
@@ -745,8 +759,24 @@
   function lugarDoDiario(ano, metas) {
     const doAno = (metas || []).filter((m) => m.tipo === 'diario' && String(m.competencia).slice(0, 4) === String(ano))
       .sort((a, b) => U.paraMs(b.enviadoEm) - U.paraMs(a.enviadoEm));
-    return { id: 'diario', parte: 'Contabilidade', titulo: 'Livro diário de ' + ano, sub: 'todas as contas, do 1º mês ao último', nome: 'livro diário de ' + ano,
+    return { id: 'diario', parte: 'Contabilidade', titulo: 'Livro diário de ' + ano, sub: 'o ano todo ou um pedaço (jan a mar, jan a out…)', nome: 'livro diário de ' + ano,
       log: 'diario', tipo: 'diario', competencia: ano + '-01-01', arquivos: doAno.length ? [doAno[0]] : [] };
+  }
+  // Os cartões do diário MÊS A MÊS (Dony, 25/09/2026: "quero poder salvar mês a mês o diário, assim como o
+  // balancete"). O arquivo guardado é um só — o diário do ano —, então o cartão do mês mostra o que aquele mês
+  // tem e de qual arquivo ele veio; carregar em qualquer mês junta tudo no mesmo diário do ano.
+  function lugaresDoDiarioPorMes(ano, diario) {
+    const porComp = new Map(((diario && diario.meses) || []).map((m) => [m.comp, m]));
+    return U.MESES.map((nome, i) => {
+      const dois = String(i + 1).padStart(2, '0');
+      const comp = ano + '-' + dois + '-01';
+      const m = porComp.get(comp);
+      const cheio = !!(m && m.lancamentos);
+      return { id: 'diario-' + dois, parte: 'Livro diário · mês a mês', titulo: nome.charAt(0).toUpperCase() + nome.slice(1), sub: U.nomeCompetencia(comp),
+        nome: 'livro diário de ' + U.nomeCompetencia(comp), log: 'diario', tipo: 'diario', competencia: comp, arquivos: [], opcional: true,
+        resumo: cheio ? '<b>' + m.lancamentos.toLocaleString('pt-BR') + ' lançamentos</b>' + (m.arquivo ? '<br><span class="suave">de ' + T.esc(m.arquivo) + '</span>' : '') : '',
+        rotulo: cheio ? '🔄 Carregar de novo' : '⬆ Carregar' };
+    });
   }
   function periodoDoLugar(lugar) {
     const per = lugar.periodo || { de: null, ate: lugar.competencia };
@@ -1233,6 +1263,6 @@
   }
 
   raiz.TelaSubir = { painel, botao, ligar, ligarBotao, subir, apagar, verVersao, guardarContaDoRazao, guardarTitulos, guardarBalancete, guardarDiario, doMesmoLugar, versoesDoArquivo,
-    htmlComparacao, contagensDaComparacao, lugarDoDiario, diariosEmUso, diarioDoLugar, balancetesDoDiario, doDiario,
+    htmlComparacao, contagensDaComparacao, lugarDoDiario, lugaresDoDiarioPorMes, diariosEmUso, diarioDoLugar, balancetesDoDiario, doDiario,
     sincronizarDoDiario, prepararDoDiario, cartaoDaEscolha, ligarCartaoDaEscolha, textoSemDiario, lugarDoBalanceteDoDiario, contasEscolhidas, resumoDoDiario };
 })(self);

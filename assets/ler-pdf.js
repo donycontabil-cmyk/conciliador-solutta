@@ -187,36 +187,45 @@
       if (typeof pagina.cleanup === 'function') pagina.cleanup();
     }
     if (typeof doc.destroy === 'function') doc.destroy();
-    // As colunas de cada página e, entre elas, o DESENHO MAIS COMUM — que vale para o arquivo inteiro. Juntar
-    // os pedaços de todas as páginas antes de procurar as divisas não funciona: os nomes compridos de páginas
-    // diferentes tapam os espaços vazios e as colunas somem. Por página o desenho sai limpo, e as páginas
-    // repetem o mesmo desenho.
+    // AS COLUNAS DO ARQUIVO INTEIRO saem do BRANCO QUE SE REPETE. Cada página tem os seus vazios — numa folha
+    // um nome comprido ou um valor grande tapa o espaço, na outra não —, então o que vale é onde a folha fica
+    // branca em QUASE TODAS as páginas: é ali que passa a divisa, e ela é a mesma da primeira à última página.
+    // (Juntar os pedaços de todas as páginas antes de medir não serve: o branco some. Votar no MEIO do vazio de
+    // cada página também não: o meio anda com o tamanho dos valores, e no diário de 282 páginas da Zelco os
+    // créditos caíam na coluna errada. Contar o branco ponto a ponto resolve os dois.)
     const comLinhas = porPagina.filter((l) => l.length);
-    const cortesPorPagina = comLinhas.map((linhas) => {
+    const PONTOS = 2000;                        // a largura da folha em pontos (retrato e paisagem cabem)
+    const branco = new Uint16Array(PONTOS + 1);
+    let inicio = Infinity, fim = 0;
+    comLinhas.forEach((linhas) => {
       const f = colunasDaPagina(linhas, opc);
-      const cortes = [];
-      for (let i = 1; i < f.length; i++) cortes.push((f[i - 1][1] + f[i][0]) / 2);
-      return { cortes, fim: f.length ? f[f.length - 1][1] : 0, inicio: f.length ? f[0][0] : 0 };
+      if (!f.length) return;
+      inicio = Math.min(inicio, f[0][0]);
+      fim = Math.max(fim, f[f.length - 1][1]);
+      for (let i = 1; i < f.length; i++) {
+        const a = Math.max(0, Math.ceil(f[i - 1][1])), b = Math.min(PONTOS, Math.floor(f[i][0]));
+        for (let x = a; x <= b; x++) branco[x]++;
+      }
     });
-    // As divisas que aparecem na MAIORIA das páginas. Cada página sozinha tem uma divisa a mais ou a menos
-    // (depende do tamanho dos valores daquela folha); o que se repete é o desenho de verdade.
-    const grupos = [];
-    cortesPorPagina.forEach((p) => p.cortes.forEach((x) => {
-      const g = grupos.find((y) => Math.abs(y.x - x) <= (opc.folgaColuna || 4));
-      if (g) { g.soma += x; g.n++; g.x = g.soma / g.n; } else grupos.push({ x, soma: x, n: 1 });
-    }));
-    // Basta a divisa aparecer em duas páginas: numa folha um valor comprido tapa o vazio, na outra não — e o
-    // espaço existe de verdade. Com uma página só, vale o que ela mostrar.
-    const minimoPaginas = comLinhas.length >= 3 ? 2 : 1;
-    const divisas = grupos.filter((g) => g.n >= minimoPaginas).map((g) => g.x).sort((a, b) => a - b);
-    const inicio = Math.min.apply(null, cortesPorPagina.map((p) => p.inicio).concat([0]));
-    const fim = Math.max.apply(null, cortesPorPagina.map((p) => p.fim).concat([0])) + 10;
+    if (!isFinite(inicio)) inicio = 0;
+    fim += 10;
+    // Com três páginas ou mais, o branco tem de aparecer em pelo menos 30% delas (e nunca em uma só); com uma
+    // ou duas, vale o que elas mostrarem. Não dá para exigir a maioria: numa folha em que quase todo lançamento
+    // tem histórico comprido, o espaço entre o lote, a conta e a descrição some — e ele existe.
+    const minimo = comLinhas.length >= 3 ? Math.max(2, Math.ceil(comLinhas.length * (opc.brancoMinimo || 0.3))) : 1;
+    const divisas = [];
+    const guardar = (a, b) => { const meio = (a + b) / 2; if (meio > inicio && meio < fim) divisas.push(meio); };
+    let abriu = -1;
+    for (let x = 0; x <= PONTOS; x++) {
+      if (branco[x] >= minimo) { if (abriu < 0) abriu = x; }
+      else if (abriu >= 0) { guardar(abriu, x - 1); abriu = -1; }
+    }
+    if (abriu >= 0) guardar(abriu, PONTOS);
     const faixas = [];
     let de = inicio;
     divisas.forEach((x) => { faixas.push([de, x]); de = x; });
     faixas.push([de, fim]);
-    const todas = [].concat.apply([], porPagina);
-    const linhas = todas.map((l) => emCelulas(l, faixas));
+    const linhas = [].concat.apply([], porPagina).map((l) => emCelulas(l, faixas));
     return { nome: opc.nome || 'PDF', paginas: total, lidas: ate, linhas, colunas: faixas.length,
       divisas: divisas.length, paginasLidas: comLinhas.length };
   }

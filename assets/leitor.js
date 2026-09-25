@@ -62,6 +62,10 @@
     const planilha = { abas: abasDoArquivo, avisos: avisosAbertura || [] };
     r.avisos = planilha.avisos.slice();
     r.previa = previa(planilha.abas);
+    // O arquivo JÁ ABERTO fica junto da leitura. Quem precisar tentar de novo (indicar as colunas do balancete,
+    // por exemplo) usa estas abas em vez de abrir o arquivo outra vez — num PDF, abrir "como planilha" traz
+    // lixo na tela (Dony, 25/09/2026: "carregou o balancete de janeiro, mas não entendeu os outros").
+    r.abas = planilha.abas;
 
     // (saldo de abertura por fornecedor: formato a definir com o Dony — Parte 5.3)
 
