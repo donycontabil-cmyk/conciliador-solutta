@@ -850,14 +850,14 @@
       cab: [T.esc(l.rotulo), '<span class="suave">' + T.esc(l.bloco) + '</span>'], valores: l.valores })));
     const dif = A.diferenca;
     const conta = Math.abs(dif) < 1 ? 'Nos dois jeitos o IRPJ + CSLL dá o mesmo valor.'
-      : dif < 0 ? 'Pela apuração <b>anual</b> o IRPJ + CSLL fica <b>' + T.moeda(Math.abs(dif)) + ' menor</b> do que somando os trimestres.'
-        : 'Pela apuração anual o IRPJ + CSLL fica <b>' + T.moeda(dif) + ' maior</b> do que somando os trimestres — neste caso o trimestral é melhor.';
+      : dif < 0 ? 'Pela apuração <b>anual</b> o IRPJ + CSLL fica <b>' + 'R$ ' + U.formatarCentavos(Math.abs(dif)) + ' menor</b> do que somando os trimestres.'
+        : 'Pela apuração anual o IRPJ + CSLL fica <b>' + 'R$ ' + U.formatarCentavos(dif) + ' maior</b> do que somando os trimestres — neste caso o trimestral é melhor.';
     return '<h3 class="apres-sub">LALUR anual' + (simulado ? ' na simulação' : '') + ' <small>o ano inteiro como um período só · o adicional de 10% é sobre o que passa de ' +
       T.esc(U.formatarCentavos(2000000 * A.meses)) + ' (R$ 20.000,00 por mês do período) e a compensação é 30% do lucro real do ano</small></h3>' + tab +
       '<p class="apres-nota">' + conta +
       (A.completo ? '' : ' <b>Atenção:</b> o ano tem ' + A.meses + ' mês(es) ' + (simulado ? 'no período simulado' : 'de balancete carregado') +
         ' — para a apuração anual de verdade, ' + (simulado ? 'simule o ano inteiro' : 'carregue janeiro a dezembro') + '.') +
-      ' O prejuízo fiscal e a base negativa usados são os saldos informados no 1º trimestre da Parte B; o IR retido é a soma dos trimestres (' + T.moeda(A.irRetido) + ').</p>';
+      ' O prejuízo fiscal e a base negativa usados são os saldos informados no 1º trimestre da Parte B; o IR retido é a soma dos trimestres (' + 'R$ ' + U.formatarCentavos(A.irRetido) + ').</p>';
   }
 
   function secaoLalurSimulado(s, ant, op) {
