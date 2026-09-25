@@ -47,7 +47,8 @@
     if (!k) return null;
     if (/^(dc|dcs|natureza|nat|sinal|debcred|dc\d)$/.test(k) || /(saldo|anterior|inicial|atual|final|ant)dc$/.test(k)) return 'dc';
     if (/^(red|reduzido|reduzida|codreduzido|contareduzida|codigoreduzido|codred|reduz|codigored|creduzido)$/.test(k)) return 'reduzido';
-    if (/^(contacontabil|conta|classificacao|classificacaocontabil|classif|codigodaconta|contaclassificacao|codconta|contacodigo|numerodaconta|numeroconta|nconta|mascara|estrutura|codigocontabil|contas)$/.test(k)) return 'conta';
+    // "Cta. Contábil" (Dony, 25/09/2026, o balancete da Zelco) é o mesmo que "Conta contábil".
+    if (/^(contacontabil|ctacontabil|ctacontab|ctacont|cta|conta|classificacao|classificacaocontabil|classif|codigodaconta|contaclassificacao|codconta|contacodigo|numerodaconta|numeroconta|nconta|mascara|estrutura|codigocontabil|contas)$/.test(k)) return 'conta';
     if (/^(codigo|cod|codig)$/.test(k)) return 'codigo';
     if (/^(titulodaconta|titulo|descricaodaconta|descricao|descricaoconta|nomedaconta|nome|nomeconta|denominacao|especificacao|discriminacao|contadescricao|historicodaconta|contanome|nomedacontacontabil|descricaodacontacontabil)$/.test(k)) return 'titulo';
     if (/^saldoem/.test(k)) return 'saldoEm';

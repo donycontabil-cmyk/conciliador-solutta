@@ -27,17 +27,51 @@
   // Plano de contas pelo código reduzido (de todos os balancetes; o nome do mais recente vale).
   // balancetes: [{ competencia, contas }]
   // ------------------------------------------------------------------
+  // O plano vem dos balancetes. A conta do diário é achada pelo REDUZIDO e, quando o balancete não tem
+  // reduzido, pela CLASSIFICAÇÃO — inclusive quando os dois relatórios escrevem a mesma conta com máscaras
+  // diferentes (Dony, 25/09/2026, a Zelco: o balancete traz "1.1.1.002.0001" e o diário, "1.1.10.020.001";
+  // tirando os pontos, os dígitos são os mesmos). Por isso o plano também é indexado só pelos dígitos.
+  const soDigitos = (x) => String(x || '').replace(/\D+/g, '');
+  // A conta dentro de um balancete: pelo reduzido, pela classificação ou pelos dígitos dela (a mesma conta
+  // pode estar escrita com outra máscara em cada relatório).
+  function contaNoBalancete(b, chave) {
+    const k = String(chave || '').trim();
+    if (!b || !k) return null;
+    const dig = soDigitos(k);
+    const contas = b.contas || [];
+    return contas.find((c) => String(c.reduzido || '').trim() === k) ||
+      contas.find((c) => String(c.conta || '').trim() === k) ||
+      (dig ? contas.find((c) => soDigitos(c.conta) === dig) : null) || null;
+  }
   function planoDosBalancetes(balancetes) {
     const plano = new Map();
+    const apelidos = new Map(); // outro jeito de escrever a mesma conta -> a chave dela no plano
     (balancetes || []).slice().sort((a, b) => String(a.competencia).localeCompare(String(b.competencia))).forEach((b) => {
       const contas = b.contas || [];
       const pais = new Set(contas.map((c) => c.pai).filter(Boolean));
       contas.forEach((c) => {
         const red = String(c.reduzido || '').trim();
-        if (!red) return;
-        plano.set(red, { reduzido: red, conta: c.conta, titulo: c.titulo || '', nivel: c.nivel, pai: c.pai || '', analitica: !pais.has(c.conta) });
+        const cls = String(c.conta || '').trim();
+        // A chave da conta é o reduzido; sem reduzido no balancete (o caso da Zelco), é a classificação.
+        const chave = red || cls;
+        if (!chave) return;
+        plano.set(chave, { reduzido: chave, conta: c.conta, titulo: c.titulo || '', nivel: c.nivel, pai: c.pai || '', analitica: !pais.has(c.conta) });
+        // Os APELIDOS ficam fora do plano (senão a mesma conta apareceria várias vezes em quem percorre o
+        // plano inteiro): a classificação e os dígitos dela, para achar a conta escrita com outra máscara.
+        if (cls && cls !== chave) apelidos.set(cls, chave);
+        const dig = soDigitos(cls);
+        if (dig && dig !== chave) apelidos.set(dig, chave);
       });
     });
+    // Achar a conta do diário no plano: pelo que veio escrito, pelos apelidos, senão pelos dígitos.
+    plano.achar = (codigo) => {
+      const k = String(codigo || '').trim();
+      if (!k) return null;
+      if (plano.has(k)) return plano.get(k);
+      const porApelido = apelidos.get(k) || apelidos.get(soDigitos(k));
+      return porApelido ? plano.get(porApelido) || null : null;
+    };
+    plano.chaveDe = (codigo) => { const c = plano.achar(codigo); return c ? c.reduzido : String(codigo || '').trim(); };
     return plano;
   }
 
@@ -52,6 +86,28 @@
     return g[chave];
   }
 
+  // O diário pode escrever a conta com uma máscara e o balancete com outra (Dony, 25/09/2026, a Zelco:
+  // "1.1.10.020.001" no diário e "1.1.1.002.0001" no balancete). Antes de cruzar os dois, os códigos do
+  // diário são traduzidos para a chave do plano — uma vez só, guardada no próprio diário.
+  function traduzido(diario, plano) {
+    if (!diario || !plano || typeof plano.achar !== 'function' || !plano.size) return diario;
+    const marca = 'traduzido:' + plano.size + ':' + (plano.keys().next().value || '');
+    return guardado(diario, marca, () => {
+      let mudou = false;
+      const conv = (c) => {
+        const k = String(c || '');
+        if (!k || plano.has(k)) return c;
+        const x = plano.achar(k);
+        if (x && x.reduzido !== k) { mudou = true; return x.reduzido; }
+        return c;
+      };
+      const tradLanc = (l) => Object.assign({}, l, { debito: conv(l.debito), credito: conv(l.credito) });
+      // Em alguns desenhos o mês guarda a lista de lançamentos; em outros, só a contagem. Só traduz a lista.
+      const meses = (diario.meses || []).map((m) => (Array.isArray(m.lancamentos) ? Object.assign({}, m, { lancamentos: m.lancamentos.map(tradLanc) }) : m));
+      const lancamentos = (diario.lancamentos || []).map(tradLanc);
+      return mudou ? Object.assign({}, diario, { meses, lancamentos }) : diario;
+    });
+  }
   function movimentos(diario) { return guardado(diario, 'movimentos', () => calcularMovimentos(diario)); }
   function calcularMovimentos(diario) {
     const m = new Map();
@@ -120,7 +176,7 @@
       .sort((a, b) => String(a.competencia).localeCompare(String(b.competencia)));
     for (const b of candidatos) {
       const comp = String(b.competencia).slice(0, 10);
-      const linha = (b.contas || []).find((c) => String(c.reduzido || '').trim() === red);
+      const linha = contaNoBalancete(b, red);
       // Balancete sem a conta: saldo zero nele (o balancete lista as contas com saldo ou movimento).
       const anterior = linha ? linha.saldoAnterior : 0;
       let antes = 0;
@@ -268,11 +324,13 @@
   // O RAZÃO DE UMA CONTA tirado do diário, no desenho do razão que os passos usam.
   // op: { de (competência do começo; sem ela, o começo do diário), ate (competência do fim) }
   // ------------------------------------------------------------------
-  function razaoDaConta(diario, balancetes, reduzido, op) {
-    const red = String(reduzido);
+  function razaoDaConta(diarioCru, balancetes, reduzido, op) {
     const opc = op || {};
     const plano = planoDosBalancetes(balancetes);
-    const info = plano.get(red) || { reduzido: red, conta: '', titulo: '' };
+    const info = plano.achar(reduzido) || { reduzido: String(reduzido), conta: '', titulo: '' };
+    // A conta pela chave do plano e o diário com os códigos traduzidos: os dois falam a mesma língua.
+    const red = String(info.reduzido || reduzido);
+    const diario = traduzido(diarioCru, plano);
     const mov = movimentos(diario);
     const comps = (diario.meses || []).map((m) => m.comp);
     const inicio = opc.de && opc.de > comps[0] ? opc.de : comps[0];
@@ -321,7 +379,7 @@
     });
     // O saldo do fim conferido com o balancete do último mês (quando ele está carregado).
     const bFim = (balancetes || []).find((b) => String(b.competencia).slice(0, 10) === fim);
-    const linhaFim = bFim ? (bFim.contas || []).find((c) => String(c.reduzido || '').trim() === red) : null;
+    const linhaFim = contaNoBalancete(bFim, red);
     const saldoFinalDeclarado = bFim ? (linhaFim ? linhaFim.saldoAtual : 0) : null;
     const confere = saldoFinalDeclarado === null ? null : saldoFinalDeclarado === saldo;
     if (confere === false) avisos.push('O saldo do fim pelo diário (' + Util.formatarCentavos(saldo) + ') não é o do balancete de ' + Util.nomeCompetencia(fim) + ' (' + Util.formatarCentavos(saldoFinalDeclarado) + ').');
@@ -352,21 +410,32 @@
   // SALDOS DE TODAS AS CONTAS pelo diário: saldo no começo (do balancete), débitos, créditos e saldo no fim, conferido
   // com o balancete do último mês do diário quando ele está carregado.
   // ------------------------------------------------------------------
-  function saldosDasContas(diario, balancetes) {
-    const mov = movimentos(diario);
+  function saldosDasContas(diarioCru, balancetes) {
     const plano = planoDosBalancetes(balancetes);
+    const diario = traduzido(diarioCru, plano);
+    const mov = movimentos(diario);
     const comps = (diario.meses || []).map((m) => m.comp);
     const fim = comps[comps.length - 1];
     const bFim = (balancetes || []).find((b) => String(b.competencia).slice(0, 10) === fim);
-    const noFim = new Map(bFim ? (bFim.contas || []).filter((c) => String(c.reduzido || '').trim()).map((c) => [String(c.reduzido).trim(), c]) : []);
+    // O balancete do fim por reduzido E por classificação (com e sem os pontos): a conta do diário pode vir
+    // escrita de outro jeito.
+    const noFim = new Map();
+    (bFim ? bFim.contas || [] : []).forEach((c) => {
+      const red = String(c.reduzido || '').trim();
+      if (red) noFim.set(red, c);
+      const cls = String(c.conta || '').trim();
+      if (cls && !noFim.has(cls)) noFim.set(cls, c);
+      const dig = cls.replace(/D+/g, '');
+      if (dig && !noFim.has(dig)) noFim.set(dig, c);
+    });
     const codigos = new Set(Array.from(plano.values()).filter((c) => c.analitica).map((c) => c.reduzido));
     mov.forEach((x, red) => codigos.add(red));
     const lista = Array.from(codigos).map((red) => {
-      const info = plano.get(red) || null;
+      const info = plano.achar(red) || null;
       const x = mov.get(red) || { d: 0, c: 0, n: 0 };
       const sc = saldoNoComeco(diario, balancetes, red, mov);
       const saldoFinal = sc.valor === null ? null : sc.valor + x.d - x.c;
-      const lb = noFim.get(red);
+      const lb = noFim.get(red) || noFim.get(String(red).replace(/D+/g, ''));
       const saldoBalancete = bFim ? (lb ? lb.saldoAtual : 0) : null;
       return { reduzido: red, conta: info ? info.conta : '', titulo: info ? info.titulo : '', noPlano: !!info, lancamentos: x.n, saldoInicial: sc.valor, debitos: x.d, creditos: x.c,
         saldoFinal, saldoBalancete, confere: saldoBalancete === null || saldoFinal === null ? null : saldoFinal === saldoBalancete };
