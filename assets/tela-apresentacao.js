@@ -40,6 +40,7 @@
     { id: 'bp-assinatura', titulo: 'Balanço para assinatura' },
     { id: 'dre-assinatura', titulo: 'DRE para assinatura' },
     { id: 'dfc', titulo: 'Fluxo de caixa' },
+    { id: 'dmpl', titulo: 'Mutações do patrimônio líquido' },
     { id: 'notas', titulo: 'Notas explicativas' },
   ];
   // As DREs num botão só (Dony, 22/09/2026: "como a gente já tem mais de 3 DREs, eu quero poder clicar em DRE e escolher:
@@ -47,10 +48,10 @@
   const GRUPO_DRE = ['dre-mensal', 'dre-trimestral', 'simulacao'];
   // Os relatórios num botão só (Dony, 22/09/2026: "você vai colocar assim: relatórios — o relatório do cliente, DRE para
   // assinatura, balanço para assinatura, e já cria também o fluxo de caixa"). Cada grupo lembra a última aba aberta.
-  const GRUPO_RELATORIOS = ['cliente', 'bp-assinatura', 'dre-assinatura', 'dfc', 'notas'];
+  const GRUPO_RELATORIOS = ['cliente', 'bp-assinatura', 'dre-assinatura', 'dfc', 'dmpl', 'notas'];
   const GRUPOS_DE_ABAS = [
     { id: 'dre', abas: GRUPO_DRE, rotulo: 'DRE', dica: 'DRE mensal, trimestral ou simulação', ultima: 'ultimaDre' },
-    { id: 'rel', abas: GRUPO_RELATORIOS, rotulo: '📄 Relatórios', dica: 'Relatório do cliente, balanço e DRE para assinatura, fluxo de caixa e notas explicativas', ultima: 'ultimoRelatorio' },
+    { id: 'rel', abas: GRUPO_RELATORIOS, rotulo: '📄 Relatórios', dica: 'Relatório do cliente, balanço, DRE, fluxo de caixa, mutações do patrimônio líquido e notas explicativas', ultima: 'ultimoRelatorio' },
   ];
   const grupoDaAba = (id) => GRUPOS_DE_ABAS.find((g) => g.abas.indexOf(id) >= 0) || null;
   const REGRAS = { movimento: 'Movimento do mês (conta de resultado)', 'aumento-credor': 'Aumento do saldo credor (conta patrimonial)' };
@@ -60,7 +61,7 @@
   const E = { codigo: null, ano: null, emp: null, rel: null, registro: null, config: {}, lugares: [], metas: [],
     aba: 'dre-mensal', avah: true, nivel: 5, semZeradas: false, abertos: new Set(), selecao: null, marcarLalur: false, balancetes: [], fila: null, clienteMes: null, cacheCliente: null, ultimoCliente: null, casas: 2, milhar: false,
     dreEdicao: null, balancetesAnt: [], relAnt: null, ultimaDre: 'dre-mensal', ultimoRelatorio: 'cliente',
-    assinaturaMes: null, assinaturaSoMes: false, assinaturaComparar: false, assinaturaNivel: 3, nivelDre: 2, dfcDetalhe: false, balancoLado: false, balancoPaisagem: false };
+    assinaturaMes: null, assinaturaSoMes: false, assinaturaComparar: false, assinaturaNivel: 3, nivelDre: 2, dfcDetalhe: false, balancoLado: false, balancoPaisagem: false, dmplPaisagem: true };
   (function lerPreferencias() {
     try {
       const p = JSON.parse((raiz.localStorage && raiz.localStorage.getItem(CHAVE_PREF)) || '{}') || {};
@@ -73,6 +74,7 @@
       if (p.nivelDre >= 1 && p.nivelDre <= 9) E.nivelDre = p.nivelDre;
       if (typeof p.balancoLado === 'boolean') E.balancoLado = p.balancoLado;
       if (typeof p.balancoPaisagem === 'boolean') E.balancoPaisagem = p.balancoPaisagem;
+      if (typeof p.dmplPaisagem === 'boolean') E.dmplPaisagem = p.dmplPaisagem;
       if (typeof p.semZeradas === 'boolean') E.semZeradas = p.semZeradas;
       if (p.casas === 0 || p.casas === 1 || p.casas === 2) E.casas = p.casas;
       if (typeof p.milhar === 'boolean') E.milhar = p.milhar;
@@ -80,7 +82,7 @@
   })();
   function guardarPreferencias() {
     try { raiz.localStorage.setItem(CHAVE_PREF, JSON.stringify({ aba: E.aba, ultimaDre: E.ultimaDre, ultimoRelatorio: E.ultimoRelatorio, avah: E.avah, nivel: E.nivel, semZeradas: E.semZeradas, casas: E.casas, milhar: E.milhar,
-      nivelBalanco: E.assinaturaNivel, nivelDre: E.nivelDre, balancoLado: E.balancoLado, balancoPaisagem: E.balancoPaisagem })); } catch (e) { /* navegador sem armazenamento */ }
+      nivelBalanco: E.assinaturaNivel, nivelDre: E.nivelDre, balancoLado: E.balancoLado, balancoPaisagem: E.balancoPaisagem, dmplPaisagem: E.dmplPaisagem })); } catch (e) { /* navegador sem armazenamento */ }
   }
 
   // ------------------------------------------------------------------
@@ -943,6 +945,8 @@
       if (dreNivel) { E.nivelDre = Number(dreNivel.getAttribute('data-dre-nivel')); guardarPreferencias(); redesenharFolha(el); return; }
       const bpModelo = ev.target.closest('button[data-bp-modelo]');
       if (bpModelo) { E.balancoLado = bpModelo.getAttribute('data-bp-modelo') === 'lado'; guardarPreferencias(); redesenharFolha(el); return; }
+      const dmplPapel = ev.target.closest('button[data-dmpl-papel]');
+      if (dmplPapel) { E.dmplPaisagem = dmplPapel.getAttribute('data-dmpl-papel') === 'paisagem'; guardarPreferencias(); redesenharFolha(el); return; }
       const bpPapel = ev.target.closest('button[data-bp-papel]');
       if (bpPapel) { E.balancoPaisagem = bpPapel.getAttribute('data-bp-papel') === 'paisagem'; guardarPreferencias(); redesenharFolha(el); return; }
       const dc = ev.target.closest('button[data-dc]');
@@ -1649,8 +1653,8 @@
   // nome e o CNPJ da empresa, a demonstração e, no fim, o local e a data e as linhas de assinatura do responsável e do
   // contador (guardados no cadastro da empresa: emp.assinaturas). As contas vêm do motor (demonstracoes).
   // ------------------------------------------------------------------
-  const DOCUMENTOS = { 'bp-assinatura': 'balanco', 'dre-assinatura': 'dre', dfc: 'dfc', notas: 'notas' };
-  const NOME_DOCUMENTO = { balanco: 'Balanço patrimonial', dre: 'DRE', dfc: 'Fluxo de caixa', notas: 'Notas explicativas' };
+  const DOCUMENTOS = { 'bp-assinatura': 'balanco', 'dre-assinatura': 'dre', dfc: 'dfc', dmpl: 'dmpl', notas: 'notas' };
+  const NOME_DOCUMENTO = { balanco: 'Balanço patrimonial', dre: 'DRE', dfc: 'Fluxo de caixa', dmpl: 'Mutações do patrimônio líquido', notas: 'Notas explicativas' };
   const CHAVE_CONTADOR = 'conciliador-solutta.contador';
   function mesDaAssinatura() {
     const ms = E.rel.meses.filter((m) => m.tem);
@@ -1661,6 +1665,12 @@
     if (k < 0) return null;
     const comparar = !!E.assinaturaComparar && E.balancetesAnt.length > 0;
     return motor().demonstracoes(E.rel, comparar ? relAnterior() : null, { k, soMes: !!E.assinaturaSoMes, comparar });
+  }
+  // As mutações do patrimônio líquido do período que termina no mês escolhido.
+  function mutacoesVisiveis() {
+    const k = E.rel.meses.findIndex((m) => m.comp === mesDaAssinatura());
+    if (k < 0) return null;
+    return motor().mutacoesPl(E.rel, { k });
   }
   // As notas explicativas do mês escolhido (com a coluna do mês anterior, como no modelo do escritório).
   function notasVisiveis() {
@@ -1737,6 +1747,23 @@
         if (l.categoria !== categoria) { categoria = l.categoria; if (!SEM_FAIXA[categoria]) faixa = secaoDoc(categoria); }
         return faixa + linha(l.tipo !== 'total' ? 'dem-conta' : l.id === 'lucroLiquido' ? 'dem-total' : 'dem-subtotal', l.rotulo, l) + contasDaLinha(l);
       }).join('');
+    } else if (qual === 'dmpl') {
+      // DMPL: uma coluna por conta do patrimônio líquido, mais o resultado ainda não encerrado e o total.
+      const mu = mutacoesVisiveis();
+      titulo = 'Demonstração das mutações do patrimônio líquido';
+      sub = 'Período de ' + (mu ? mu.periodo.de : '') + ' a ' + (mu ? mu.periodo.ate : '') + ' · ' + valores;
+      if (!mu) return '<div class="dem dem-pagina"><div class="dem-cab"><h2>' + T.esc(titulo) + '</h2></div>' +
+        '<p class="suave">Não achei o patrimônio líquido no plano de contas: sem ele não dá para montar esta demonstração.</p></div>';
+      const cols = mu.colunas;
+      cab = '<th>&nbsp;</th>' + cols.map((c) => '<th class="num">' + T.esc(c.titulo) + '</th>').join('') + '<th class="num">TOTAL</th>';
+      corpo = mu.linhas.map((l) => '<tr class="' + (l.tipo === 'saldo' ? 'dem-total' : 'dem-conta') + '"><td>' + T.esc(l.rotulo) + '</td>' +
+        l.valores.map((v) => '<td class="num">' + (Math.round(v) ? dinheiro(v) : '<span class="zero">–</span>') + '</td>').join('') +
+        '<td class="num">' + dinheiro(l.total) + '</td></tr>').join('');
+      return '<div class="dem dem-pagina' + (E.dmplPaisagem ? ' dem-deitada' : '') + '"><div class="dem-cab"><div class="dem-empresa">' + T.esc(emp.nome) + '</div>' +
+        (emp.cnpj ? '<div class="dem-cnpj">CNPJ ' + T.esc(U.formatarCnpj(emp.cnpj)) + '</div>' : '') +
+        '<h2>' + T.esc(titulo) + '</h2><div class="dem-sub">' + T.esc(sub) + '</div></div>' +
+        '<table class="dem-tabela dem-dmpl"><thead><tr>' + cab + '</tr></thead><tbody>' + corpo + '</tbody></table>' +
+        blocoAssinaturas(editavel) + '</div>';
     } else if (qual === 'notas') {
       // NOTAS EXPLICATIVAS (Dony, 24/09/2026, com o modelo de um escritório): o contexto da empresa, como o
       // balanço foi preparado, as práticas contábeis e a abertura de cada grupo do balanço nas contas.
@@ -1805,7 +1832,10 @@
     return '<div class="rc-barra nao-imprimir">' +
       '<label>' + (qual === 'balanco' ? 'Balanço no fim de' : 'Até o fim de') + ' <select class="apres-campo" id="dc-mes">' +
       ms.map((m) => '<option value="' + m.comp + '"' + (m.comp === comp ? ' selected' : '') + '>' + T.esc(m.rotulo) + '</option>').join('') + '</select></label>' +
-      (qual === 'notas'
+      (qual === 'dmpl'
+        ? '<span class="grupo-seg"><span class="seg-rotulo">Papel</span>' + seg(!E.dmplPaisagem, 'data-dmpl-papel="retrato"', 'Retrato', 'Folha em pé') +
+          seg(!!E.dmplPaisagem, 'data-dmpl-papel="paisagem"', 'Paisagem', 'Folha deitada: cabe mais coluna') + '</span>'
+        : qual === 'notas'
         ? '<button type="button" class="botao pequeno" data-dc="notas-extras" title="Acrescentar uma nota escrita por você no fim (fica guardada na empresa)">✎ Escrever</button>'
         : qual === 'balanco'
         ? nivelSeg('Mostrar até o nível', 'data-dc-nivel', E.assinaturaNivel, 'No balanço: 1 = ativo e passivo · 2 = circulante e não circulante · 3 = as contas de cada grupo · 4 e 5 = as de baixo delas') +
@@ -1832,6 +1862,7 @@
     const avisos = d.avisos.length ? '<div class="aviso ambar nao-imprimir" style="margin:0 0 10px"><span class="icone-aviso">⚠️</span><div>' + d.avisos.map((a) => T.esc(a)).join('<br>') + '</div></div>' : '';
     const conf = qual === 'balanco' ? (d.balanco.fecha ? '✓ O balanço fecha: total do ativo = total do passivo e do patrimônio líquido (' + U.formatarCentavos(d.balanco.totalAtivo) + '). O resultado do exercício é o lucro da DRE que ainda não foi encerrado no balancete.' : '')
       : qual === 'dre' ? '✓ É a DRE mensal somada nos meses do período (' + T.esc(d.periodo.de) + ' a ' + T.esc(d.periodo.ate) + '), com as linhas da DRE da empresa.'
+        : qual === 'dmpl' ? (function () { const mu = mutacoesVisiveis(); return mu ? (mu.confere ? '✓ Confere: o saldo de cada coluna no começo do período mais o que mexeu é o saldo do fim (total ' + U.formatarCentavos(mu.totalFinal) + '), o mesmo patrimônio líquido do balanço.' : '⚠ ' + mu.falhas.join(' ')) : ''; })()
         : d.dfc.confere ? '✓ O fluxo de caixa fecha com o disponível (' + T.esc(d.dfc.disponivel) + '): o caixa do fim (' + U.formatarCentavos(d.dfc.caixaFim) + ') menos o do começo (' +
           U.formatarCentavos(d.dfc.caixaInicio) + ') é o aumento (redução) do período. No ativo, o aumento de um grupo consome caixa; no passivo, gera.' : '';
     const semNome = !((E.emp.assinaturas || {}).responsavel || {}).nome;
@@ -1885,7 +1916,7 @@
     const escolha = await T.janela({
       titulo: 'Imprimir ou salvar em PDF',
       corpo: '<p class="suave pequeno" style="margin:0 0 8px">Cada demonstração sai numa folha A4 em pé, com as linhas de assinatura. Data: ' + T.esc(qual === 'balanco' ? d.data : d.periodo.de + ' a ' + d.periodo.ate) + '.</p>' +
-        ['balanco', 'dre', 'dfc', 'notas'].map((q) => '<label class="item-aba"><input type="checkbox" value="' + q + '"' + (q === qual ? ' checked' : '') + (q === 'dfc' && !d.dfc ? ' disabled' : '') + '> ' +
+        ['balanco', 'dre', 'dfc', 'dmpl', 'notas'].map((q) => '<label class="item-aba"><input type="checkbox" value="' + q + '"' + (q === qual ? ' checked' : '') + (q === 'dfc' && !d.dfc ? ' disabled' : '') + '> ' +
           NOME_DOCUMENTO[q] + (q === 'dfc' && !d.dfc ? ' (não dá para montar: veja o aviso na aba)' : '') + '</label>').join(''),
       botoes: [{ texto: 'Cancelar', valor: null }, { texto: '🖨 Imprimir', tipo: 'primario', antes: (j) => {
         const lista = Array.from(j.querySelectorAll('input[type=checkbox]:checked')).map((x) => x.value);

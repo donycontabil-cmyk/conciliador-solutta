@@ -163,16 +163,26 @@
       casaBusca(f.nome + ' ' + f.contas.map((c) => c.conta + ' ' + c.nome).join(' ')) &&
       (!filtro('conta') || f.contas.some((c) => c.conta === filtro('conta'))));
     const marcados = Array.from(E.escolhas.values()).filter((e) => e.marcado).length;
+    // A lista que está na tela agora (com os filtros): é o que os botões de marcar tudo pegam.
+    E.listaNaTela = lista;
+    const naTela = lista.filter((f) => (E.escolhas.get(f.chave) || {}).marcado).length;
     alvo.innerHTML = '<div class="cartao corpo" style="margin-top:14px">' +
       '<div class="linha-flex" style="margin-bottom:6px"><h3 style="flex:1;margin:0">🔀 Mesmo fornecedor em várias contas ' +
       '<span class="suave pequeno">(' + lista.length.toLocaleString('pt-BR') + ')</span></h3>' +
+      // Marcar um por um em 300 fornecedores não dá (Dony, 25/09/2026: "eu quero poder selecionar tudo para
+      // não ter que ficar ticando uma a uma"). Os botões valem para a lista COM OS FILTROS de agora.
+      '<button type="button" class="botao pequeno" data-acao="marcar-todos"' + (naTela === lista.length && lista.length ? ' disabled' : '') +
+      ' title="Marca os ' + lista.length + ' fornecedor(es) desta lista, com a conta que fica que o programa sugeriu">☑ Marcar todos' +
+      (lista.length ? ' (' + lista.length + ')' : '') + '</button> ' +
+      '<button type="button" class="botao pequeno" data-acao="limpar-marcas"' + (marcados ? '' : ' disabled') + ' title="Desmarca tudo">☐ Limpar</button>' +
       '<span class="pilula azul">' + marcados + ' marcado(s) para o arquivo de ajustes</span></div>' +
       '<p class="suave pequeno" style="margin:0 0 8px">Marque o fornecedor e escolha a <b>conta que fica</b>: o programa monta o lançamento que leva <b>o saldo</b> das outras para ela. ' +
       'A conta sugerida é a que tem a maior parte. O que já foi reclassificado (débito e crédito que se anulam na mesma conta) <b>não entra</b>.</p><div id="re-tab"></div></div>';
     T.tabelaPaginada(alvo.querySelector('#re-tab'), {
       alta: true, porPagina: 60,
       ordem: { id: 're-varias', colunas: [null, TXT((f) => f.nome), NUM((f) => f.qtdContas), VALOR((f) => f.total), VALOR((f) => f.aLevar), null] },
-      cabecalho: '<th style="width:26px"></th><th>Fornecedor</th><th class="num">Contas</th><th class="num">Total no resultado</th><th class="num">Vai mudar de conta</th><th>Conta que fica</th>',
+      cabecalho: '<th style="width:26px"><input type="checkbox" data-marcar-todos title="Marcar ou desmarcar todos os desta lista"' +
+        (lista.length && naTela === lista.length ? ' checked' : '') + '></th><th>Fornecedor</th><th class="num">Contas</th><th class="num">Total no resultado</th><th class="num">Vai mudar de conta</th><th>Conta que fica</th>',
       linhas: lista, vazio: 'Nenhum fornecedor em mais de uma conta com estes filtros.',
       linha: (f) => {
         const e = E.escolhas.get(f.chave) || { marcado: false, destino: f.principal };
@@ -213,6 +223,27 @@
     });
   }
 
+  // Marcar (ou desmarcar) de uma vez todos os fornecedores da lista que está na tela, com a conta que fica que
+  // o programa sugeriu — dá para trocar uma a uma depois (Dony, 25/09/2026).
+  function marcarTodos(ligar) {
+    const lista = E.listaNaTela || [];
+    if (!lista.length) return;
+    if (ligar) {
+      lista.forEach((f) => {
+        const e = E.escolhas.get(f.chave) || { marcado: false, destino: f.principal };
+        e.marcado = true;
+        if (!e.destino) e.destino = f.principal;
+        E.escolhas.set(f.chave, e);
+      });
+    } else {
+      // Limpar tira a marca de TUDO, não só do que está filtrado: é o que se espera de um "limpar".
+      E.escolhas.forEach((e) => { e.marcado = false; });
+    }
+    desenharLista();
+    T.avisoRapido(ligar ? lista.length + ' fornecedor(es) marcado(s) — confira a conta que fica de cada um antes de baixar o arquivo de ajustes.'
+      : 'Marcações limpas.', 'ok', 6000);
+  }
+
   // ------------------------------------------------------------------
   // Eventos
   // ------------------------------------------------------------------
@@ -225,8 +256,11 @@
       const a = acao.getAttribute('data-acao');
       if (a === 'ajustes') await baixarAjustes();
       else if (a === 'excel') baixarExcel();
+      else if (a === 'marcar-todos') marcarTodos(true);
+      else if (a === 'limpar-marcas') marcarTodos(false);
     });
     E.el.addEventListener('change', (ev) => {
+      if (ev.target.closest('[data-marcar-todos]')) { marcarTodos(ev.target.checked); return; }
       const marcar = ev.target.closest('[data-marcar]');
       if (marcar) {
         const chave = marcar.getAttribute('data-marcar');

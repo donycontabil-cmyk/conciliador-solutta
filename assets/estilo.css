@@ -1104,3 +1104,8 @@ table.rc-tabela-contas { font-size: 7.6pt; }
 .dem-nota-bloco .dem-tabela td:first-child { padding-left: 4mm; }
 .dem-tabela tr.dem-nota-destaque td { font-style: italic; }
 .dem-vazio { color: var(--texto-suave); font-style: italic; }
+
+/* ---------- DMPL: uma coluna por conta do patrimônio líquido (cabem mais na folha deitada) ---------- */
+.dem-tabela.dem-dmpl td.num, .dem-tabela.dem-dmpl th.num { width: auto; min-width: 26mm; }
+.dem-tabela.dem-dmpl th { font-size: 8pt; }
+.dem-tabela.dem-dmpl tr.dem-conta td:first-child { padding-left: 4mm; }

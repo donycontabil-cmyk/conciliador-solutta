@@ -1631,6 +1631,84 @@
 
 
   // ------------------------------------------------------------------
+  // DMPL — DEMONSTRAÇÃO DAS MUTAÇÕES DO PATRIMÔNIO LÍQUIDO (Dony, 25/09/2026: "coloca a DMPL também como
+  // relatório"). Colunas: cada conta do patrimônio líquido, mais o resultado do exercício que ainda não foi
+  // encerrado, mais o total. Linhas: o saldo no começo do período, o que mexeu em cada conta (com o nome do
+  // movimento pelo tipo da conta) e o saldo no fim. Sai tudo dos balancetes; o que o balancete não diz — se o
+  // aumento do capital foi em dinheiro ou com lucro — não é inventado, fica como "movimento do período".
+  // ------------------------------------------------------------------
+  const MOVIMENTO_DO_PL = [
+    [/CAPITAL/, 'Aumento de capital', 'Redução de capital'],
+    [/RESERVA/, 'Constituição de reservas', 'Reversão de reservas'],
+    [/LUCROS? (OU PREJUIZOS? )?ACUMULADO|PREJUIZOS? ACUMULADO/, 'Lucros incorporados', 'Distribuição de lucros'],
+    [/AJUSTE|AVALIACAO PATRIMONIAL/, 'Ajustes de avaliação patrimonial', 'Ajustes de avaliação patrimonial'],
+    [/ACOES? EM TESOURARIA/, 'Alienação de ações em tesouraria', 'Aquisição de ações em tesouraria'],
+  ];
+  function mutacoesPl(rel, op) {
+    const opc = op || {};
+    const k = opc.k;
+    const m = rel.meses[k];
+    if (!m || !m.tem) return null;
+    const cb = contasDoBalanco(rel.contas);
+    if (!cb.pl) return null;
+    let ini = k;
+    while (ini > 0 && rel.meses[ini - 1].tem) ini--;
+    const abertura = new Map(), fechamento = new Map();
+    (rel.base || []).forEach((x) => {
+      if (x.mes === rel.meses[ini].rotulo) abertura.set(x.conta, x.saldoAnterior);
+      if (x.mes === m.rotulo) fechamento.set(x.conta, x.saldoAtual);
+    });
+    const filhas = (pai) => rel.contas.filter((c) => c.pai === pai);
+    // As colunas: as contas de baixo do PL que têm saldo ou movimento. Uma conta só embaixo (o PL inteiro num
+    // grupo) abre nas de baixo dela, senão a demonstração teria uma coluna só.
+    let contas = filhas(cb.pl.conta);
+    while (contas.length === 1 && filhas(contas[0].conta).length >= 2) contas = filhas(contas[0].conta);
+    const pl = (mapa, conta) => -(mapa.get(conta) || 0); // o PL é credor: na demonstração vai positivo
+    const colunas = contas
+      .map((c) => ({ conta: c.conta, titulo: nomeDaDemonstracao(c.titulo), inicio: pl(abertura, c.conta), fim: pl(fechamento, c.conta) }))
+      .filter((c) => Math.round(c.inicio) || Math.round(c.fim));
+    // O resultado do exercício ainda não encerrado: fica nas contas de resultado, e é o que faz o balanço fechar.
+    const doResultado = rel.contas.filter((c) => c.nivel === 1 && !patrimonial(c.conta));
+    const somaResultado = (mapa) => -doResultado.reduce((s, c) => s + (mapa.get(c.conta) || 0), 0);
+    const resultado = { conta: '', titulo: 'Resultado do exercício', inicio: somaResultado(abertura), fim: somaResultado(fechamento), resultado: true };
+    const todas = colunas.concat(Math.round(resultado.inicio) || Math.round(resultado.fim) ? [resultado] : []);
+    if (!todas.length) return null;
+    const zeros = () => todas.map(() => 0);
+    const linhas = [];
+    const soma = (vs) => vs.reduce((s, v) => s + v, 0);
+    const dataIni = dataDoFim(rel.meses[ini].mes === 1 ? rel.ano - 1 : rel.ano, rel.meses[ini].mes === 1 ? 12 : rel.meses[ini].mes - 1);
+    const dataFim = dataDoFim(rel.ano, m.mes);
+    linhas.push({ tipo: 'saldo', rotulo: 'Saldos em ' + dataIni, valores: todas.map((c) => c.inicio) });
+    // O que mexeu em cada coluna, uma linha por movimento.
+    todas.forEach((c, i) => {
+      const dif = c.fim - c.inicio;
+      if (!Math.round(dif)) return;
+      let rotulo;
+      if (c.resultado) rotulo = dif >= 0 ? 'Lucro líquido do período' : 'Prejuízo do período';
+      else {
+        const regra = MOVIMENTO_DO_PL.find(([re]) => re.test(nomeNormal(c.titulo)));
+        rotulo = regra ? (dif > 0 ? regra[1] : regra[2]) : (dif > 0 ? 'Aumento de ' + noMeioDaFrase(c.titulo) : 'Redução de ' + noMeioDaFrase(c.titulo));
+      }
+      const valores = zeros();
+      valores[i] = dif;
+      linhas.push({ tipo: 'movimento', rotulo, valores });
+    });
+    linhas.push({ tipo: 'saldo', rotulo: 'Saldos em ' + dataFim, valores: todas.map((c) => c.fim) });
+    // Conferência: o saldo do começo mais o que mexeu é o saldo do fim, coluna por coluna e no total.
+    const falhas = [];
+    todas.forEach((c, i) => {
+      const mexeu = soma(linhas.filter((l) => l.tipo === 'movimento').map((l) => l.valores[i]));
+      if (Math.abs(c.inicio + mexeu - c.fim) > 1) falhas.push('A coluna ' + c.titulo + ' não fecha: ' + Util.formatarCentavos(c.inicio + mexeu - c.fim) + '.');
+    });
+    return {
+      mes: m, data: dataFim, dataInicio: dataIni, periodo: { de: dataDoComeco(rel.ano, rel.meses[ini].mes), ate: dataFim },
+      colunas: todas.map((c) => ({ titulo: c.titulo, conta: c.conta, resultado: !!c.resultado })),
+      linhas: linhas.map((l) => Object.assign({}, l, { total: soma(l.valores) })),
+      totalFinal: soma(todas.map((c) => c.fim)), confere: !falhas.length, falhas,
+    };
+  }
+
+  // ------------------------------------------------------------------
   // NOTAS EXPLICATIVAS (Dony, 24/09/2026, com o modelo de um escritório na mão: "eu quero que você monte um
   // relatório estilo notas explicativas lá dentro do nosso sistema"). São as notas que acompanham as
   // demonstrações: o contexto da empresa, como o balanço foi preparado, as práticas contábeis e, para cada
@@ -1768,6 +1846,6 @@
     return { mes: m, data: dataDoFim(rel.ano, m.mes), colunas: colunas.map((c) => c.rotulo), periodo, notas };
   }
 
-  return { montar, compararBalancetes, indicadores, comparativo, simulacao, lalurSimulacao, demonstracoes, notasExplicativas, nomeDaDemonstracao, noMeioDaFrase, INDICADORES, contasDoBalanco, MODELO_DRE, FORA_DA_DRE, PARAMETROS, AJUSTES_MODELO, CONTA_PAT_MODELO, PREMISSAS, rotuloMes, compararContas, valorUsado,
+  return { montar, compararBalancetes, indicadores, comparativo, simulacao, lalurSimulacao, demonstracoes, notasExplicativas, mutacoesPl, nomeDaDemonstracao, noMeioDaFrase, INDICADORES, contasDoBalanco, MODELO_DRE, FORA_DA_DRE, PARAMETROS, AJUSTES_MODELO, CONTA_PAT_MODELO, PREMISSAS, rotuloMes, compararContas, valorUsado,
     LINHAS_DO_MAPA, sugerirMapaDre, mapaDoModelo, reclassificarConta, planoJunto, linhaNoMapa, linhaDoModelo, avaliarModelo, linhasSugeridas, nomeNormal };
 });
