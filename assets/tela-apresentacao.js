@@ -36,6 +36,7 @@
     { id: 'balancete-mensal', titulo: 'Balancete mensal' },
     { id: 'balancete-trimestral', titulo: 'Balancete trimestral' },
     { id: 'lalur', titulo: 'LALUR trimestral' },
+    { id: 'lalur-anual', titulo: 'LALUR anual' },
     { id: 'cliente', titulo: 'Relatório do cliente' },
     { id: 'bp-assinatura', titulo: 'Balanço para assinatura' },
     { id: 'dre-assinatura', titulo: 'DRE para assinatura' },
@@ -46,11 +47,15 @@
   // As DREs num botão só (Dony, 22/09/2026: "como a gente já tem mais de 3 DREs, eu quero poder clicar em DRE e escolher:
   // DRE mensal, trimestral ou simulação"): na barra fica "DRE" e, com uma delas aberta, a escolha aparece embaixo.
   const GRUPO_DRE = ['dre-mensal', 'dre-trimestral', 'simulacao'];
+  // O LALUR também num botão só: trimestral e anual são apurações diferentes (Dony, 25/09/2026: "lá na parte
+  // de cima só tem LALUR trimestral, quero ele anual também").
+  const GRUPO_LALUR = ['lalur', 'lalur-anual'];
   // Os relatórios num botão só (Dony, 22/09/2026: "você vai colocar assim: relatórios — o relatório do cliente, DRE para
   // assinatura, balanço para assinatura, e já cria também o fluxo de caixa"). Cada grupo lembra a última aba aberta.
   const GRUPO_RELATORIOS = ['cliente', 'bp-assinatura', 'dre-assinatura', 'dfc', 'dmpl', 'notas'];
   const GRUPOS_DE_ABAS = [
     { id: 'dre', abas: GRUPO_DRE, rotulo: 'DRE', dica: 'DRE mensal, trimestral ou simulação', ultima: 'ultimaDre' },
+    { id: 'lalur', abas: GRUPO_LALUR, rotulo: 'LALUR', dica: 'LALUR trimestral ou anual', ultima: 'ultimoLalur' },
     { id: 'rel', abas: GRUPO_RELATORIOS, rotulo: '📄 Relatórios', dica: 'Relatório do cliente, balanço, DRE, fluxo de caixa, mutações do patrimônio líquido e notas explicativas', ultima: 'ultimoRelatorio' },
   ];
   const grupoDaAba = (id) => GRUPOS_DE_ABAS.find((g) => g.abas.indexOf(id) >= 0) || null;
@@ -60,13 +65,14 @@
   // Estado da tela (continua entre redesenhos).
   const E = { codigo: null, ano: null, emp: null, rel: null, registro: null, config: {}, lugares: [], metas: [],
     aba: 'dre-mensal', avah: true, nivel: 5, semZeradas: false, abertos: new Set(), selecao: null, marcarLalur: false, balancetes: [], fila: null, clienteMes: null, cacheCliente: null, ultimoCliente: null, casas: 2, milhar: false,
-    dreEdicao: null, balancetesAnt: [], relAnt: null, ultimaDre: 'dre-mensal', ultimoRelatorio: 'cliente',
+    dreEdicao: null, balancetesAnt: [], relAnt: null, ultimaDre: 'dre-mensal', ultimoRelatorio: 'cliente', ultimoLalur: 'lalur',
     assinaturaMes: null, assinaturaSoMes: false, assinaturaComparar: false, assinaturaNivel: 3, nivelDre: 2, dfcDetalhe: false, balancoLado: false, balancoPaisagem: false, dmplPaisagem: true };
   (function lerPreferencias() {
     try {
       const p = JSON.parse((raiz.localStorage && raiz.localStorage.getItem(CHAVE_PREF)) || '{}') || {};
       if (ABAS.some((a) => a.id === p.aba)) E.aba = p.aba;
       if (GRUPO_DRE.indexOf(p.ultimaDre) >= 0) E.ultimaDre = p.ultimaDre;
+      if (GRUPO_LALUR.indexOf(p.ultimoLalur) >= 0) E.ultimoLalur = p.ultimoLalur;
       if (GRUPO_RELATORIOS.indexOf(p.ultimoRelatorio) >= 0) E.ultimoRelatorio = p.ultimoRelatorio;
       if (typeof p.avah === 'boolean') E.avah = p.avah;
       if (p.nivel >= 1 && p.nivel <= 9) E.nivel = p.nivel;
@@ -81,7 +87,7 @@
     } catch (e) { /* sem preferências guardadas */ }
   })();
   function guardarPreferencias() {
-    try { raiz.localStorage.setItem(CHAVE_PREF, JSON.stringify({ aba: E.aba, ultimaDre: E.ultimaDre, ultimoRelatorio: E.ultimoRelatorio, avah: E.avah, nivel: E.nivel, semZeradas: E.semZeradas, casas: E.casas, milhar: E.milhar,
+    try { raiz.localStorage.setItem(CHAVE_PREF, JSON.stringify({ aba: E.aba, ultimaDre: E.ultimaDre, ultimoRelatorio: E.ultimoRelatorio, ultimoLalur: E.ultimoLalur, avah: E.avah, nivel: E.nivel, semZeradas: E.semZeradas, casas: E.casas, milhar: E.milhar,
       nivelBalanco: E.assinaturaNivel, nivelDre: E.nivelDre, balancoLado: E.balancoLado, balancoPaisagem: E.balancoPaisagem, dmplPaisagem: E.dmplPaisagem })); } catch (e) { /* navegador sem armazenamento */ }
   }
 
@@ -306,9 +312,12 @@
         avah + marcar +
         (E.marcarLalur ? ajudaMarcar : '<span class="suave pequeno">' + (E.aba === 'balancete-mensal' ? 'Contas 1 e 2: saldo final do mês; 3, 4 e 5: movimento do mês.' : 'Contas 1 e 2: saldo no fim do trimestre; 3, 4 e 5: soma dos meses.') + ' AV % sobre a conta-mãe.</span>');
     }
-    if (E.aba === 'lalur') {
+    if (E.aba === 'lalur' || E.aba === 'lalur-anual') {
       return '<button type="button" class="botao pequeno" data-opcao="editar-ajustes">✎ Lista de ajustes e conta do PAT</button>' +
-        '<span class="suave pequeno">Apuração trimestral do lucro real. As adições e exclusões são as contas que você marca na DRE ou no balancete. Os campos em azul da Parte B são preenchidos por você.</span>';
+        '<span class="suave pequeno">' + (E.aba === 'lalur-anual'
+          ? 'Apuração ANUAL do lucro real: o ano inteiro como um período só, ao lado da soma dos trimestres.'
+          : 'Apuração trimestral do lucro real.') +
+        ' As adições e exclusões são as contas que você marca na DRE ou no balancete. Os campos em azul da Parte B são preenchidos por você.</span>';
     }
     if (E.aba === 'indicadores') {
       return '<span class="suave pequeno">Balanço pelo saldo do fim do mês; resultado pelo movimento do mês. <b>Período</b>: resultado somado nos meses escolhidos e balanço do último mês. ' +
@@ -461,6 +470,7 @@
     if (aba === 'balancete-mensal') return secaoBalancete(balanceteMensalVisivel(), 'Balancete analítico mensal');
     if (aba === 'balancete-trimestral') return secaoBalancete(rel.trimestral, 'Balancete analítico trimestral');
     if (aba === 'lalur') return secaoLalur(op);
+    if (aba === 'lalur-anual') return secaoLalur(op, true);
     return '';
   }
 
@@ -828,6 +838,28 @@
   // LALUR simulação, acompanhando tudo que eu fizer na DRE simulação"): o mesmo LALUR, com o lucro de cada mês
   // vindo da DRE simulada (com os ajustes dela) e as contas dos meses simulados tiradas do ano anterior com o
   // percentual. Fica logo embaixo da DRE simulada, na mesma aba.
+  // LALUR ANUAL ao lado da soma dos trimestres: o imposto do ano não é a soma dos trimestres (o adicional de
+  // 10% e a trava de 30% da compensação mudam de conta), e é essa diferença que diz qual regime compensa
+  // (Dony, 25/09/2026: "eu quero o LALUR trimestral e o anual, porque é diferente um do outro"). Vale para o
+  // LALUR de verdade e para o da DRE simulação — ele procurou lá e não achou.
+  function blocoLalurAnual(L, simulado) {
+    const A = L && L.anual;
+    if (!A) return '';
+    const colAn = A.colunas.map((c) => Object.assign({}, c, { cls: c.anual ? 'acum' : '' }));
+    const tab = tabelaSimples(['Linha', 'Bloco'], colAn, A.linhas.map((l) => ({ cls: l.destaque ? 'total' : '',
+      cab: [T.esc(l.rotulo), '<span class="suave">' + T.esc(l.bloco) + '</span>'], valores: l.valores })));
+    const dif = A.diferenca;
+    const conta = Math.abs(dif) < 1 ? 'Nos dois jeitos o IRPJ + CSLL dá o mesmo valor.'
+      : dif < 0 ? 'Pela apuração <b>anual</b> o IRPJ + CSLL fica <b>' + T.moeda(Math.abs(dif)) + ' menor</b> do que somando os trimestres.'
+        : 'Pela apuração anual o IRPJ + CSLL fica <b>' + T.moeda(dif) + ' maior</b> do que somando os trimestres — neste caso o trimestral é melhor.';
+    return '<h3 class="apres-sub">LALUR anual' + (simulado ? ' na simulação' : '') + ' <small>o ano inteiro como um período só · o adicional de 10% é sobre o que passa de ' +
+      T.esc(U.formatarCentavos(2000000 * A.meses)) + ' (R$ 20.000,00 por mês do período) e a compensação é 30% do lucro real do ano</small></h3>' + tab +
+      '<p class="apres-nota">' + conta +
+      (A.completo ? '' : ' <b>Atenção:</b> o ano tem ' + A.meses + ' mês(es) ' + (simulado ? 'no período simulado' : 'de balancete carregado') +
+        ' — para a apuração anual de verdade, ' + (simulado ? 'simule o ano inteiro' : 'carregue janeiro a dezembro') + '.') +
+      ' O prejuízo fiscal e a base negativa usados são os saldos informados no 1º trimestre da Parte B; o IR retido é a soma dos trimestres (' + T.moeda(A.irRetido) + ').</p>';
+  }
+
   function secaoLalurSimulado(s, ant, op) {
     const L = motor().lalurSimulacao(s, E.rel, ant, E.config);
     if (!L) return '';
@@ -871,13 +903,15 @@
       ' · a Parte B (prejuízo fiscal, base negativa e IR retido) é a mesma da aba LALUR.';
     return tituloSecao('LALUR simulação · IRPJ e CSLL projetados', sub) +
       (L.confere ? '' : '<div class="aviso vermelho" style="margin:0 0 10px"><span class="icone-aviso">⚠️</span><div>O lucro do LALUR simulado não bate com a DRE simulada: avise o suporte.</div></div>') +
-      '<div class="apres-fichas">' + fichas + '</div>' + parteA +
+      '<div class="apres-fichas">' + fichas + '</div>' + parteA + blocoLalurAnual(L, true) +
       '<h3 class="apres-sub">Adições e exclusões na simulação <small>as contas marcadas no LALUR · nos meses simulados, o valor de ' + ant.ano + ' ' + T.esc(sinalPercentual(s.percentual)) + '</small></h3>' + ajustes +
       (pat ? '<h3 class="apres-sub">Incentivo fiscal PAT na simulação <small>conta ' + T.esc(L.contaPAT || '—') + '</small></h3>' + pat : '') +
       (editavel ? '<p class="apres-nota nao-imprimir">Mexeu no percentual ou nos ajustes da DRE simulação aí em cima? Este LALUR muda junto.</p>' : '');
   }
 
-  function secaoLalur(op) {
+  // anual = a aba "LALUR anual": em cima vai a apuração do ano (ao lado da soma dos trimestres) e o
+  // trimestral fica embaixo, para conferir de onde saiu cada número.
+  function secaoLalur(op, anual) {
     const L = E.rel.lalur;
     const colA = L.parteA.colunas.map((c) => Object.assign({}, c, { cls: c.soma ? 'acum' : '' }));
     const parteA = tabelaSimples(['Linha', 'Bloco'], colA, L.parteA.linhas.map((l) => ({ cls: l.destaque ? 'total' : '', cab: [T.esc(l.rotulo), '<span class="suave">' + T.esc(l.bloco) + '</span>'], valores: l.valores })));
@@ -909,24 +943,14 @@
         '<span class="suave pequeno">Os valores entram na Parte A na hora (compensação limitada a 30% e IR retido abatido do IRPJ).</span></div>' : '');
     const premissas = '<div class="apres-caixa"><table class="apres simples premissas"><thead><tr><th class="fixa">Tema</th><th>Premissa usada</th><th>Fonte / Base</th><th>Status</th><th>Comentário</th></tr></thead><tbody>' +
       L.premissas.map((p) => '<tr><td class="fixa">' + T.esc(p[0]) + '</td>' + p.slice(1).map((x) => '<td class="txt">' + T.esc(x) + '</td>').join('') + '</tr>').join('') + '</tbody></table></div>';
-    // LALUR ANUAL ao lado da soma dos trimestres: o imposto do ano não é a soma dos trimestres (o adicional de
-    // 10% e a trava de 30% da compensação mudam de conta), e é essa diferença que diz qual regime compensa
-    // (Dony, 25/09/2026: "eu quero o LALUR trimestral e o anual, porque é diferente um do outro").
-    const A = L.anual;
-    const anual = !A ? '' : (function () {
-      const colAn = A.colunas.map((c) => Object.assign({}, c, { cls: c.anual ? 'acum' : '' }));
-      const tab = tabelaSimples(['Linha', 'Bloco'], colAn, A.linhas.map((l) => ({ cls: l.destaque ? 'total' : '',
-        cab: [T.esc(l.rotulo), '<span class="suave">' + T.esc(l.bloco) + '</span>'], valores: l.valores })));
-      const dif = A.diferenca;
-      const conta = Math.abs(dif) < 1 ? 'Nos dois jeitos o IRPJ + CSLL dá o mesmo valor.'
-        : dif < 0 ? 'Pela apuração <b>anual</b> o IRPJ + CSLL fica <b>' + T.moeda(Math.abs(dif)) + ' menor</b> do que somando os trimestres.'
-          : 'Pela apuração anual o IRPJ + CSLL fica <b>' + T.moeda(dif) + ' maior</b> do que somando os trimestres — neste caso o trimestral é melhor.';
-      return '<h3 class="apres-sub">LALUR anual <small>o ano inteiro como um período só · o adicional de 10% é sobre o que passa de ' +
-        T.esc(U.formatarCentavos(2000000 * A.meses)) + ' (R$ 20.000,00 por mês do período) e a compensação é 30% do lucro real do ano</small></h3>' + tab +
-        '<p class="apres-nota">' + conta + (A.completo ? '' : ' <b>Atenção:</b> o ano tem ' + A.meses + ' mês(es) de balancete carregado — para a apuração anual de verdade, carregue janeiro a dezembro.') +
-        ' O prejuízo fiscal e a base negativa usados são os saldos informados no 1º trimestre da Parte B; o IR retido é a soma dos trimestres (' + T.moeda(A.irRetido) + ').</p>';
-    })();
-    return tituloSecao('LALUR Parte A: apuração do lucro real e da CSLL', 'Apuração trimestral e anual a partir da DRE; adições e exclusões pela lista de ajustes; incentivo PAT e Parte B.') + parteA + anual +
+    const anualHtml = blocoLalurAnual(L);
+    const trimestralHtml = anual
+      ? '<h3 class="apres-sub">LALUR trimestral <small>de onde vem a coluna "soma dos trimestres"</small></h3>' + parteA
+      : parteA;
+    return tituloSecao(anual ? 'LALUR anual: apuração do lucro real e da CSLL no ano' : 'LALUR Parte A: apuração do lucro real e da CSLL',
+      anual ? 'O ano inteiro como um período só, ao lado da soma dos trimestres — o imposto não é o mesmo nos dois jeitos.'
+        : 'Apuração trimestral a partir da DRE; adições e exclusões pela lista de ajustes; incentivo PAT e Parte B.') +
+      (anual ? anualHtml + trimestralHtml : parteA + anualHtml) +
       '<h3 class="apres-sub">Ajustes mensais e trimestrais <small>as contas marcadas na DRE ou no balancete · valor positivo = adição · valor negativo = exclusão</small></h3>' + ajustes +
       '<h3 class="apres-sub">Incentivo fiscal PAT <small>conta ' + T.esc(L.contaPAT || '—') + (L.pat.titulo ? ' · ' + T.esc(L.pat.titulo) : '') + ' · menor entre o incentivo potencial e 3,6% do IRPJ principal (15%)</small></h3>' + pat +
       '<h3 class="apres-sub">LALUR Parte B: controles fiscais <small>saldos de prejuízo fiscal e base negativa (zerados até você informar) e IR retido</small></h3>' + parteB +
@@ -2775,7 +2799,7 @@
     ].filter((a) => !a[2]);
     const planilhas = abas.map((a) => a[1]()).concat(folhasLalur(), [folhaBase()]);
     const i = abas.findIndex((a) => a[0] === E.aba);
-    const ativa = i >= 0 ? i : E.aba === 'lalur' ? abas.length : 0;
+    const ativa = i >= 0 ? i : (E.aba === 'lalur' || E.aba === 'lalur-anual') ? abas.length : 0;
     return raiz.ExcelBonito.gerar({ planilhas, estilos: estilosDoExcel(), ativa });
   }
 
