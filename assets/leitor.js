@@ -100,7 +100,12 @@
     // Balancete (relatório de apresentação): lido conta por conta quando o cabeçalho é reconhecido.
     const recBal = LerBalancete && LerBalancete.reconhecer(planilha.abas);
     if (recBal) {
-      const b = LerBalancete.ler(planilha.abas, { nomeArquivo });
+      // inferir: o cabeçalho pode ter DUAS colunas com cara de saldo anterior — no balancete da Zelco,
+      // "Saldo Incial conta" (desde a abertura) e "Inicial Período" (do mês). Em janeiro dá na mesma; de
+      // fevereiro em diante, não. Quando o cabeçalho não fecha a conta, o leitor acha as colunas pelo
+      // conteúdo e fica com a leitura que fecha (Dony, 25/09/2026: "por que ele tá pedindo de novo a
+      // estrutura do balancete de fevereiro?").
+      const b = LerBalancete.ler(planilha.abas, { nomeArquivo, inferir: true });
       r.tipo = 'balancete';
       r.motivo = recBal.motivo;
       r.balancete = b;

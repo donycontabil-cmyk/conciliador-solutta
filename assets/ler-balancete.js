@@ -315,6 +315,58 @@
     return { aba: Number.isInteger(mapa.aba) && abas[mapa.aba] ? mapa.aba : 0, colunas, inicio: 0, como: 'mapa' };
   }
 
+  // ------------------------------------------------------------------
+  // O desenho guardado achado pelos NOMES das colunas, e não pela posição (Dony, 25/09/2026: "se eu já subi o
+  // balancete de janeiro, por que ele tá pedindo de novo a estrutura do de fevereiro?"). A posição muda de um
+  // mês para o outro — principalmente em PDF, em que as colunas saem da medida da folha e um mês pode ter uma
+  // coluna a mais que o outro. O nome impresso no cabeçalho, não.
+  // ------------------------------------------------------------------
+  function porTitulos(abas, mapa) {
+    const t = mapa && mapa.titulos;
+    if (!t || !OBRIGATORIOS_MAPA.every((k) => t[k])) return null;
+    for (let a = 0; a < abas.length; a++) {
+      const linhas = (abas[a] || {}).linhas || [];
+      for (let r = 0; r < Math.min(40, linhas.length); r++) {
+        const cel = (linhas[r] || []).map(chaveTitulo);
+        const colunas = {};
+        let faltou = false;
+        CAMPOS.concat(OPCIONAIS).forEach((k) => {
+          if (!t[k]) return;
+          const i = cel.indexOf(chaveTitulo(t[k]));
+          if (i >= 0) colunas[k] = i;
+          else if (OBRIGATORIOS_MAPA.indexOf(k) >= 0) faltou = true;
+        });
+        if (faltou) continue;
+        // A coluna de D/C não tem nome no cabeçalho: ela continua colada no saldo, como estava.
+        const colado = (k, s) => {
+          if (mapa.colunas && Number.isInteger(mapa.colunas[k]) && mapa.colunas[k] === mapa.colunas[s] + 1 && Number.isInteger(colunas[s])) colunas[k] = colunas[s] + 1;
+        };
+        colado('dcAnterior', 'saldoAnterior');
+        colado('dcAtual', 'saldoAtual');
+        return { aba: a, colunas, inicio: r + 1, como: 'mapa' };
+      }
+    }
+    return null;
+  }
+
+  // Os nomes das colunas usadas, para guardar com o mapa.
+  function titulosDasColunas(linhas, col, linhaCabecalho, primeiraConta) {
+    const texto = (l, i) => (!l || i === undefined || i === null || l[i] === null || l[i] === undefined ? '' : String(l[i]).replace(/\s+/g, ' ').trim());
+    const doRotulo = (r) => {
+      const t = {};
+      CAMPOS.concat(OPCIONAIS).forEach((k) => {
+        if (!Number.isInteger(col[k])) return;
+        const x = texto(linhas[r], col[k]);
+        if (x && Util.paraNumero(x) === null) t[k] = x;
+      });
+      return OBRIGATORIOS_MAPA.every((k) => t[k]) ? t : null;
+    };
+    if (Number.isInteger(linhaCabecalho)) { const t = doRotulo(linhaCabecalho); if (t) return t; }
+    const ate = primeiraConta > 0 ? primeiraConta : Math.min(40, linhas.length);
+    for (let r = ate - 1; r >= 0; r--) { const t = doRotulo(r); if (t) return t; }
+    return null;
+  }
+
   const MESES_LONGOS = ['janeiro', 'fevereiro', 'marco', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'];
   const MESES_EN = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
   // Empresa, CNPJ e período escritos acima das contas. Também no desenho em que o rótulo fica numa célula e
@@ -626,9 +678,11 @@
     if (variosMeses) avisos.push('O período do balancete vai de ' + periodo.de + ' a ' + periodo.ate + ': o relatório espera um balancete por mês (débitos e créditos do mês).');
     const usadas = {};
     CAMPOS.concat(OPCIONAIS).forEach((k) => { if (Number.isInteger(col[k])) usadas[k] = col[k]; });
+    const titulos = titulosDasColunas(linhas, col, escolha.linhaCabecalho, primeiraConta);
     return {
       tipo: 'balancete', empresa: info.empresa, cnpj: info.cnpj, periodo, competencia: ate ? Util.competenciaDe(ate) : null, variosMeses,
-      contas, total, confere, avisos, linhasIgnoradas, qualidade, como: escolha.como, mapa: { aba: escolha.aba, colunas: usadas },
+      contas, total, confere, avisos, linhasIgnoradas, qualidade, como: escolha.como,
+      mapa: titulos ? { aba: escolha.aba, colunas: usadas, titulos } : { aba: escolha.aba, colunas: usadas },
     };
   }
 
@@ -637,9 +691,13 @@
   function ler(abas, opcoes) {
     const op = opcoes || {};
     if (op.mapa) {
-      const e = doMapa(abas, op.mapa);
-      if (!e) throw new Error('As colunas indicadas não servem para este arquivo (faltam conta, saldo anterior, débitos, créditos ou saldo atual).');
-      return montar(abas, e, op);
+      // O desenho guardado vale de dois jeitos: pelos NOMES das colunas (mesmo que elas tenham andado de
+      // lugar) e pela posição. Fica o que lê mais contas fechando.
+      const jeitos = [porTitulos(abas, op.mapa), doMapa(abas, op.mapa)].filter(Boolean);
+      if (!jeitos.length) throw new Error('As colunas indicadas não servem para este arquivo (faltam conta, saldo anterior, débitos, créditos ou saldo atual).');
+      const lidas = jeitos.map((e) => montar(abas, e, op));
+      lidas.sort((a, b) => b.qualidade * b.contas.length - a.qualidade * a.contas.length);
+      return lidas[0];
     }
     const leituras = [];
     const cab = acharCabecalho(abas);

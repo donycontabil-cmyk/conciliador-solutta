@@ -115,16 +115,37 @@
     const L = raiz.LerBalancete;
     const tentar = (op) => { try { return L.ler(abas, Object.assign({ nomeArquivo: arquivo.name }, op)); } catch (e) { return null; } };
     const emp = app().empresas.find((e) => String(e.codigo) === String(codigo)) || {};
-    // 1) As colunas que a empresa já tem guardadas (mesmo desenho dos meses anteriores): entra direto.
+    // 1) O programa leu sozinho e a conta fecha: é só GUARDAR O DESENHO, para os próximos meses entrarem
+    //    direto (antes ele lia janeiro sozinho, não guardava nada, e em fevereiro perguntava tudo de novo).
+    if (balanceteBom(r.balancete)) {
+      // O desenho guardado fica sendo o que serve para o arquivo mais novo: o do mês passado pode ter sido
+      // lido com uma coluna que só fechava naquele mês (a Zelco tem duas colunas de saldo inicial).
+      const guardado = emp.mapaBalancete && tentar({ mapa: emp.mapaBalancete });
+      if (r.balancete.mapa && !balanceteBom(guardado)) await guardarMapaDoBalancete(codigo, r.balancete.mapa);
+      return r.balancete;
+    }
+    // 2) O desenho guardado na empresa (dos meses anteriores): entra direto.
     if (emp.mapaBalancete) { const x = tentar({ mapa: emp.mapaBalancete }); if (balanceteBom(x)) return x; }
-    // 2) Pelo conteúdo: quem usa confere as colunas na primeira vez; 3) senão, indica.
+    // 3) Pelo conteúdo. Se a conta fecha e a empresa JÁ TEM um desenho guardado, não pergunta de novo: o
+    //    programa entendeu o arquivo (Dony, 25/09/2026: "se eu já subi o balancete de janeiro, por que ele tá
+    //    pedindo de novo a estrutura do de fevereiro?"). A pergunta fica só para o primeiro balancete da
+    //    empresa e para quando ele não entender.
     const pelo = tentar({ inferir: true });
+    if (balanceteBom(pelo)) {
+      if (emp.mapaBalancete) {
+        if (pelo.mapa) await guardarMapaDoBalancete(codigo, pelo.mapa);
+        T.avisoRapido('Li as colunas de ' + arquivo.name + ' sozinho: ' + pelo.contas.length + ' contas, ' +
+          Math.round(pelo.qualidade * 100) + '% fecham.', null, 5000);
+        return pelo;
+      }
+    }
+    // 4) Primeira vez na empresa (ou não entendeu): quem usa confere ou indica as colunas.
     const sugestao = pelo && pelo.contas.length ? pelo.mapa : emp.mapaBalancete || null;
     const mapa = await escolherColunasDoBalancete(abas, arquivo.name, sugestao, balanceteBom(pelo));
     if (!mapa) return false;
     const b = tentar({ mapa });
     if (!b || !b.contas.length) { T.avisoRapido('Com essas colunas não achei nenhuma conta.', 'erro', 5000); return false; }
-    await guardarMapaDoBalancete(codigo, mapa);
+    await guardarMapaDoBalancete(codigo, b.mapa || mapa);
     return b;
   }
   async function guardarMapaDoBalancete(codigo, mapa) {
@@ -671,7 +692,9 @@
         // Balancete que o leitor geral não entendeu (ou em que a conta não fecha): as colunas guardadas na
         // empresa; senão pelo conteúdo ou indicadas por quem usa (Dony, 18/09/2026: "vários tipos de
         // balancete; se não entender, eu indico as colunas no primeiro e ele guarda").
-        if (r.tipo !== 'razao' && !/^financeiro/.test(r.tipo) && !balanceteBom(r.balancete)) {
+        // Passa sempre por aqui, mesmo quando o programa já entendeu: é aqui que o DESENHO das colunas fica
+        // guardado na empresa, para o mês seguinte entrar sem perguntar nada.
+        if (r.tipo !== 'razao' && !/^financeiro/.test(r.tipo)) {
           const lido = await balanceteDoArquivo(r, arquivo, codigo);
           if (lido === false) return false;
           if (lido) { r.tipo = 'balancete'; r.balancete = lido; r.competencia = lido.competencia; }

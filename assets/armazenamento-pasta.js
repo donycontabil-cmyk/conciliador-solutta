@@ -415,7 +415,18 @@
         if (Number.isInteger(v) && v >= 0 && v < 200) colunas[k] = v;
       });
       if (!['conta', 'saldoAnterior', 'debitos', 'creditos', 'saldoAtual'].every((k) => colunas[k] !== undefined)) return null;
-      return { aba: Number.isInteger(valor.aba) && valor.aba >= 0 && valor.aba < 100 ? valor.aba : 0, colunas };
+      // Os NOMES das colunas no cabeçalho do arquivo: é por eles que o desenho continua valendo no mês
+      // seguinte, mesmo que as colunas andem de lugar (PDF).
+      const titulos = {};
+      if (valor.titulos && typeof valor.titulos === 'object') {
+        Object.keys(colunas).forEach((k) => {
+          const t = valor.titulos[k];
+          if (typeof t === 'string' && t.trim()) titulos[k] = t.trim().slice(0, 120);
+        });
+      }
+      const limpo = { aba: Number.isInteger(valor.aba) && valor.aba >= 0 && valor.aba < 100 ? valor.aba : 0, colunas };
+      if (Object.keys(titulos).length) limpo.titulos = titulos;
+      return limpo;
     }
 
     // Linhas da DRE da empresa: { contas: { '<conta>': '<id da linha>' | 'fora' }, rotulos: { '<id>': 'nome' },

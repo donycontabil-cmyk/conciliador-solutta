@@ -15,8 +15,8 @@
     // Número e carimbo da versão publicada. Preenchidos sozinhos pelo montar-site.js a cada
     // publicação (o número sobe 1, 2, 3…), para quem usa saber se pegou a versão nova (Ctrl+F5).
     // build 'local' = rodando neste PC, ainda não publicado.
-    numero: 78,
-    build: '25/09/2026 14:38',
+    numero: 79,
+    build: '25/09/2026 15:01',
 
     // Onde os dados moram:
     //   'pasta'    -> numa pasta do computador de quem usa (hoje)
