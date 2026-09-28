@@ -375,6 +375,20 @@
       return limpo;
     }
 
+    // A consolidação de um grupo: os códigos das empresas somadas e as contas de operações ENTRE elas, que
+    // são eliminadas. Só códigos válidos entram; sem empresa nenhuma, o campo some.
+    function limparConsolidacao(valor) {
+      if (!valor || typeof valor !== 'object') return null;
+      const empresas = Array.from(new Set((Array.isArray(valor.empresas) ? valor.empresas : [])
+        .map((c) => String(c === null || c === undefined ? '' : c).trim()).filter((c) => c && c.length <= 20)));
+      if (!empresas.length) return null;
+      const eliminar = Array.from(new Set((Array.isArray(valor.eliminar) ? valor.eliminar : [])
+        .map((c) => String(c === null || c === undefined ? '' : c).trim()).filter((c) => /^[\d.\-]{1,30}$/.test(c))));
+      const limpo = { empresas };
+      if (eliminar.length) limpo.eliminar = eliminar;
+      return limpo;
+    }
+
     // As conciliações livres da empresa: só o que o programa entende (a definição, nunca dado de lançamento).
     function limparConciliacoesLivres(valor) {
       if (!Array.isArray(valor)) return [];
@@ -528,6 +542,13 @@
       // ele guarda"): { aba, colunas: { conta, titulo, saldoAnterior, debitos, creditos, saldoAtual, dcAnterior, dcAtual } }.
       const mapaBal = limparMapaBalancete(empresa.mapaBalancete !== undefined ? empresa.mapaBalancete : (anterior && anterior.mapaBalancete));
       if (mapaBal) registro.mapaBalancete = mapaBal;
+      // CONSOLIDAÇÃO (Dony, 28/09/2026: "existem algumas empresas em que eu preciso consolidar; quero escolher
+      // as empresas que eu quero consolidar"). Um "grupo" é um cadastro sem balancete próprio: o relatório
+      // dele é a soma dos balancetes das empresas escolhidas, com as contas marcadas eliminadas.
+      // { empresas: ['101','102'], eliminar: ['1.1.2.003.0007', …] }
+      const cons = limparConsolidacao(empresa.consolidacao !== undefined ? empresa.consolidacao : (anterior && anterior.consolidacao));
+      if (cons) { registro.consolidacao = cons; registro.ehGrupo = true; }
+      else if (empresa.ehGrupo === true || (empresa.ehGrupo === undefined && anterior && anterior.ehGrupo)) registro.ehGrupo = true;
       // Linhas da DRE conferidas por quem usa (Dony, 18/09/2026: cada empresa com o seu plano de contas).
       const mapaDre = limparMapaDre(empresa.mapaDre !== undefined ? empresa.mapaDre : (anterior && anterior.mapaDre));
       if (mapaDre) registro.mapaDre = mapaDre;
@@ -900,7 +921,7 @@
     // abas escondidas e a nota escrita à mão. Numa importação, isso nunca se perde: se o lado de cá não tem,
     // vem do backup; se os dois têm, fica o do cadastro mais novo.
     const CONFIG_DA_EMPRESA = ['mapaDre', 'mapaBalancete', 'assinaturas', 'logo', 'corRelatorio', 'conciliacoesLivres',
-      'papeisDeConta', 'contasDoDiario', 'abasOcultas', 'notasExtras'];
+      'papeisDeConta', 'contasDoDiario', 'abasOcultas', 'notasExtras', 'consolidacao'];
     const semConteudo = (x) => x === undefined || x === null || x === '' ||
       (Array.isArray(x) && !x.length) ||
       (typeof x === 'object' && !Array.isArray(x) && !Object.keys(x).length) ||

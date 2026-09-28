@@ -195,14 +195,29 @@
       el.innerHTML = '<div class="aviso ambar"><span class="icone-aviso">⚠️</span><div>A empresa <b>' + T.esc(codigo) + '</b> não está cadastrada nesta pasta de dados. <a href="#/">Voltar para as empresas</a></div></div>';
       return;
     }
-    T.carregando(el, 'Montando o relatório de apresentação…');
+    // CONSOLIDAÇÃO (Dony, 28/09/2026): o cadastro é um grupo, não uma empresa — os balancetes são a SOMA das
+    // empresas escolhidas, com as contas de operações entre elas eliminadas. Daí para baixo a tela é a mesma.
+    const grupo = emp.ehGrupo && emp.consolidacao && emp.consolidacao.empresas.length ? emp.consolidacao : null;
+    T.carregando(el, grupo ? 'Consolidando as empresas…' : 'Montando o relatório de apresentação…');
     const arm = app().armazenamento;
-    const metas = await arm.arquivos(codigo);
+    const metas = grupo ? [] : await arm.arquivos(codigo);
     const doTipo = metas.filter((m) => m.tipo === 'balancete');
     const anoAtual = Number(U.hoje().ano || new Date().getFullYear());
-    const anosComBalancete = Array.from(new Set(doTipo.map((m) => Number(String(m.competencia).slice(0, 4))))).sort((a, b) => b - a);
+    // As empresas do grupo, com os arquivos e o plano de contas de cada uma (lidos uma vez só).
+    const membros = [];
+    if (grupo) {
+      for (const cod of grupo.empresas) {
+        const e = app().empresas.find((x) => String(x.codigo) === String(cod));
+        if (!e) continue;
+        const ms = await arm.arquivos(cod);
+        membros.push({ codigo: String(cod), nome: e.nome, doTipo: ms.filter((m) => m.tipo === 'balancete'), plano: await raiz.TelaSubir.planoDaEmpresa(ms) });
+      }
+      if (conferir && !conferir()) return;
+    }
+    const anosDeBalancete = grupo ? [].concat.apply([], membros.map((m) => m.doTipo.map((x) => x.competencia))) : doTipo.map((m) => m.competencia);
+    const anosComBalancete = Array.from(new Set(anosDeBalancete.map((c) => Number(String(c).slice(0, 4))))).sort((a, b) => b - a);
     const anoEscolhido = Number(ano) || anosComBalancete[0] || anoAtual;
-    const lugares = MESES_LONGOS.map((nome, i) => {
+    const lugares = grupo ? [] : MESES_LONGOS.map((nome, i) => {
       const comp = anoEscolhido + '-' + String(i + 1).padStart(2, '0') + '-01';
       const doMes = doTipo.filter((m) => m.competencia === comp).sort((a, b) => U.paraMs(b.enviadoEm) - U.paraMs(a.enviadoEm));
       return { id: 'bal-' + String(i + 1).padStart(2, '0'), parte: 'Balancete', titulo: nome, sub: U.nomeCompetencia(comp),
@@ -211,13 +226,25 @@
     });
     // O plano de contas da empresa (opcional): quando existe, o nome de cada conta sai dele — tem sistema que
     // imprime o nome cortado no balancete (Dony, 25/09/2026, a Zelco).
-    const plano = await raiz.TelaSubir.planoDaEmpresa(metas);
-    lugares.push(raiz.TelaSubir.lugarDoPlano(anoEscolhido, metas));
+    const plano = grupo ? null : await raiz.TelaSubir.planoDaEmpresa(metas);
+    if (!grupo) lugares.push(raiz.TelaSubir.lugarDoPlano(anoEscolhido, metas));
+    // Os balancetes de um ano: os da empresa, ou a SOMA das empresas do grupo (com as eliminações).
+    const consolidarAno = async (a) => {
+      const partes = [];
+      for (const m of membros) partes.push({ codigo: m.codigo, nome: m.nome, balancetes: await lerBalancetesDoAno(arm, m.doTipo, a, m.plano) });
+      return raiz.MotorConsolidado.consolidar(partes, { eliminar: grupo.eliminar || [] });
+    };
+    let consolidado = null;
     const balancetes = [];
-    for (const l of lugares) {
-      if (l.tipo !== 'balancete' || !l.arquivos.length) continue;
-      const c = await arm.conteudoDoArquivo(l.arquivos[0].id);
-      if (c && c.contas) balancetes.push({ competencia: l.competencia, contas: raiz.TelaSubir.comNomesDoPlano(c.contas, plano) });
+    if (grupo) {
+      consolidado = await consolidarAno(anoEscolhido);
+      consolidado.balancetes.forEach((b) => balancetes.push(b));
+    } else {
+      for (const l of lugares) {
+        if (l.tipo !== 'balancete' || !l.arquivos.length) continue;
+        const c = await arm.conteudoDoArquivo(l.arquivos[0].id);
+        if (c && c.contas) balancetes.push({ competencia: l.competencia, contas: raiz.TelaSubir.comNomesDoPlano(c.contas, plano) });
+      }
     }
     const registro = (await arm.conciliacoes(codigo, anoEscolhido + '-01-01')).find((r) => r.id === idRegistro(codigo, anoEscolhido)) || null;
     const configLida = (registro && registro.config) || {};
@@ -226,13 +253,13 @@
     const porAno = {};
     for (const a of anosQueAConfigUsa(configLida, anoEscolhido)) {
       if (a === anoEscolhido || porAno[a] || anosComBalancete.indexOf(a) < 0) continue;
-      porAno[a] = await lerBalancetesDoAno(arm, doTipo, a, plano);
+      porAno[a] = grupo ? (await consolidarAno(a)).balancetes : await lerBalancetesDoAno(arm, doTipo, a, plano);
     }
     const balancetesAnt = porAno[anoEscolhido - 1] || [];
     if (conferir && !conferir()) return;
     if (E.codigo !== codigo || E.ano !== anoEscolhido) { E.abertos = new Set(); E.selecao = null; E.dreEdicao = null; }
     Object.assign(E, { codigo, ano: anoEscolhido, emp, metas, lugares, registro, balancetes, balancetesAnt, relAnt: null,
-      balancetesPorAno: porAno, relsPorAno: {}, plano, doTipo, config: configLida });
+      balancetesPorAno: porAno, relsPorAno: {}, plano, doTipo, config: configLida, grupo, membros, consolidado });
     E.rel = montarRel();
     // O ano anterior sempre aparece na escolha (Dony, 21/09/2026: "quero poder jogar os balancetes de 2025 das
     // empresas, para poder fazer comparação"): sem balancete nenhum dele ainda, é por ali que eles sobem.
@@ -255,7 +282,7 @@
     const projecao = soSimulacao();
     const semBalancete = !carregados.length && !projecao;
     if (projecao) E.aba = 'simulacao';
-    const painel = raiz.TelaSubir.painel({ chave, titulo: 'Balancetes de ' + E.ano, lugares: E.lugares, metas: E.metas, fixo: semBalancete,
+    const painel = E.grupo ? painelConsolidacao() : raiz.TelaSubir.painel({ chave, titulo: 'Balancetes de ' + E.ano, lugares: E.lugares, metas: E.metas, fixo: semBalancete,
       resumo: carregados.length + ' de 12 meses',
       antes: '<p class="suave pequeno" style="margin:-4px 0 10px">Um balancete por mês (período do dia 1º ao último dia do mês). ' +
         'O relatório usa do começo do trimestre do primeiro balancete até o último: faltando um mês no meio, ele fica vazio e o trimestre fica parcial.<br>' +
@@ -288,10 +315,94 @@
 
   function avisos() {
     const rel = E.rel;
-    const lista = rel.avisos.slice();
+    const lista = (E.consolidado ? E.consolidado.avisos.slice() : []).concat(rel.avisos);
     if (rel.lalur.ajustesSemConta.length) lista.push(rel.lalur.ajustesSemConta.length + ' conta(s) da lista de ajustes do LALUR não aparecem nos balancetes (' + rel.lalur.ajustesSemConta.slice(0, 3).join(', ') + (rel.lalur.ajustesSemConta.length > 3 ? ', …' : '') + '): confira a lista na aba LALUR.');
     if (!rel.lalur.pat.noBalancete && rel.lalur.contaPAT) lista.push('A conta do PAT (' + rel.lalur.contaPAT + ') não aparece nos balancetes: confira na aba LALUR.');
     return lista.length ? '<div class="aviso ambar nao-imprimir" style="margin-top:12px"><span class="icone-aviso">⚠️</span><div>' + lista.map((a) => T.esc(a)).join('<br>') + '</div></div>' : '';
+  }
+
+  // ------------------------------------------------------------------
+  // CONSOLIDAÇÃO: no lugar do quadro de arquivos, o quadro das EMPRESAS somadas e das contas que se eliminam
+  // (Dony, 28/09/2026). O relatório em si é o mesmo de uma empresa — ele sai da soma dos balancetes.
+  // ------------------------------------------------------------------
+  function painelConsolidacao() {
+    const c = E.consolidado || { empresas: [], eliminacoes: [], avisos: [] };
+    const doAno = (m) => m.meses.filter((x) => String(x).slice(0, 4) === String(E.ano)).length;
+    const linhas = c.empresas.map((m) => '<tr><td>' + T.esc(m.codigo) + '</td><td class="txt">' + T.esc(m.nome) + '</td>' +
+      '<td class="num">' + doAno(m) + '</td><td class="txt suave">' + T.esc(m.meses.length ? U.nomeCompetencia(m.meses[0]) + ' a ' + U.nomeCompetencia(m.meses[m.meses.length - 1]) : 'sem balancete') + '</td></tr>').join('');
+    const faltam = (E.grupo.empresas || []).filter((cod) => !c.empresas.some((m) => String(m.codigo) === String(cod)));
+    const elim = c.eliminacoes.length
+      ? '<table class="apres simples" style="margin-top:10px"><thead><tr><th class="fixa">Conta eliminada</th><th>Onde está</th><th class="num">Valor no ano</th></tr></thead><tbody>' +
+        c.eliminacoes.map((e) => '<tr><td class="fixa"><span class="cod">' + T.esc(e.conta) + '</span> ' + T.esc(e.titulo || '') + '</td>' +
+          '<td class="txt">' + e.porEmpresa.map((x) => T.esc(x.nome) + ' ' + dinheiro(x.valor)).join(' · ') + '</td>' +
+          '<td class="num' + (e.confere ? '' : ' falta') + '">' + dinheiro(e.valor) + '</td></tr>').join('') +
+        '<tr class="total"><td class="fixa">Soma das eliminações (tem que dar zero)</td><td class="txt suave">ativo e passivo ' + dinheiro(c.somaDasEliminacoes.patrimonial) +
+        ' · resultado ' + dinheiro(c.somaDasEliminacoes.resultado) + '</td><td class="num' + (c.somaDasEliminacoes.confere ? '' : ' falta') + '">' +
+        (c.somaDasEliminacoes.confere ? '✓ zero' : dinheiro(c.somaDasEliminacoes.total)) + '</td></tr></tbody></table>'
+      : '<p class="suave pequeno" style="margin:10px 0 0">Nenhuma conta marcada para eliminar. Operação entre as empresas do grupo (mútuo, venda de uma para a outra, ' +
+        'participação societária) fica somada duas vezes no consolidado: marque as contas dos <b>dois lados</b> em “Contas que se eliminam”.</p>';
+    return '<section class="cartao corpo arquivos-passo">' +
+      '<div class="cab-arquivos"><h3>🧩 Consolidação</h3><span class="suave pequeno">' + c.empresas.length + ' empresa(s) · ' +
+      carregadosDoAno() + ' mês(es) de ' + E.ano + ' · ' + c.eliminacoes.length + ' conta(s) eliminada(s)</span>' +
+      '<button type="button" class="botao pequeno" data-cons="empresas">✎ Empresas</button>' +
+      '<button type="button" class="botao pequeno" data-cons="eliminar">✎ Contas que se eliminam</button></div>' +
+      '<p class="suave pequeno" style="margin:0 0 10px">O relatório abaixo é a <b>soma dos balancetes</b> destas empresas, mês a mês e conta por conta. ' +
+      'Cada empresa continua com o relatório dela; aqui nada é carregado nem alterado.</p>' +
+      '<table class="apres simples"><thead><tr><th class="fixa">Código</th><th>Empresa</th><th class="num">Balancetes de ' + E.ano + '</th><th>Período</th></tr></thead><tbody>' +
+      linhas + '</tbody></table>' +
+      (faltam.length ? '<p class="apres-nota rel-aviso">Sem balancete nenhum: ' + T.esc(faltam.join(', ')) + '.</p>' : '') +
+      elim + '</section>';
+  }
+  const carregadosDoAno = () => (E.rel ? E.rel.meses.filter((m) => m.tem).length : 0);
+
+  // A janela de marcar as contas que se eliminam: as contas do consolidado, com busca.
+  async function escolherEliminacoes(el) {
+    const c = E.consolidado;
+    if (!c) return;
+    const marcadas = new Set(((E.grupo && E.grupo.eliminar) || []).map(String));
+    // Todas as contas analíticas do ano, com o valor (para ele reconhecer a conta do mútuo pelo valor).
+    const contas = new Map();
+    c.balancetes.forEach((b) => b.contas.forEach((x) => {
+      const atual = contas.get(x.conta) || { conta: x.conta, titulo: x.titulo, nivel: x.nivel, valor: 0 };
+      atual.valor += motor().valorUsado(x);
+      if (!atual.titulo) atual.titulo = x.titulo;
+      contas.set(x.conta, atual);
+    }));
+    // As marcadas não aparecem no consolidado (foram zeradas): entram pela lista guardada.
+    marcadas.forEach((cod) => { if (!contas.has(cod)) contas.set(cod, { conta: cod, titulo: (c.eliminacoes.find((e) => e.conta === cod) || {}).titulo || '', nivel: 9, valor: 0 }); });
+    const lista = Array.from(contas.values()).sort((a, b) => motor().compararContas(a.conta, b.conta));
+    const item = (x) => '<label class="item-aba" data-busca="' + T.esc(U.normalizarNome(x.conta + ' ' + (x.titulo || ''))) + '">' +
+      '<input type="checkbox" value="' + T.esc(x.conta) + '"' + (marcadas.has(String(x.conta)) ? ' checked' : '') + '> ' +
+      '<span class="cod">' + T.esc(x.conta) + '</span> ' + T.esc(x.titulo || '') + ' <span class="suave pequeno">' + dinheiro(x.valor) + '</span></label>';
+    const escolha = await T.janela({
+      titulo: 'Contas que se eliminam na consolidação',
+      larga: true,
+      corpo: '<p class="suave pequeno" style="margin:0 0 8px;line-height:1.5">Marque as contas de operações <b>entre as empresas do grupo</b> — o mútuo de uma com a outra, a venda de uma para a outra, ' +
+        'a participação societária. Elas são zeradas no consolidado, e o valor sai também das contas-mãe.<br>' +
+        'Marque os <b>dois lados</b>: a soma das contas marcadas tem que dar zero. Quando não dá, o programa avisa a diferença — é ela que mostra o lançamento que faltou.</p>' +
+        '<input type="search" class="busca" id="el-busca" placeholder="Buscar por código ou nome (ex.: mutuo, ligada, grupo)" style="margin-bottom:8px">' +
+        '<div class="lista-escolha" id="el-lista" style="max-height:46vh;overflow:auto">' + lista.map(item).join('') + '</div>',
+      botoes: [{ texto: 'Cancelar', valor: null }, { texto: 'Usar estas contas', tipo: 'primario',
+        antes: (j) => ({ contas: Array.from(j.querySelectorAll('#el-lista input:checked')).map((x) => x.value) }) }],
+      aoAbrir: (j) => {
+        const busca = j.querySelector('#el-busca');
+        busca.addEventListener('input', () => {
+          const q = U.normalizarNome(busca.value);
+          j.querySelectorAll('#el-lista label').forEach((l) => { l.hidden = !!q && l.getAttribute('data-busca').indexOf(q) < 0 && !l.querySelector('input').checked; });
+        });
+      },
+    });
+    if (!escolha) return;
+    const novo = Object.assign({}, E.emp, { consolidacao: Object.assign({}, E.grupo, { eliminar: escolha.contas }) });
+    try {
+      const salvo = await app().armazenamento.salvarEmpresa(novo);
+      app().empresas = await app().armazenamento.empresas();
+      await app().armazenamento.registrarNoLog({ codigo: E.codigo, acao: 'consolidacao-eliminacoes', alvo: 'apresentacao/' + E.ano,
+        detalhe: escolha.contas.length + ' conta(s) que se eliminam' });
+      T.avisoRapido(escolha.contas.length ? escolha.contas.length + ' conta(s) marcadas para eliminar · guardado.' : 'Nenhuma conta eliminada · guardado.', 'ok', 3000);
+      E.emp = salvo;
+      app().mostrarRota();
+    } catch (e) { T.avisoRapido('Não consegui guardar: ' + T.mensagemDeErro(e), 'erro'); }
   }
 
   // Ano sem balancete nenhum, mas com base para simular: só a DRE simulação (as outras abas não teriam nada).
@@ -1020,8 +1131,17 @@
   // ------------------------------------------------------------------
   function ligar(el) {
     const painel = el.querySelector('#apres-painel .arquivos-passo');
-    raiz.TelaSubir.ligar(painel, E.codigo, E.lugares);
-    raiz.TelaSubir.ligarBotao(el.querySelector('[data-abrir-arquivos]'));
+    if (!E.grupo) {
+      raiz.TelaSubir.ligar(painel, E.codigo, E.lugares);
+      raiz.TelaSubir.ligarBotao(el.querySelector('[data-abrir-arquivos]'));
+    } else if (painel) {
+      painel.addEventListener('click', async (ev) => {
+        const b = ev.target.closest('[data-cons]');
+        if (!b) return;
+        if (b.getAttribute('data-cons') === 'empresas') { await raiz.TelaCarteira.formularioGrupo(E.emp); return; }
+        await escolherEliminacoes(el);
+      });
+    }
     const sel = el.querySelector('#apres-ano');
     if (sel) sel.addEventListener('change', () => app().ir('#/empresa/' + encodeURIComponent(E.codigo) + '/apresentacao/' + sel.value));
     const bx = el.querySelector('#apres-excel');
@@ -2991,5 +3111,5 @@
   }
 
   // _teste: para as provas montarem o Excel sem a tela (estado = os mesmos campos de E).
-  raiz.TelaApresentacao = { mostrar, _teste: { definirEstado: (x) => Object.assign(E, x), montarExcel, dinheiro, secao } };
+  raiz.TelaApresentacao = { mostrar, _teste: { definirEstado: (x) => Object.assign(E, x), estado: () => E, montarExcel, dinheiro, secao } };
 })(self);

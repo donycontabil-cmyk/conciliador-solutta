@@ -81,6 +81,23 @@
       '<div class="rodape"><span class="suave pequeno">' + (arquivos.length ? arquivos.length + ' arquivo(s) nesta máquina' : 'nenhum arquivo ainda') + '</span>' +
       '<span class="botao primario pequeno">Abrir →</span></div></a>';
 
+    // CONSOLIDAÇÃO (Dony, 28/09/2026): o grupo não tem arquivo nem conciliação própria — só o relatório, que
+    // sai da soma das empresas escolhidas.
+    const daConsolidacao = (emp.consolidacao && emp.consolidacao.empresas) || [];
+    if (emp.ehGrupo) {
+      const nomes = daConsolidacao.map((c) => { const x = app().empresas.find((e) => String(e.codigo) === String(c)); return x ? x.nome : c; });
+      const cartaoConsolidado = '<a class="cartao familia apresentacao" href="#/empresa/' + encodeURIComponent(codigo) + '/apresentacao">' +
+        '<div class="icone">🧩</div><h2>Relatório consolidado</h2><p class="suave" style="line-height:1.5">A soma dos balancetes das empresas do grupo, mês a mês e conta por conta, ' +
+        'com as operações entre elas eliminadas: DRE mensal e trimestral, balanço, indicadores e fluxo de caixa.</p>' +
+        '<div class="rodape"><span class="suave pequeno">' + (nomes.length ? T.esc(nomes.join(' + ')) : 'nenhuma empresa escolhida') + '</span>' +
+        '<span class="botao primario pequeno">Abrir →</span></div></a>';
+      el.innerHTML = '<a class="voltar" href="#/">← Empresas</a>' +
+        '<div class="cabecalho"><div class="titulos"><h1>🧩 ' + T.esc(emp.nome) + '</h1><p class="suave">Consolidação · código ' + T.esc(emp.codigo) + ' · ' +
+        daConsolidacao.length + ' empresa(s)</p></div><button class="botao" id="bt-editar">Editar a consolidação</button></div>' +
+        '<div class="grade-3">' + cartaoConsolidado + '</div>';
+      el.querySelector('#bt-editar').addEventListener('click', () => raiz.TelaCarteira.formularioGrupo(emp));
+      return;
+    }
     el.innerHTML = '<a class="voltar" href="#/">← Empresas</a>' +
       '<div class="cabecalho"><div class="titulos"><h1>' + T.esc(emp.nome) + '</h1><p class="suave">Código ' + T.esc(emp.codigo) + (detalhes.length ? ' · ' + T.esc(detalhes.join(' · ')) : '') + '</p></div>' +
       '<button class="botao" id="bt-editar">Editar cadastro</button></div>' +
