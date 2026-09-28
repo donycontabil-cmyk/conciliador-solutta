@@ -27,6 +27,7 @@
       (semDemonstracao ? '<div class="aviso info" style="margin-bottom:14px"><span class="icone-aviso">🧪</span><div style="flex:1"><b>Quer conhecer o programa sem arquivo de cliente?</b><br>' +
         'Crie a empresa de demonstração ' + T.esc(E.nome) + ' (código ' + T.esc(E.codigo) + ', CNPJ fictício). Fornecedores, notas e valores são todos inventados.</div>' +
         '<button class="botao primario" id="bt-demonstracao">Criar a empresa de demonstração</button></div>' : '') +
+      conviteConsolidar(empresas) +
       '<div class="filtros"><input class="busca" id="busca" type="search" placeholder="Buscar por código, nome ou CNPJ" value="' + T.esc(busca) + '"></div>' +
       '<div id="lista"></div>';
     const lista = el.querySelector('#lista');
@@ -59,6 +60,7 @@
     el.querySelector('#busca').addEventListener('input', () => { app().gravarLocal('conciliador-solutta.busca-carteira', el.querySelector('#busca').value); desenhar(); });
     el.querySelector('#bt-nova').addEventListener('click', () => formulario(null));
     el.querySelector('#bt-consolidacao').addEventListener('click', () => formularioGrupo(null));
+    el.querySelectorAll('[data-consolidar-grupo]').forEach((b) => b.addEventListener('click', () => formularioGrupo(null, b.getAttribute('data-consolidar-grupo'))));
     const btDemo = el.querySelector('#bt-demonstracao');
     if (btDemo) {
       btDemo.addEventListener('click', async () => {
@@ -192,45 +194,96 @@
     }
   }
 
+  // Grupo com duas ou mais empresas e sem consolidação ainda: o convite aparece na própria lista (Dony,
+  // 28/09/2026 perguntou "onde está a opção de consolidar?" — o botão de cima sozinho não bastou).
+  function conviteConsolidar(empresas) {
+    const porGrupo = new Map();
+    empresas.filter((e) => !e.ehGrupo && String(e.grupo || '').trim()).forEach((e) => {
+      const g = String(e.grupo).trim();
+      porGrupo.set(g, (porGrupo.get(g) || []).concat([e]));
+    });
+    const jaTem = new Set(empresas.filter((e) => e.ehGrupo).map((e) => String(e.grupo || '').trim()));
+    const faltam = Array.from(porGrupo.entries()).filter(([g, lista]) => lista.length >= 2 && !jaTem.has(g));
+    if (!faltam.length) return '';
+    return faltam.slice(0, 2).map(([g, lista]) => '<div class="aviso info" style="margin-bottom:14px"><span class="icone-aviso">🧩</span>' +
+      '<div style="flex:1"><b>' + T.esc(g) + ' tem ' + lista.length + ' empresas nesta pasta.</b><br>' +
+      'Dá para montar um <b>relatório consolidado</b> do grupo: a soma dos balancetes de ' + T.esc(lista.map((e) => e.nome).join(', ')) + ', com as operações entre elas eliminadas.</div>' +
+      '<button class="botao primario" data-consolidar-grupo="' + T.esc(g) + '">🧩 Consolidar ' + T.esc(g) + '</button></div>').join('');
+  }
+
   // ------------------------------------------------------------------
   // CONSOLIDAÇÃO (Dony, 28/09/2026: "existem algumas empresas em que eu preciso consolidar; quero entrar nos
   // relatórios de consolidação e escolher as empresas"). Um grupo é um cadastro sem balancete próprio: o
   // relatório dele soma os balancetes das empresas escolhidas. As contas que se eliminam (operações entre as
   // empresas do grupo) são marcadas depois, dentro do relatório, onde as contas estão à mão.
   // ------------------------------------------------------------------
-  async function formularioGrupo(grupo) {
+  async function formularioGrupo(grupo, grupoSugerido) {
     const g = grupo || {};
     const novo = !grupo;
     const escolhidas = new Set(((g.consolidacao && g.consolidacao.empresas) || []).map(String));
     const candidatas = app().empresas.filter((e) => !e.ehGrupo).sort((a, b) => String(a.nome).localeCompare(String(b.nome), 'pt-BR'));
+    // SÓ EMPRESAS DO MESMO GRUPO (Dony, 28/09/2026: "precisa ser do mesmo grupo, tá"). O grupo é o campo
+    // "Grupo" do cadastro da empresa; quem não tem grupo preenchido não entra em consolidação nenhuma.
+    const daEmpresa = (e) => String(e.grupo || '').trim();
+    const grupos = Array.from(new Set(candidatas.map(daEmpresa).filter(Boolean))).sort((a, b) => a.localeCompare(b, 'pt-BR'));
+    const grupoAtual = g.grupo || grupoSugerido || (escolhidas.size ? daEmpresa(candidatas.find((e) => escolhidas.has(String(e.codigo))) || {}) : '') || grupos[0] || '';
+    const semGrupo = candidatas.filter((e) => !daEmpresa(e));
     const codigoSugerido = () => {
       for (let n = 1; n < 100; n++) { const c = 'C' + n; if (!app().empresas.some((x) => String(x.codigo) === c)) return c; }
       return 'C';
     };
+    const listaDoGrupo = (nome) => {
+      const doGrupo = candidatas.filter((e) => daEmpresa(e) === nome);
+      if (!doGrupo.length) return '<p class="suave pequeno">Nenhuma empresa com o grupo <b>' + T.esc(nome) + '</b>.</p>';
+      return doGrupo.map((e) => '<label class="item-aba"><input type="checkbox" value="' + T.esc(e.codigo) + '"' +
+        (!escolhidas.size || escolhidas.has(String(e.codigo)) ? ' checked' : '') + '> <b>' + T.esc(e.codigo) + '</b> · ' + T.esc(e.nome) +
+        (e.cnpj ? ' <span class="suave pequeno">· ' + T.esc(U.formatarCnpj(e.cnpj)) + '</span>' : '') + '</label>').join('');
+    };
+    if (!grupos.length) {
+      await T.janela({ titulo: 'Consolidação: falta dizer o grupo',
+        corpo: '<p style="line-height:1.55">A consolidação junta empresas <b>do mesmo grupo econômico</b>, e nenhuma empresa desta pasta tem o campo <b>Grupo</b> preenchido.<br><br>' +
+          'Abra o cadastro de cada empresa do grupo (botão <b>Editar</b> na lista) e escreva o <b>mesmo nome</b> no campo Grupo — por exemplo <i>GRUPO ALFA</i>. Depois volte aqui.</p>' });
+      return;
+    }
     const salvo = await T.janela({
       titulo: novo ? 'Nova consolidação' : 'Editar a consolidação ' + g.codigo,
       larga: true,
-      corpo: '<p class="suave pequeno" style="margin:0 0 10px;line-height:1.5">A consolidação soma os balancetes das empresas escolhidas, mês a mês e conta por conta, e ' +
+      corpo: '<p class="suave pequeno" style="margin:0 0 10px;line-height:1.5">A consolidação soma os balancetes das empresas <b>do mesmo grupo</b>, mês a mês e conta por conta, e ' +
         'monta o relatório inteiro (DRE, balanço, indicadores e fluxo de caixa) como se fosse uma empresa só. ' +
         'As <b>contas que se eliminam</b> (operações entre as empresas do grupo) você marca depois, dentro do relatório.</p>' +
         '<div class="grade-form">' +
-        '<div class="campo"><label for="g-codigo">Código *</label><input id="g-codigo" maxlength="20" ' + (novo ? 'autofocus' : 'readonly') +
+        '<div class="campo"><label for="g-grupo">Grupo *</label><select id="g-grupo" class="apres-campo">' +
+        grupos.map((n) => '<option value="' + T.esc(n) + '"' + (n === grupoAtual ? ' selected' : '') + '>' + T.esc(n) + '</option>').join('') +
+        '</select><span class="ajuda">O campo Grupo do cadastro das empresas.</span></div>' +
+        '<div class="campo"><label for="g-codigo">Código *</label><input id="g-codigo" maxlength="20" ' + (novo ? '' : 'readonly') +
         ' value="' + T.esc(g.codigo || codigoSugerido()) + '"><span class="ajuda">Um código só para a consolidação (ela não é uma empresa do sistema contábil).</span></div>' +
-        '<div class="campo"><label for="g-nome">Nome *</label><input id="g-nome" maxlength="120" ' + (novo ? '' : 'autofocus') + ' value="' + T.esc(g.nome || '') + '" placeholder="Ex.: GRUPO ALFA (consolidado)"></div>' +
+        '<div class="campo inteiro"><label for="g-nome">Nome *</label><input id="g-nome" maxlength="120" autofocus value="' + T.esc(g.nome || (grupoAtual ? grupoAtual + ' (consolidado)' : '')) + '" placeholder="Ex.: GRUPO ALFA (consolidado)"></div>' +
         '</div>' +
         '<h3 class="apres-sub" style="margin:14px 0 6px">Empresas desta consolidação</h3>' +
-        (candidatas.length ? '<div class="lista-escolha" id="g-empresas">' + candidatas.map((e) => '<label class="item-aba"><input type="checkbox" value="' + T.esc(e.codigo) + '"' +
-          (escolhidas.has(String(e.codigo)) ? ' checked' : '') + '> <b>' + T.esc(e.codigo) + '</b> · ' + T.esc(e.nome) + (e.grupo ? ' <span class="suave pequeno">· grupo ' + T.esc(e.grupo) + '</span>' : '') + '</label>').join('')
-          + '</div>' : '<div class="aviso ambar"><span class="icone-aviso">⚠️</span><div>Cadastre as empresas primeiro.</div></div>') +
+        '<div class="lista-escolha" id="g-empresas">' + listaDoGrupo(grupoAtual) + '</div>' +
+        (semGrupo.length ? '<p class="suave pequeno" style="margin-top:8px">' + semGrupo.length + ' empresa(s) sem o campo Grupo preenchido não aparecem aqui (' +
+          T.esc(semGrupo.slice(0, 3).map((e) => e.nome).join(', ')) + (semGrupo.length > 3 ? ', …' : '') + '). Preencha o Grupo no cadastro delas para poder consolidar.</p>' : '') +
         '<div id="g-erro" style="margin-top:12px"></div>',
+      aoAbrir: (j) => {
+        const sel = j.querySelector('#g-grupo');
+        const nome = j.querySelector('#g-nome');
+        sel.addEventListener('change', () => {
+          escolhidas.clear();
+          j.querySelector('#g-empresas').innerHTML = listaDoGrupo(sel.value);
+          if (novo) nome.value = sel.value + ' (consolidado)';
+        });
+      },
       botoes: [{ texto: 'Cancelar', valor: null }, {
         texto: novo ? 'Criar consolidação' : 'Salvar', tipo: 'primario',
         antes: async (j) => {
           const empresas = Array.from(j.querySelectorAll('#g-empresas input:checked')).map((x) => x.value);
           const erro = j.querySelector('#g-erro');
-          const dados = { codigo: j.querySelector('#g-codigo').value.trim(), nome: j.querySelector('#g-nome').value.trim(), ehGrupo: true,
+          const nomeGrupo = j.querySelector('#g-grupo').value;
+          const dados = { codigo: j.querySelector('#g-codigo').value.trim(), nome: j.querySelector('#g-nome').value.trim(), grupo: nomeGrupo, ehGrupo: true,
             consolidacao: { empresas, eliminar: (g.consolidacao && g.consolidacao.eliminar) || [] } };
-          if (empresas.length < 2) { erro.innerHTML = '<div class="aviso vermelho">Escolha pelo menos duas empresas para consolidar.</div>'; return false; }
+          if (empresas.length < 2) { erro.innerHTML = '<div class="aviso vermelho">Escolha pelo menos duas empresas do grupo ' + T.esc(nomeGrupo) + ' para consolidar.</div>'; return false; }
+          const fora = empresas.filter((c) => daEmpresa(candidatas.find((e) => String(e.codigo) === String(c)) || {}) !== nomeGrupo);
+          if (fora.length) { erro.innerHTML = '<div class="aviso vermelho">Só entram empresas do grupo ' + T.esc(nomeGrupo) + ' (fora: ' + T.esc(fora.join(', ')) + ').</div>'; return false; }
           if (novo && app().empresas.some((x) => String(x.codigo) === dados.codigo)) {
             erro.innerHTML = '<div class="aviso vermelho">Já existe uma empresa ou consolidação com o código ' + T.esc(dados.codigo) + '.</div>';
             return false;
