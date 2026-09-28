@@ -42,6 +42,10 @@
     if (/^-/.test(s)) { negativo = !negativo; s = s.slice(1).trim(); }
     s = s.replace(/^R\$\s*/i, '');
     if (/^-/.test(s)) { negativo = !negativo; s = s.slice(1).trim(); }
+    // DUAS QUANTIAS NA MESMA CÉLULA ("600,00 0,00"): o arquivo grudou duas colunas. Não dá para adivinhar
+    // qual é, e ler errado é pior do que não ler — sem isto, tirando os espaços virava "600,000,00" e entrava
+    // um valor absurdo calado (Dony, 28/09/2026, a Nika: "o sistema não entendeu, só que não deu como erro").
+    if ((s.match(/\d(?:[\d.]*\d)?[.,]\d{2}(?!\d)/g) || []).length >= 2) return null;
     s = s.replace(/\s+/g, '');
     if (!/^[0-9.,]+$/.test(s) || !/[0-9]/.test(s)) return null;
     const ultimo = Math.max(s.lastIndexOf('.'), s.lastIndexOf(','));

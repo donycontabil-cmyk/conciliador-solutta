@@ -572,6 +572,7 @@
     const contas = [];
     const vistas = new Set();
     let total = null, linhasIgnoradas = 0, repetidas = 0, comLado = 0, negativos = 0, primeiraConta = -1;
+    const ignoradas = [];   // linhas com código de conta em que o valor não foi lido (alguma coluna saiu do lugar)
     for (let r = escolha.inicio || 0; r < linhas.length; r++) {
       const l = linhas[r];
       if (!l || !l.some((c) => !vazio(c))) continue;
@@ -591,7 +592,13 @@
       }
       if (!cod) { linhasIgnoradas++; continue; }
       const va = lerValor(l[col.saldoAnterior]), vd = lerValor(l[col.debitos]), vc = lerValor(l[col.creditos]), vf = lerValor(l[col.saldoAtual]);
-      if (!va || !vd || !vc || !vf) { linhasIgnoradas++; continue; } // valor que não é número: não é linha de conta
+      // Linha com CÓDIGO DE CONTA mas com valor que não é número: alguma coluna saiu do lugar nessa linha.
+      // Ela fica guardada com o texto como veio, para a tela poder mostrar o que não entrou.
+      if (!va || !vd || !vc || !vf) {
+        linhasIgnoradas++;
+        if (ignoradas.length < 30) ignoradas.push({ linha: r + 1, conta: cod.codigo, texto: (l || []).map((x) => texto({ 0: x }, 0)).filter(Boolean).join(' | ').slice(0, 180) });
+        continue;
+      }
       // Linha com código mas sem nenhum valor: é título de grupo, não conta. (No balancete da Zelco o grupo
       // aparece duas vezes: em cima só o nome e embaixo o total — o que vale é o de baixo.)
       if (va.vazio && vd.vazio && vc.vazio && vf.vazio) { linhasIgnoradas++; continue; }
@@ -641,8 +648,21 @@
         avisos.push('Os débitos e créditos das contas de 1º nível não batem com o Total Geral do arquivo.');
       }
     }
-    if (primeiras.length && soma(primeiras, 'saldoAtual') !== 0) {
-      avisos.push('A soma dos saldos das contas de 1º nível não dá zero (' + Util.formatarCentavos(soma(primeiras, 'saldoAtual')) + '): confira se o balancete está completo.');
+    // O BALANCETE FECHA? ativo − passivo = receitas − despesas, ou seja: a soma dos saldos das contas de 1º
+    // nível tem que dar zero. Isso é ERRO, não recado (Dony, 28/09/2026, a Nika: "as contas de despesa o
+    // sistema não entendeu, só que ele não deu como erro, e aí ativo e passivo não bate"): quando não fecha,
+    // o programa tenta outras colunas, avisa o quanto falta e mostra as linhas que não entraram.
+    const diferenca = primeiras.length ? soma(primeiras, 'saldoAtual') : 0;
+    const fecha = !primeiras.length || diferenca === 0;
+    if (!fecha) {
+      confere = false;
+      avisos.push('O balancete não fecha: a soma dos saldos das contas de 1º nível dá ' + Util.formatarCentavos(diferenca) +
+        ' em vez de zero (ativo − passivo tem que ser igual a receitas − despesas).' +
+        (ignoradas.length ? ' ' + ignoradas.length + ' linha(s) com código de conta não entraram: confira as colunas.' : ''));
+    }
+    if (ignoradas.length && fecha) {
+      avisos.push(ignoradas.length + ' linha(s) com código de conta não entraram (o valor não foi lido em alguma coluna): ' +
+        ignoradas.slice(0, 3).map((x) => x.conta).join(', ') + (ignoradas.length > 3 ? ', …' : '') + '.');
     }
     const filhas = new Map();
     contas.forEach((c) => { if (c.pai) { if (!filhas.has(c.pai)) filhas.set(c.pai, []); filhas.get(c.pai).push(c); } });
@@ -681,10 +701,15 @@
     const titulos = titulosDasColunas(linhas, col, escolha.linhaCabecalho, primeiraConta);
     return {
       tipo: 'balancete', empresa: info.empresa, cnpj: info.cnpj, periodo, competencia: ate ? Util.competenciaDe(ate) : null, variosMeses,
-      contas, total, confere, avisos, linhasIgnoradas, qualidade, como: escolha.como,
+      contas, total, confere, fecha, diferenca, ignoradas, avisos, linhasIgnoradas, qualidade, como: escolha.como,
       mapa: titulos ? { aba: escolha.aba, colunas: usadas, titulos } : { aba: escolha.aba, colunas: usadas },
     };
   }
+
+  // Qual leitura vale mais: a que FECHA (ativo − passivo = receitas − despesas) ganha; depois, a que traz
+  // mais contas fechando conta a conta. Sem isso, uma leitura com colunas trocadas que perde as despesas
+  // podia ganhar de outra completa (Dony, 28/09/2026, a Nika).
+  const melhorLeitura = (a, b) => (b.fecha ? 1 : 0) - (a.fecha ? 1 : 0) || b.qualidade * b.contas.length - a.qualidade * a.contas.length;
 
   // Lê o balancete: com o mapa indicado (só ele); senão pelo cabeçalho; e, com opcoes.inferir, pelo
   // conteúdo quando o cabeçalho não fecha a conta. Fica a leitura com mais contas que fecham.
@@ -696,7 +721,7 @@
       const jeitos = [porTitulos(abas, op.mapa), doMapa(abas, op.mapa)].filter(Boolean);
       if (!jeitos.length) throw new Error('As colunas indicadas não servem para este arquivo (faltam conta, saldo anterior, débitos, créditos ou saldo atual).');
       const lidas = jeitos.map((e) => montar(abas, e, op));
-      lidas.sort((a, b) => b.qualidade * b.contas.length - a.qualidade * a.contas.length);
+      lidas.sort(melhorLeitura);
       return lidas[0];
     }
     const leituras = [];
@@ -706,12 +731,12 @@
       const colunas = alinhar(abas[cab.aba].linhas || [], inicio, cab.mapa);
       leituras.push(montar(abas, { aba: cab.aba, inicio, linhaCabecalho: cab.linha, colunas, como: 'cabecalho' }, op));
     }
-    if (op.inferir && !leituras.some((x) => x.qualidade >= 0.9 && x.contas.length >= 3)) {
+    if (op.inferir && !leituras.some((x) => x.qualidade >= 0.9 && x.contas.length >= 3 && x.fecha)) {
       const inf = inferir(abas);
       if (inf) leituras.push(montar(abas, inf, op));
     }
     if (!leituras.length) throw new Error('Não achei o cabeçalho de um balancete (Conta, Título, Saldo anterior, Débitos, Créditos, Saldo atual).');
-    leituras.sort((a, b) => b.qualidade * b.contas.length - a.qualidade * a.contas.length);
+    leituras.sort(melhorLeitura);
     return leituras[0];
   }
 

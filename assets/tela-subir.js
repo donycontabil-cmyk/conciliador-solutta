@@ -67,7 +67,10 @@
     const b = r.balancete;
     const resultado = b.contas.filter((c) => c.nivel === 1 && !/^0*[12]$/.test(c.conta)).reduce((s, c) => s + c.creditos - c.debitos, 0);
     const meta = Object.assign({ tipo: 'balancete', arquivo: r.nomeArquivo, competencia: comp, periodo: b.periodo, contas: b.contas.length, resultado,
-      confere: b.confere, empresaNoArquivo: b.empresa, cnpjNoArquivo: b.cnpj, hashDoConteudo: r.hash }, extra || {});
+      confere: b.confere, empresaNoArquivo: b.empresa, cnpjNoArquivo: b.cnpj, hashDoConteudo: r.hash,
+      // Quando não fecha: o quanto falta e as linhas que não entraram, para o cartão do arquivo mostrar.
+      diferenca: b.diferenca || 0, linhasIgnoradas: b.linhasIgnoradas || 0,
+      ignoradas: (b.ignoradas || []).slice(0, 12).map((x) => ({ conta: x.conta, texto: String(x.texto || '').slice(0, 120) })) }, extra || {});
     return app().armazenamento.guardarArquivo(codigo, meta, { tipo: 'balancete', empresa: b.empresa, cnpj: b.cnpj, periodo: b.periodo, contas: b.contas, total: b.total }, r.bytes);
   }
 
@@ -119,16 +122,17 @@
   // créditos = atual).
   // ------------------------------------------------------------------
   const balanceteBom = (b) => !!b && !!b.contas && b.contas.length >= 3 && b.qualidade >= 0.9;
-  async function balanceteDoArquivo(r, arquivo, codigo) {
+  async function balanceteDoArquivo(r, arquivo, codigo, opSubir) {
     let abas = r.abas || null;   // o arquivo já aberto pelo leitor (planilha ou PDF): abrir de novo estraga o PDF
     try { if (!abas) abas = raiz.LerPlanilha.abrir(r.bytes).abas; } catch (e) { return null; }
     if (!abas) return null;
     const L = raiz.LerBalancete;
     const tentar = (op) => { try { return L.ler(abas, Object.assign({ nomeArquivo: arquivo.name }, op)); } catch (e) { return null; } };
     const emp = app().empresas.find((e) => String(e.codigo) === String(codigo)) || {};
+    const forcar = !!(opSubir && opSubir.forcarColunas);   // o botão "✎ Conferir as colunas" pede a janela
     // 1) O programa leu sozinho e a conta fecha: é só GUARDAR O DESENHO, para os próximos meses entrarem
     //    direto (antes ele lia janeiro sozinho, não guardava nada, e em fevereiro perguntava tudo de novo).
-    if (balanceteBom(r.balancete)) {
+    if (!forcar && balanceteBom(r.balancete)) {
       // O desenho guardado fica sendo o que serve para o arquivo mais novo: o do mês passado pode ter sido
       // lido com uma coluna que só fechava naquele mês (a Zelco tem duas colunas de saldo inicial).
       const guardado = emp.mapaBalancete && tentar({ mapa: emp.mapaBalancete });
@@ -136,13 +140,13 @@
       return r.balancete;
     }
     // 2) O desenho guardado na empresa (dos meses anteriores): entra direto.
-    if (emp.mapaBalancete) { const x = tentar({ mapa: emp.mapaBalancete }); if (balanceteBom(x)) return x; }
+    if (!forcar && emp.mapaBalancete) { const x = tentar({ mapa: emp.mapaBalancete }); if (balanceteBom(x)) return x; }
     // 3) Pelo conteúdo. Se a conta fecha e a empresa JÁ TEM um desenho guardado, não pergunta de novo: o
     //    programa entendeu o arquivo (Dony, 25/09/2026: "se eu já subi o balancete de janeiro, por que ele tá
     //    pedindo de novo a estrutura do de fevereiro?"). A pergunta fica só para o primeiro balancete da
     //    empresa e para quando ele não entender.
     const pelo = tentar({ inferir: true });
-    if (balanceteBom(pelo)) {
+    if (!forcar && balanceteBom(pelo)) {
       if (emp.mapaBalancete) {
         if (pelo.mapa) await guardarMapaDoBalancete(codigo, pelo.mapa);
         T.avisoRapido('Li as colunas de ' + arquivo.name + ' sozinho: ' + pelo.contas.length + ' contas, ' +
@@ -276,7 +280,8 @@
     }
     if (m.tipo === 'balancete') {
       return (m.contas || 0) + ' contas · ' + (m.resultado >= 0 ? 'lucro' : 'prejuízo') + ' do mês ' + T.moeda(Math.abs(m.resultado || 0)) +
-        (m.confere === false ? ' · <span class="falta">não fecha</span>' : '');
+        (m.confere === false ? ' · <span class="falta">não fecha</span>' + (m.diferenca ? ' por ' + T.moeda(Math.abs(m.diferenca)) : '') : '') +
+        (m.linhasIgnoradas ? ' · <span class="falta">' + m.linhasIgnoradas + ' linha(s) não entraram</span>' : '');
     }
     if (m.tipo === 'plano') return (m.contas || 0) + ' contas · o nome vem daqui';
     return m.tipo === 'razao'
@@ -301,7 +306,15 @@
       '<br><span class="suave">' + detalheDoArquivo(m) + outroMes + (quem ? ' · ' + quem : '') + '</span>' +
       (comparar ? '<br><span class="pequeno">Em relação à versão anterior: ' + textoComparacao(m.comparacao, tipo) +
         ' · <button type="button" class="lapis" data-ver-versao="' + T.esc(m.id) + '">ver o que mudou</button></span>' : '') +
+      // As linhas que o programa não conseguiu ler (é onde costuma estar a diferença de quem não fecha).
+      ((m.ignoradas || []).length ? '<details class="versoes-lugar"><summary>' + m.ignoradas.length + ' linha(s) com código de conta que não entraram</summary>' +
+        m.ignoradas.map((x) => '<div class="versao-antiga"><div><b>' + T.esc(x.conta) + '</b><br><span class="suave pequeno">' + T.esc(x.texto) + '</span></div></div>').join('') +
+        '<p class="suave pequeno" style="margin:6px 0 0">Alguma coluna saiu do lugar nessas linhas. Clique em <b>✎ Conferir as colunas</b> e diga qual coluna é cada coisa.</p></details>' : '') +
       '</div>' +
+      // Balancete que NÃO FECHA: o botão que abre a janela das colunas com este mesmo arquivo (Dony,
+      // 28/09/2026: "ele não me dá nenhum comando para ajustar").
+      (m.tipo === 'balancete' && (m.confere === false || m.linhasIgnoradas > 0)
+        ? '<button type="button" class="botao pequeno" data-colunas-balancete="' + T.esc(m.id) + '" title="Abrir este arquivo de novo e dizer qual coluna é cada coisa">✎ Conferir as colunas</button> ' : '') +
       '<button type="button" class="botao pequeno perigo" data-apagar-arquivo="' + T.esc(m.id) + '" title="Excluir esta versão (a cópia vai para _apagados)">🗑 Excluir</button></div>' +
       (antigas.length ? '<details class="versoes-lugar"><summary>' + antigas.length + (antigas.length === 1 ? ' versão anterior guardada' : ' versões anteriores guardadas') + '</summary>' +
         antigas.map((v, k) => {
@@ -441,6 +454,12 @@
       if (ver) {
         ev.preventDefault();
         await verVersao(codigo, doLugar(ver.closest('[data-lugar]').getAttribute('data-lugar')), ver.getAttribute('data-ver-versao'));
+        return;
+      }
+      const col = ev.target.closest('[data-colunas-balancete]');
+      if (col) {
+        const l = doLugar(col.closest('[data-lugar]').getAttribute('data-lugar'));
+        await conferirColunasDeNovo(codigo, l, await metaDoBotao(l, col.getAttribute('data-colunas-balancete')));
         return;
       }
       const ap = ev.target.closest('[data-apagar-arquivo]');
@@ -737,7 +756,7 @@
         // Passa sempre por aqui, mesmo quando o programa já entendeu: é aqui que o DESENHO das colunas fica
         // guardado na empresa, para o mês seguinte entrar sem perguntar nada.
         if (r.tipo !== 'razao' && !/^financeiro/.test(r.tipo)) {
-          const lido = await balanceteDoArquivo(r, arquivo, codigo);
+          const lido = await balanceteDoArquivo(r, arquivo, codigo, op);
           if (lido === false) return false;
           if (lido) { r.tipo = 'balancete'; r.balancete = lido; r.competencia = lido.competencia; }
         }
@@ -827,6 +846,30 @@
     return { id: 'diario', parte: 'Contabilidade', titulo: 'Livro diário de ' + ano, sub: 'o ano todo ou um pedaço (jan a mar, jan a out…)', nome: 'livro diário de ' + ano,
       log: 'diario', tipo: 'diario', competencia: ano + '-01-01', arquivos: doAno.length ? [doAno[0]] : [] };
   }
+  // ------------------------------------------------------------------
+  // ✎ CONFERIR AS COLUNAS de um balancete já guardado (Dony, 28/09/2026, a Nika: "as contas de despesa o
+  // sistema não entendeu… ele não me dá nenhum comando para ajustar"). Pega o ARQUIVO ORIGINAL guardado, abre
+  // de novo e força a janela das colunas; o resultado entra como versão nova, com o desenho guardado na
+  // empresa. Nada é perdido: a versão anterior continua lá.
+  // ------------------------------------------------------------------
+  async function conferirColunasDeNovo(codigo, lugar, meta) {
+    if (!meta || !lugar) return;
+    const arm = app().armazenamento;
+    if (typeof arm.bytesOriginais !== 'function') {
+      T.avisoRapido('Este jeito de guardar não tem o arquivo original: carregue o balancete de novo no lugar dele.', 'erro', 6000);
+      return;
+    }
+    let bytes = null;
+    try { bytes = await arm.bytesOriginais(meta.id); } catch (e) { bytes = null; }
+    if (!bytes || !bytes.length) {
+      T.avisoRapido('Não achei o arquivo original de ' + meta.arquivo + ' nesta pasta: carregue o balancete de novo.', 'erro', 6000);
+      return;
+    }
+    let arquivo;
+    try { arquivo = new File([bytes], meta.arquivo || 'balancete', { type: '' }); } catch (e) { arquivo = { name: meta.arquivo || 'balancete' }; }
+    await subir(codigo, lugar, arquivo, { forcarColunas: true });
+  }
+
   // O lugar do PLANO DE CONTAS: um por empresa, opcional. Serve para empresa cujo sistema imprime o nome da
   // conta cortado no balancete (Dony, 25/09/2026, a Zelco): com o plano guardado, o nome de cada conta sai
   // dele. Nas outras empresas o cartão fica vazio e ninguém precisa mexer.
