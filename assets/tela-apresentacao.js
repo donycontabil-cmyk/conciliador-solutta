@@ -916,11 +916,11 @@
     // O LALUR simulado precisa das CONTAS de um ano só (as de adição, exclusão e do PAT). Com a base na média
     // de dois anos ele não sai; a DRE simulação continua normal.
     if (!L) {
-      return s.simulados.length && s.fonte && s.fonte.sintetica
-        ? '<p class="apres-nota suave nao-imprimir">O <b>LALUR simulação</b> não sai com esta base (' + T.esc(s.fonte.rotulo) +
-          '): ele precisa das contas de um ano só. Escolha “Copiar ' + (s.fonte.anos ? s.fonte.anos[s.fonte.anos.length - 1] : E.ano - 1) + '” na base para ter o LALUR simulado junto.</p>'
+      return s.simulados.length && !s.fonte
+        ? '<p class="apres-nota suave nao-imprimir">O <b>LALUR simulação</b> precisa de uma base para os meses simulados: escolha uma lá em cima.</p>'
         : '';
     }
+    const daBase = nomeDaBase(s) || 'a base';
     const real = E.rel.lalur;
     const editavel = !(op && op.impressao);
     const cor = (origem) => (origem === 'simulado' ? 'sim' : origem === 'misto' ? 'aj' : '');
@@ -953,16 +953,16 @@
         { cls: 'total', cab: ['Total das Adições', '', ''], valores: L.ajustes.adicoes },
         { cls: 'total', cab: ['Total das Exclusões', '', ''], valores: L.ajustes.exclusoes }]))
       : '<p class="apres-nota nao-imprimir">Nenhuma conta marcada como adição ou exclusão. As que você marcar na aba <b>LALUR</b> entram aqui também, ' +
-        'com os meses simulados tirados de ' + (ant.ano) + ' ' + sinalPercentual(s.percentual) + '.</p>';
+        'com os meses simulados tirados de ' + daBase + ' ' + sinalPercentual(s.percentual) + '.</p>';
     const colPat = L.pat.colunas.map((c) => Object.assign({}, c, { cls: c.lalur ? 'acum' : '' }));
     const pat = L.pat.linhas.length ? tabelaSimples(['Descrição', 'Linha'], colPat, L.pat.linhas.map((l) => ({ cab: [T.esc(l.rotulo), l.letra], valores: l.valores }))) : '';
-    const sub = 'A mesma apuração do LALUR, com o lucro da DRE simulada: ' + (s.simulados.length ? 'os meses simulados saem de ' + ant.ano + ' ' + sinalPercentual(s.percentual) : 'só meses reais') +
+    const sub = 'A mesma apuração do LALUR, com o lucro da DRE simulada: ' + (s.simulados.length ? 'os meses simulados saem de ' + daBase + ' ' + sinalPercentual(s.percentual) : 'só meses reais') +
       (s.ajustes.length ? ' · os ' + s.ajustes.length + ' ajuste' + (s.ajustes.length > 1 ? 's' : '') + ' da simulação entram no lucro' : '') +
       ' · a Parte B (prejuízo fiscal, base negativa e IR retido) é a mesma da aba LALUR.';
     return tituloSecao('LALUR simulação · IRPJ e CSLL projetados', sub) +
       (L.confere ? '' : '<div class="aviso vermelho" style="margin:0 0 10px"><span class="icone-aviso">⚠️</span><div>O lucro do LALUR simulado não bate com a DRE simulada: avise o suporte.</div></div>') +
       '<div class="apres-fichas">' + fichas + '</div>' + parteA + blocoLalurAnual(L, true) +
-      '<h3 class="apres-sub">Adições e exclusões na simulação <small>as contas marcadas no LALUR · nos meses simulados, o valor de ' + ant.ano + ' ' + T.esc(sinalPercentual(s.percentual)) + '</small></h3>' + ajustes +
+      '<h3 class="apres-sub">Adições e exclusões na simulação <small>as contas marcadas no LALUR · nos meses simulados, o valor de ' + T.esc(daBase) + ' ' + T.esc(sinalPercentual(s.percentual)) + '</small></h3>' + ajustes +
       (pat ? '<h3 class="apres-sub">Incentivo fiscal PAT na simulação <small>conta ' + T.esc(L.contaPAT || '—') + '</small></h3>' + pat : '') +
       (editavel ? '<p class="apres-nota nao-imprimir">Mexeu no percentual ou nos ajustes da DRE simulação aí em cima? Este LALUR muda junto.</p>' : '');
   }
