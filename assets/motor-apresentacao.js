@@ -501,6 +501,9 @@
     const mapaEmpresa = entrada.mapaDre && entrada.mapaDre.contas && (entrada.mapaDre.rascunho || Object.keys(entrada.mapaDre.contas).length) ? entrada.mapaDre : null;
     let situacaoDre, mapaUsado = null, avaliacao = null;
     if (mapaEmpresa) { situacaoDre = 'mapa'; mapaUsado = mapaEmpresa.contas; }
+    // Ano sem balancete nenhum (o ano que vem, para simular): não há conta para mapear, então não há o que
+    // conferir — a DRE fica aberta, com as linhas do modelo zeradas, e a simulação preenche pela base.
+    else if (!contas.length) { situacaoDre = 'modelo'; avaliacao = { serve: true, vazio: true, divergencias: [] }; }
     else {
       avaliacao = entrada.dreModo === 'modelo' ? { serve: true, forcado: true, divergencias: [] } : avaliarModelo(contas, peso, movimentoNoAno);
       if (avaliacao.serve) situacaoDre = 'modelo';
@@ -1508,11 +1511,20 @@
     const percentual = Number((opcoes && opcoes.percentual) || 0) || 0;
     const fator = 1 + percentual / 100;
     const ano = atual.ano;
+    // A FONTE dos meses simulados: o ano anterior (o de sempre), outro ano qualquer, a média de alguns anos ou
+    // a média dos meses do próprio ano (baseDeSimulacao monta cada uma). Sem fonte, só os meses com balancete
+    // entram — a simulação vira a DRE real mais os ajustes (Dony, 28/09/2026: "não quero ser condicionado a
+    // ter 2025; quero poder fazer a simulação com o ano atual").
+    const fonte = anterior && anterior.meses && anterior.dre ? anterior : null;
+    // A COMPARAÇÃO (a coluna do fim): quem chamar diz qual é (o ano anterior de verdade, mesmo quando a base
+    // é outra coisa); sem dizer nada, é a própria fonte. Dizendo null, a coluna some.
+    const comparar = opcoes && Object.prototype.hasOwnProperty.call(opcoes, 'comparar') ? (opcoes.comparar || null) : (fonte || null);
     const meses = [];
     for (let n = 1; n <= 12; n++) {
-      const iA = indiceDoMes(atual, n), iB = indiceDoMes(anterior, n);
-      const kA = iA >= 0 && atual.meses[iA].tem ? iA : -1, kB = iB >= 0 && anterior.meses[iB].tem ? iB : -1;
-      meses.push({ mes: n, comp: ano + '-' + String(n).padStart(2, '0') + '-01', rotulo: rotuloDoMes(ano, n), rotuloAnterior: rotuloDoMes(ano - 1, n), kA, kB,
+      const iA = indiceDoMes(atual, n), iB = fonte ? indiceDoMes(fonte, n) : -1;
+      const kA = iA >= 0 && atual.meses[iA].tem ? iA : -1, kB = iB >= 0 && fonte.meses[iB].tem ? iB : -1;
+      meses.push({ mes: n, comp: ano + '-' + String(n).padStart(2, '0') + '-01', rotulo: rotuloDoMes(ano, n),
+        rotuloAnterior: kB >= 0 ? (fonte.meses[kB].rotulo || rotuloDoMes(fonte.ano, n)) : fonte ? rotuloDoMes(fonte.ano, n) : '', kA, kB,
         origem: kA >= 0 ? 'real' : kB >= 0 ? 'simulado' : 'vazio' });
     }
     const de = (origem) => meses.filter((m) => m.origem === origem);
@@ -1520,8 +1532,8 @@
     const ultimoReal = reais.length ? reais[reais.length - 1].mes : 0;
     const vazia = () => meses.map((m) => (m.origem === 'vazio' ? null : 0));
 
-    // Contas analíticas: o valor real, o do ano anterior com o percentual ou nada; os grupos somam as contas deles.
-    const juntas = mesclar(atual.dre.mensal.linhas.filter(semAcumulado), anterior.dre.mensal.linhas.filter(semAcumulado), (l) => l.id);
+    // Contas analíticas: o valor real, o da fonte com o percentual ou nada; os grupos somam as contas deles.
+    const juntas = mesclar(atual.dre.mensal.linhas.filter(semAcumulado), fonte ? fonte.dre.mensal.linhas.filter(semAcumulado) : [], (l) => l.id);
     const contas = new Map(); // id da conta -> 12 valores
     const doGrupo = new Map();
     juntas.forEach(({ a, b }) => {
@@ -1569,8 +1581,9 @@
     // As colunas do fim: realizado e simulado (sem os ajustes), os ajustes, o ano e o ano anterior (os meses dele).
     const posicoes = (lista) => lista.map((m) => m.mes - 1);
     const iReais = posicoes(reais), iSimulados = posicoes(simulados), iAno = posicoes(reais.concat(simulados));
-    const kAnt = anterior.meses.map((m, j) => (m.tem ? j : -1)).filter((j) => j >= 0);
-    const rlAnterior = (anterior.dre.mensal.linhas.find((l) => l.id === 'receitaLiquida') || {}).valores;
+    const kAnt = comparar ? comparar.meses.map((m, j) => (m.tem ? j : -1)).filter((j) => j >= 0) : [];
+    const linhasComparar = comparar ? new Map(comparar.dre.mensal.linhas.filter(semAcumulado).map((l) => [l.id, l])) : null;
+    const rlAnterior = comparar ? (comparar.dre.mensal.linhas.find((l) => l.id === 'receitaLiquida') || {}).valores : null;
     const rlAno = somaNos(com.get('receitaLiquida'), iAno), rlAnt = somaNos(rlAnterior, kAnt);
     const porGrupo = new Map(); // linha da DRE -> ajustes dela
     usados.forEach((x) => { if (!porGrupo.has(x.a.linha)) porGrupo.set(x.a.linha, []); porGrupo.get(x.a.linha).push(x); });
@@ -1580,7 +1593,9 @@
       const semAj = analitica ? contas.get(base.id) : sem.get(base.id);
       const vs = analitica ? semAj : com.get(base.id);
       const noAno = somaNos(vs, iAno);
-      const noAnterior = b ? somaNos(b.valores, kAnt) : kAnt.length ? 0 : null;
+      // A coluna de comparação sai do ano comparado (que pode não ser a fonte dos meses simulados).
+      const lc = linhasComparar ? linhasComparar.get(base.id) : null;
+      const noAnterior = lc ? somaNos(lc.valores, kAnt) : kAnt.length ? 0 : null;
       return Object.assign({ id: base.id, tipo: base.tipo, grupo: base.grupo, conta: base.conta, rotulo: base.rotulo, categoria: base.categoria, destaque: !!base.destaque,
         semLinha: !!base.semLinha, soNoAnterior: !a, soNoAtual: !b, valores: vs, realizado: somaNos(semAj, iReais), simulado: somaNos(semAj, iSimulados),
         ajustes: usados.length ? (noAno || 0) - (somaNos(semAj, iAno) || 0) : null, nAjustes: base.tipo === 'grupo' ? (porGrupo.get(base.id) || []).length : 0,
@@ -1605,14 +1620,18 @@
     // Conferência: nos meses reais, cada linha é a da DRE mensal do ano (fora os ajustes); nos simulados, a receita
     // líquida é a do ano anterior com o percentual (a diferença, se houver, é o arredondamento de cada conta no centavo).
     const reaisConferem = juntas.every(({ a }) => !a || reais.every((m) => ((a.tipo === 'analitica' ? contas.get(a.id) : sem.get(a.id))[m.mes - 1] || 0) === (a.valores[m.kA] || 0)));
+    const temNoComparar = (n) => { if (!comparar) return false; const i = indiceDoMes(comparar, n); return i >= 0 && comparar.meses[i].tem; };
     return {
-      percentual, fator, ano, anoAnterior: anterior.ano, meses, linhas,
+      percentual, fator, ano, anoAnterior: comparar ? comparar.ano : null, meses, linhas,
+      // De onde saem os meses simulados e contra quem o ano é comparado (a tela escreve nos títulos).
+      fonte: fonte ? { ano: fonte.ano, rotulo: fonte.rotulo || String(fonte.ano), sintetica: !!fonte.sintetica, tipo: fonte.tipo || 'ano', anos: fonte.anos || [fonte.ano] } : null,
+      comparacao: comparar ? { ano: comparar.ano, rotulo: comparar.rotulo || String(comparar.ano), sintetica: !!comparar.sintetica } : null,
       reais: reais.map((m) => m.mes), simulados: simulados.map((m) => m.mes), vazios: vazios.map((m) => m.mes),
       // Mês sem balancete no meio dos reais: entra pela simulação também (a tela avisa).
       lacunas: simulados.filter((m) => m.mes < ultimoReal).map((m) => m.mes),
-      // Meses reais que o ano anterior não tem: o total dele fica sem esses meses.
-      faltamNoAnterior: reais.filter((m) => m.kB < 0).map((m) => m.mes),
-      mesesAnterior: kAnt.map((j) => anterior.meses[j].mes),
+      // Meses reais que o ano comparado não tem: o total dele fica sem esses meses.
+      faltamNoAnterior: reais.filter((m) => !temNoComparar(m.mes)).map((m) => m.mes),
+      mesesAnterior: kAnt.map((j) => comparar.meses[j].mes),
       // Contas novas no ano (com valor nos meses reais): zeradas nos meses simulados.
       novas: linhas.filter((l) => l.tipo === 'analitica' && l.soNoAtual && l.realizado).map((l) => ({ conta: l.conta, rotulo: l.rotulo })),
       // Os ajustes que entraram (com o efeito no lucro: + crédito, − débito) e os que não entraram (e por quê).
@@ -1620,8 +1639,65 @@
       ajustesFora: lidos.filter((x) => x.motivo).map((x) => ({ ajuste: x.a, motivo: x.motivo })),
       efeitoAjustes: usados.reduce((s, x) => s + x.efeito, 0),
       acumulado: { semJaneiro: acumulado.semJaneiro, paraEm: acumulado.paraEm === null ? null : meses[acumulado.paraEm].rotulo },
-      conferencia: { reais: reaisConferem, receitaBase: somaNos(rlAnterior, simulados.map((m) => m.kB)), receitaSimulada: somaNos(sem.get('receitaLiquida'), iSimulados) },
+      conferencia: { reais: reaisConferem,
+        receitaBase: fonte ? somaNos((fonte.dre.mensal.linhas.find((l) => l.id === 'receitaLiquida') || {}).valores, simulados.map((m) => m.kB)) : 0,
+        receitaSimulada: somaNos(sem.get('receitaLiquida'), iSimulados) },
     };
+  }
+
+  // ------------------------------------------------------------------
+  // A FONTE dos meses simulados (Dony, 28/09/2026: "eu queria poder fazer uma simulação para 2027 copiando o
+  // ano de 2025, ou o de 2026, ou a média de 2025 mais 2026, ou 2026 acrescentando o percentual").
+  // Devolve algo com a mesma cara de um relatório (ano, meses, dre.mensal.linhas), que a simulação usa no
+  // lugar do ano anterior:
+  //   'copiar'     — o próprio ano escolhido (é o relatório dele, sem cópia nenhuma);
+  //   'media'      — a média, MÊS A MÊS, dos anos escolhidos (só entra na média o ano que tem aquele mês);
+  //   'mediaDoAno' — os doze meses recebem a MÉDIA dos meses com balancete de um ano só (serve para projetar
+  //                  o resto do ano que está correndo, sem depender de ano anterior nenhum).
+  // ------------------------------------------------------------------
+  function baseDeSimulacao(rels, op) {
+    const lista = (rels || []).filter((r) => r && r.meses && r.dre && r.dre.mensal);
+    if (!lista.length) return null;
+    const opc = op || {};
+    const tipo = opc.tipo || (lista.length > 1 ? 'media' : 'copiar');
+    if (tipo === 'copiar' || (tipo === 'media' && lista.length === 1)) return lista[0];
+    const anos = lista.map((r) => r.ano);
+    const daMedia = tipo === 'mediaDoAno';
+    const rotulo = opc.rotulo || (daMedia ? 'média dos meses de ' + anos[0] : 'média de ' + anos.join(' e '));
+    const curto = opc.rotuloCurto || (daMedia ? 'média/' + String(anos[0]).slice(2) : 'média');
+    const doMes = (r, n) => { const i = indiceDoMes(r, n); return i >= 0 && r.meses[i].tem ? i : -1; };
+    const meses = [];
+    for (let n = 1; n <= 12; n++) {
+      meses.push({ comp: anos[0] + '-' + String(n).padStart(2, '0') + '-01', mes: n, rotulo: curto, trimestre: Math.ceil(n / 3),
+        tem: daMedia ? lista[0].meses.some((m) => m.tem) : lista.some((r) => doMes(r, n) >= 0) });
+    }
+    // As linhas: as do primeiro ano e, depois, as que só existem nos outros (a ordem da DRE se mantém).
+    let linhas = lista[0].dre.mensal.linhas.filter(semAcumulado);
+    for (let i = 1; i < lista.length; i++) {
+      linhas = mesclar(linhas, lista[i].dre.mensal.linhas.filter(semAcumulado), (l) => l.id).map((x) => x.a || x.b);
+    }
+    const porAno = lista.map((r) => new Map(r.dre.mensal.linhas.filter(semAcumulado).map((l) => [l.id, l])));
+    const linhasBase = linhas.map((l) => {
+      const valores = meses.map((m) => {
+        if (!m.tem) return null;
+        const vs = [];
+        lista.forEach((r, i) => {
+          const dela = porAno[i].get(l.id);
+          if (!dela) return;
+          if (daMedia) {
+            const comValor = r.meses.map((x, j) => (x.tem ? dela.valores[j] || 0 : null)).filter((v) => v !== null);
+            if (comValor.length) vs.push(comValor.reduce((s, v) => s + v, 0) / comValor.length);
+          } else {
+            const j = doMes(r, m.mes);
+            if (j >= 0) vs.push(dela.valores[j] || 0);
+          }
+        });
+        return vs.length ? Math.round(vs.reduce((s, v) => s + v, 0) / vs.length) : 0;
+      });
+      return Object.assign({}, l, { valores });
+    });
+    return { ano: anos[0], anos, tipo, rotulo, rotuloCurto: curto, sintetica: true, meses,
+      dre: { mensal: { linhas: linhasBase }, situacao: lista[0].dre.situacao, rotulos: lista[0].dre.rotulos } };
   }
 
   // ------------------------------------------------------------------
@@ -1967,6 +2043,6 @@
     return { mes: m, data: dataDoFim(rel.ano, m.mes), colunas: colunas.map((c) => c.rotulo), periodo, notas };
   }
 
-  return { montar, compararBalancetes, indicadores, comparativo, simulacao, lalurSimulacao, demonstracoes, notasExplicativas, mutacoesPl, mutacoesPlComparada, nomeDaDemonstracao, noMeioDaFrase, INDICADORES, contasDoBalanco, MODELO_DRE, FORA_DA_DRE, PARAMETROS, AJUSTES_MODELO, CONTA_PAT_MODELO, PREMISSAS, rotuloMes, compararContas, valorUsado,
+  return { montar, compararBalancetes, indicadores, comparativo, simulacao, baseDeSimulacao, lalurSimulacao, demonstracoes, notasExplicativas, mutacoesPl, mutacoesPlComparada, nomeDaDemonstracao, noMeioDaFrase, INDICADORES, contasDoBalanco, MODELO_DRE, FORA_DA_DRE, PARAMETROS, AJUSTES_MODELO, CONTA_PAT_MODELO, PREMISSAS, rotuloMes, compararContas, valorUsado,
     LINHAS_DO_MAPA, sugerirMapaDre, mapaDoModelo, reclassificarConta, planoJunto, linhaNoMapa, linhaDoModelo, avaliarModelo, linhasSugeridas, nomeNormal };
 });

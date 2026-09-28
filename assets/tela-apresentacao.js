@@ -159,6 +159,25 @@
 
   function idRegistro(codigo, ano) { return 'F-' + codigo + '-apresentacao-' + ano + '-01'; }
 
+  // Os balancetes de um ano (o mais novo de cada mês), com o nome das contas pelo plano de contas da empresa.
+  async function lerBalancetesDoAno(arm, doTipo, ano, plano) {
+    const lista = [];
+    for (let i = 1; i <= 12; i++) {
+      const comp = ano + '-' + String(i).padStart(2, '0') + '-01';
+      const doMes = doTipo.filter((m) => m.competencia === comp).sort((a, b) => U.paraMs(b.enviadoEm) - U.paraMs(a.enviadoEm));
+      if (!doMes.length) continue;
+      const c = await arm.conteudoDoArquivo(doMes[0].id);
+      if (c && c.contas) lista.push({ competencia: comp, contas: raiz.TelaSubir.comNomesDoPlano(c.contas, plano) });
+    }
+    return lista;
+  }
+  // Os anos de balancete que a tela precisa ler além do escolhido: o anterior (Comparativo) e os da base da simulação.
+  function anosQueAConfigUsa(config, ano) {
+    const b = config && config.simulacao && config.simulacao.base;
+    const extras = b && Array.isArray(b.anos) ? b.anos.map(Number).filter((x) => x > 1900) : [];
+    return [ano - 1].concat(extras);
+  }
+
   // As linhas da DRE guardadas na empresa (valem para todos os anos) e o relatório montado com elas.
   function mapaDaEmpresa() { const m = E.emp && E.emp.mapaDre; return m && m.contas && Object.keys(m.contas).length ? m : null; }
   function montarRel(balancetes, dreModo) {
@@ -200,23 +219,26 @@
       const c = await arm.conteudoDoArquivo(l.arquivos[0].id);
       if (c && c.contas) balancetes.push({ competencia: l.competencia, contas: raiz.TelaSubir.comNomesDoPlano(c.contas, plano) });
     }
-    // Os balancetes do ano anterior, para a aba Comparativo.
-    const balancetesAnt = [];
-    for (let i = 1; i <= 12; i++) {
-      const comp = (anoEscolhido - 1) + '-' + String(i).padStart(2, '0') + '-01';
-      const doMes = doTipo.filter((m) => m.competencia === comp).sort((a, b) => U.paraMs(b.enviadoEm) - U.paraMs(a.enviadoEm));
-      if (!doMes.length) continue;
-      const c = await arm.conteudoDoArquivo(doMes[0].id);
-      if (c && c.contas) balancetesAnt.push({ competencia: comp, contas: raiz.TelaSubir.comNomesDoPlano(c.contas, plano) });
-    }
     const registro = (await arm.conciliacoes(codigo, anoEscolhido + '-01-01')).find((r) => r.id === idRegistro(codigo, anoEscolhido)) || null;
+    const configLida = (registro && registro.config) || {};
+    // Os balancetes de OUTROS ANOS: o anterior (aba Comparativo) e os anos que a base da simulação usar
+    // (Dony, 28/09/2026: "uma simulação para 2027 copiando 2025, ou 2026, ou a média de 2025 mais 2026").
+    const porAno = {};
+    for (const a of anosQueAConfigUsa(configLida, anoEscolhido)) {
+      if (a === anoEscolhido || porAno[a] || anosComBalancete.indexOf(a) < 0) continue;
+      porAno[a] = await lerBalancetesDoAno(arm, doTipo, a, plano);
+    }
+    const balancetesAnt = porAno[anoEscolhido - 1] || [];
     if (conferir && !conferir()) return;
     if (E.codigo !== codigo || E.ano !== anoEscolhido) { E.abertos = new Set(); E.selecao = null; E.dreEdicao = null; }
-    Object.assign(E, { codigo, ano: anoEscolhido, emp, metas, lugares, registro, balancetes, balancetesAnt, relAnt: null, config: (registro && registro.config) || {} });
+    Object.assign(E, { codigo, ano: anoEscolhido, emp, metas, lugares, registro, balancetes, balancetesAnt, relAnt: null,
+      balancetesPorAno: porAno, relsPorAno: {}, plano, doTipo, config: configLida });
     E.rel = montarRel();
     // O ano anterior sempre aparece na escolha (Dony, 21/09/2026: "quero poder jogar os balancetes de 2025 das
     // empresas, para poder fazer comparação"): sem balancete nenhum dele ainda, é por ali que eles sobem.
-    E.anos = Array.from(new Set(anosComBalancete.concat([anoAtual, anoAtual - 1, anoEscolhido]))).sort((a, b) => b - a);
+    // O ano que vem também (Dony, 28/09/2026: "queria poder fazer uma simulação para o ano de 2027"): ele não
+    // tem balancete nenhum, e é tudo simulado a partir da base escolhida.
+    E.anos = Array.from(new Set(anosComBalancete.concat([anoAtual + 1, anoAtual, anoAtual - 1, anoEscolhido]))).sort((a, b) => b - a);
     E.anosComBalancete = anosComBalancete;
     desenhar(el);
   }
@@ -229,7 +251,10 @@
     const carregados = rel.meses.filter((m) => m.tem);
     const periodo = carregados.length ? carregados[0].rotulo.slice(0, 3) + '–' + carregados[carregados.length - 1].rotulo : '';
     const chave = 'apresentacao-' + E.codigo + '-' + E.ano;
-    const semBalancete = !carregados.length;
+    // Ano sem balancete nenhum mas com base para simular (o ano que vem): a tela abre direto na DRE simulação.
+    const projecao = soSimulacao();
+    const semBalancete = !carregados.length && !projecao;
+    if (projecao) E.aba = 'simulacao';
     const painel = raiz.TelaSubir.painel({ chave, titulo: 'Balancetes de ' + E.ano, lugares: E.lugares, metas: E.metas, fixo: semBalancete,
       resumo: carregados.length + ' de 12 meses',
       antes: '<p class="suave pequeno" style="margin:-4px 0 10px">Um balancete por mês (período do dia 1º ao último dia do mês). ' +
@@ -245,14 +270,17 @@
       (E.anos.length > 1 ? '<select class="apres-campo" id="apres-ano" title="Ano do relatório (para subir os balancetes de outro ano, escolha o ano aqui)">' +
         E.anos.map((a) => '<option value="' + a + '"' + (a === E.ano ? ' selected' : '') + '>' + a + (E.anosComBalancete.indexOf(a) < 0 ? ' · sem balancete' : '') + '</option>').join('') + '</select>' : '') +
       raiz.TelaSubir.botao(chave) +
-      (semBalancete ? '' : '<button type="button" class="botao" data-aba-grupo="rel" title="O relatório do cliente, o balanço e a DRE para assinatura, o fluxo de caixa e as notas explicativas">📄 Relatórios</button>' +
+      (semBalancete ? ''
+        : projecao ? '<button type="button" class="botao primario" id="apres-imprimir" title="Na janela de impressão, escolha a impressora ou “Salvar como PDF”">🖨 Imprimir / PDF</button>'
+        : '<button type="button" class="botao" data-aba-grupo="rel" title="O relatório do cliente, o balanço e a DRE para assinatura, o fluxo de caixa e as notas explicativas">📄 Relatórios</button>' +
         '<button type="button" class="botao" id="apres-excel" title="As mesmas abas da planilha modelo">⬇ Excel</button>' +
         '<button type="button" class="botao primario" id="apres-imprimir" title="Na janela de impressão, escolha a impressora ou “Salvar como PDF”">🖨 Imprimir / PDF</button>') +
       '</div></div>' +
       '<div id="apres-painel" class="nao-imprimir">' + painel + '</div>' +
       (semBalancete ? '<div class="cartao corpo nao-imprimir" style="margin-top:14px"><h3>Comece pelos balancetes</h3><p class="suave" style="line-height:1.55;margin:6px 0 0">' +
         'Carregue o balancete de cada mês no lugar dele, aqui em cima. Com eles o programa monta o <b>Resumo</b>, a <b>DRE mensal e trimestral</b>, ' +
-        'o <b>balancete mensal e trimestral</b> (com AV % e AH %) e o <b>LALUR trimestral</b>, no desenho da planilha de apresentação.</p></div>' : conteudo()) +
+        'o <b>balancete mensal e trimestral</b> (com AV % e AH %) e o <b>LALUR trimestral</b>, no desenho da planilha de apresentação.</p></div>'
+        : projecao ? conteudoProjetado() : conteudo()) +
       '</div><div id="apres-impressao" class="apres-impressao"></div>';
     ligar(el.querySelector('.apres-raiz'));
     conferirEstouro(el);
@@ -264,6 +292,18 @@
     if (rel.lalur.ajustesSemConta.length) lista.push(rel.lalur.ajustesSemConta.length + ' conta(s) da lista de ajustes do LALUR não aparecem nos balancetes (' + rel.lalur.ajustesSemConta.slice(0, 3).join(', ') + (rel.lalur.ajustesSemConta.length > 3 ? ', …' : '') + '): confira a lista na aba LALUR.');
     if (!rel.lalur.pat.noBalancete && rel.lalur.contaPAT) lista.push('A conta do PAT (' + rel.lalur.contaPAT + ') não aparece nos balancetes: confira na aba LALUR.');
     return lista.length ? '<div class="aviso ambar nao-imprimir" style="margin-top:12px"><span class="icone-aviso">⚠️</span><div>' + lista.map((a) => T.esc(a)).join('<br>') + '</div></div>' : '';
+  }
+
+  // Ano sem balancete nenhum, mas com base para simular: só a DRE simulação (as outras abas não teriam nada).
+  function soSimulacao() {
+    return !!E.rel && !E.rel.meses.some((m) => m.tem) && !dreFechada() && !!relDaBase();
+  }
+  function conteudoProjetado() {
+    return '<div class="aviso info nao-imprimir" style="margin-top:12px"><span class="icone-aviso">🧮</span><div><b>' + E.ano + ' ainda não tem balancete.</b> ' +
+      'Esta é a <b>DRE simulação</b> do ano inteiro, montada a partir da base escolhida aí embaixo. Conforme os balancetes de ' + E.ano + ' forem carregados, ' +
+      'cada mês passa a entrar com o valor real e o resto continua projetado.</div></div>' +
+      '<div class="apres-opcoes nao-imprimir">' + opcoesDaAba() + '</div>' +
+      '<div class="apres-folha" id="apres-folha">' + secao('simulacao', {}) + '</div>';
   }
 
   function conteudo() {
@@ -338,15 +378,21 @@
         'Variação % sobre ' + (E.ano - 1) + ' (verde melhora, vermelho piora).</span>';
     }
     if (E.aba === 'simulacao') {
-      if (dreFechada() || !E.balancetesAnt.length) return '';
-      return '<span class="sim-campo" title="Os meses sem balancete de ' + E.ano + ' pegam o mesmo mês de ' + (E.ano - 1) + ' com este percentual, em todas as linhas da DRE">' +
-        'Evolução sobre ' + (E.ano - 1) + ' <input type="text" inputmode="decimal" id="sim-percentual" class="apres-campo sim-pct" value="' + T.esc(textoPercentual(percentualSimulacao())) +
-        '" aria-label="Percentual de evolução sobre ' + (E.ano - 1) + '"> %<button type="button" class="botao pequeno primario" data-opcao="sim-aplicar">Aplicar</button></span>' +
+      if (dreFechada()) return '';
+      const atual = valorDaBase(baseSimulacao());
+      const base = '<span class="sim-campo" title="De onde saem os meses de ' + E.ano + ' que não têm balancete">Base ' +
+        '<select id="sim-base" class="apres-campo" aria-label="Base dos meses simulados">' +
+        opcoesDaBase().map((o) => '<option value="' + T.esc(o.valor) + '"' + (o.valor === atual ? ' selected' : '') + '>' + T.esc(o.rotulo) + '</option>').join('') +
+        '</select></span>';
+      return base +
+        '<span class="sim-campo" title="Os meses sem balancete de ' + E.ano + ' pegam a base com este percentual, em todas as linhas da DRE">' +
+        'Evolução <input type="text" inputmode="decimal" id="sim-percentual" class="apres-campo sim-pct" value="' + T.esc(textoPercentual(percentualSimulacao())) +
+        '" aria-label="Percentual de evolução sobre a base"> %<button type="button" class="botao pequeno primario" data-opcao="sim-aplicar">Aplicar</button></span>' +
         '<button type="button" class="botao pequeno sim-ajuste" data-opcao="sim-ajuste" title="Um lançamento (ex.: estoque, custo) numa linha da DRE, num mês">＋ Adicionar ajuste</button>' +
         '<button type="button" class="botao pequeno" data-opcao="abrir-tudo">＋ Abrir todas as contas</button>' +
         '<button type="button" class="botao pequeno" data-opcao="fechar-tudo">－ Fechar todas</button>' +
         '<label class="caixa-opcao"><input type="checkbox" data-opcao="avah"' + (E.avah ? ' checked' : '') + '> AV %</label>' +
-        '<span class="suave pequeno">Mês com balancete de ' + E.ano + ': o valor real. Mês sem balancete: o mesmo mês de ' + (E.ano - 1) + ' com o percentual, em todas as linhas ' +
+        '<span class="suave pequeno">Mês com balancete de ' + E.ano + ': o valor real. Mês sem balancete: a <b>base</b> com o percentual, em todas as linhas ' +
         '(receitas, custos e despesas). Para queda, use o sinal de menos (-5).</span>';
     }
     if (E.aba === 'balanco') {
@@ -867,7 +913,14 @@
 
   function secaoLalurSimulado(s, ant, op) {
     const L = motor().lalurSimulacao(s, E.rel, ant, E.config);
-    if (!L) return '';
+    // O LALUR simulado precisa das CONTAS de um ano só (as de adição, exclusão e do PAT). Com a base na média
+    // de dois anos ele não sai; a DRE simulação continua normal.
+    if (!L) {
+      return s.simulados.length && s.fonte && s.fonte.sintetica
+        ? '<p class="apres-nota suave nao-imprimir">O <b>LALUR simulação</b> não sai com esta base (' + T.esc(s.fonte.rotulo) +
+          '): ele precisa das contas de um ano só. Escolha “Copiar ' + (s.fonte.anos ? s.fonte.anos[s.fonte.anos.length - 1] : E.ano - 1) + '” na base para ter o LALUR simulado junto.</p>'
+        : '';
+    }
     const real = E.rel.lalur;
     const editavel = !(op && op.impressao);
     const cor = (origem) => (origem === 'simulado' ? 'sim' : origem === 'misto' ? 'aj' : '');
@@ -1135,6 +1188,7 @@
       if (ev.target.id === 'rc-cor') { mudarCorCliente(el, ev.target.value); return; }
       if (ev.target.id === 'rc-arquivo-logo') { trocarLogo(el, ev.target.files && ev.target.files[0]); ev.target.value = ''; return; }
       if (ev.target.id === 'sim-percentual') { aplicarPercentual(el, ev.target.value); return; }
+      if (ev.target.id === 'sim-base') { aplicarBase(el, ev.target.value); return; }
       const c = ev.target.closest('input[data-opcao]');
       if (!c) return;
       if (c.getAttribute('data-opcao') === 'marcar-lalur') {
@@ -1446,14 +1500,96 @@
   // ------------------------------------------------------------------
   function percentualSimulacao() { const p = Number(E.config.simulacao && E.config.simulacao.percentual); return isFinite(p) ? p : 0; }
   function ajustesSimulacao() { const a = E.config.simulacao && E.config.simulacao.ajustes; return Array.isArray(a) ? a : []; }
+  // ------------------------------------------------------------------
+  // A BASE da simulação (Dony, 28/09/2026: "não quero ser condicionado a ter 2025; quero poder simular só
+  // 2026, ou 2027 copiando 2025, ou 2026, ou a média de 2025 mais 2026"). Guardada em config.simulacao.base:
+  //   { tipo: 'copiar', anos: [2026] }  · o mesmo mês daquele ano (é o de sempre, com o ano anterior)
+  //   { tipo: 'media',  anos: [2025, 2026] } · a média, mês a mês, dos anos escolhidos
+  //   { tipo: 'esteAno' } · a média dos meses com balancete do próprio ano (projeta o resto do ano)
+  //   { tipo: 'nenhum' }  · não projeta nada: só os meses com balancete, mais os ajustes
+  // ------------------------------------------------------------------
+  function baseSimulacao() {
+    const b = E.config.simulacao && E.config.simulacao.base;
+    const anos = b && Array.isArray(b.anos) ? b.anos.map(Number).filter((x) => x > 1900) : [];
+    if (b && (b.tipo === 'esteAno' || b.tipo === 'nenhum')) return { tipo: b.tipo, anos: [] };
+    if (b && b.tipo === 'media' && anos.length > 1) return { tipo: 'media', anos };
+    if (b && b.tipo === 'copiar' && anos.length) return { tipo: 'copiar', anos: [anos[0]] };
+    return { tipo: 'copiar', anos: [E.ano - 1], padrao: true };   // o de sempre: o ano anterior
+  }
+  const valorDaBase = (b) => (b.tipo === 'esteAno' || b.tipo === 'nenhum' ? b.tipo : b.tipo + ':' + b.anos.join(','));
+  function lerValorDaBase(v) {
+    const s = String(v || '');
+    if (s === 'esteAno' || s === 'nenhum') return { tipo: s, anos: [] };
+    const [tipo, lista] = s.split(':');
+    const anos = String(lista || '').split(',').map(Number).filter((x) => x > 1900);
+    if (tipo === 'media' && anos.length > 1) return { tipo: 'media', anos };
+    if (tipo === 'copiar' && anos.length) return { tipo: 'copiar', anos: [anos[0]] };
+    return null;
+  }
+  // O relatório de um ano já lido (o da tela, o anterior ou um dos anos da base).
+  function relDoAno(ano) {
+    const n = Number(ano);
+    if (!n) return null;
+    if (n === E.ano) return E.rel;
+    if (n === E.ano - 1) return relAnterior();
+    const bs = (E.balancetesPorAno || {})[n];
+    if (!bs || !bs.length) return null;
+    const m = mapaDaEmpresa();
+    const chave = bs.length + '|' + E.rel.dre.situacao + '|' + (m ? (m.conferidoEm || '') + Object.keys(m.contas).length : '');
+    E.relsPorAno = E.relsPorAno || {};
+    if (!E.relsPorAno[n] || E.relsPorAno[n].chave !== chave) {
+      E.relsPorAno[n] = { chave, rel: motor().montar({ ano: n, balancetes: bs, config: {}, mapaDre: m, dreModo: E.rel.dre.situacao === 'modelo' ? 'modelo' : undefined }) };
+    }
+    return E.relsPorAno[n].rel;
+  }
+  // A fonte dos meses simulados, pronta para o motor (null = não projeta nada).
+  function relDaBase() {
+    const b = baseSimulacao();
+    if (b.tipo === 'nenhum') return null;
+    if (b.tipo === 'esteAno') return E.rel.meses.some((m) => m.tem) ? motor().baseDeSimulacao([E.rel], { tipo: 'mediaDoAno' }) : null;
+    const rels = b.anos.map((a) => relDoAno(a)).filter(Boolean);
+    if (!rels.length) return null;
+    return rels.length === 1 ? rels[0] : motor().baseDeSimulacao(rels, { tipo: 'media' });
+  }
+  // As bases que dá para escolher nesta empresa (as mais recentes primeiro).
+  function opcoesDaBase() {
+    const anos = (E.anosComBalancete || []).filter((a) => a !== E.ano).sort((a, b) => b - a);
+    const lista = anos.map((a) => ({ valor: 'copiar:' + a, rotulo: 'Copiar ' + a + (a === E.ano - 1 ? ' (ano anterior)' : '') }));
+    const tres = anos.slice(0, 3);
+    for (let i = 0; i < tres.length; i++) {
+      for (let j = i + 1; j < tres.length; j++) {
+        const par = [tres[j], tres[i]];
+        lista.push({ valor: 'media:' + par.join(','), rotulo: 'Média de ' + par.join(' e ') });
+      }
+    }
+    if (E.rel.meses.some((m) => m.tem)) lista.push({ valor: 'esteAno', rotulo: 'Média dos meses de ' + E.ano });
+    lista.push({ valor: 'nenhum', rotulo: 'Nenhuma (só os meses com balancete)' });
+    const atual = valorDaBase(baseSimulacao());
+    if (!lista.some((o) => o.valor === atual)) lista.unshift({ valor: atual, rotulo: 'Copiar ' + baseSimulacao().anos.join(' e ') + ' (sem balancete)' });
+    return lista;
+  }
+  // O nome da base para os textos ("2025", "a média de 2025 e 2026", "a média dos meses de 2026").
+  function nomeDaBase(s) {
+    if (!s || !s.fonte) return '';
+    return s.fonte.sintetica ? s.fonte.rotulo : String(s.fonte.ano);
+  }
   // 10 → "10" e 10,5 → "10,5" (no campo); "+10%", "+0%" e "−5%" (nos textos).
   const textoPercentual = (p) => p.toLocaleString('pt-BR', { maximumFractionDigits: 2 });
   const sinalPercentual = (p) => (p < 0 ? '−' : '+') + textoPercentual(Math.abs(p)) + '%';
+  // A simulação só vai para o Excel e para a impressão quando ela muda alguma coisa: tem mês simulado ou ajuste.
+  function temSimulacao() { const s = simulacaoVisivel().s; return !!(s.simulados.length || s.ajustes.length); }
   function simulacaoVisivel() {
-    const ant = relAnterior();
-    return ant ? { ant, s: motor().simulacao(E.rel, ant, { percentual: percentualSimulacao(), ajustes: ajustesSimulacao() }) } : null;
+    const ant = relDaBase();
+    const comparar = relDoAno(E.ano - 1) || ant || null;
+    return { ant, comparar, s: motor().simulacao(E.rel, ant, { percentual: percentualSimulacao(), ajustes: ajustesSimulacao(), comparar }) };
   }
-  // Os meses (1 a 12) com o ano: "Ago–Dez/26", "Mar/26", "Mar, Ago/26" (doAnterior: com o ano anterior).
+  // Os meses (1 a 12) escritos com o ano de outro relatório: "Jan–Dez/25" (a coluna de comparação).
+  function periodoNoAno(ns, ano) {
+    if (!ns.length || !ano) return '';
+    const r = rotuloSelecao(ns.map((n) => ({ mes: n, rotulo: motor().rotuloMes(ano + '-' + String(n).padStart(2, '0') + '-01') })));
+    return /\/\d{2}$|meses$/.test(r) ? r : r + '/' + String(ano).slice(2);
+  }
+  // Os meses (1 a 12) com o ano: "Ago–Dez/26", "Mar/26", "Mar, Ago/26" (doAnterior: com o rótulo da base).
   function periodoDosMeses(s, ns, doAnterior) {
     if (!ns.length) return '';
     const r = rotuloSelecao(ns.map((n) => ({ mes: n, rotulo: doAnterior ? s.meses[n - 1].rotuloAnterior : s.meses[n - 1].rotulo })));
@@ -1475,37 +1611,47 @@
     (a.descricao ? ' · ' + a.descricao : '');
   // Os avisos da simulação (texto simples: vão para a tela, a impressão e o Excel).
   function avisosSimulacao(s, ant) {
-    const anoAnt = E.ano - 1;
+    const anoAnt = nomeDaBase(s) || 'a base';
+    const rotComp = s.comparacao ? (s.comparacao.sintetica ? s.comparacao.rotulo : String(s.comparacao.ano)) : '';
     const plural = (ns, um, varios) => (ns.length > 1 ? varios : um);
     const lista = [];
-    if (!s.simulados.length) lista.push(E.ano + ' já tem balancete de todos os meses que ' + anoAnt + ' tem: não há mês para simular (a tabela é a DRE real' + (s.ajustes.length ? ', com os ajustes' : '') + ').');
+    if (!s.fonte) lista.push('Sem base escolhida: só entram os meses de ' + E.ano + ' que têm balancete' + (s.ajustes.length ? ', mais os ajustes' : '') +
+      '. Para projetar os outros meses, escolha a base lá em cima.');
+    else if (!s.simulados.length) lista.push(E.ano + ' já tem balancete de todos os meses que ' + anoAnt + ' tem: não há mês para simular (a tabela é a DRE real' + (s.ajustes.length ? ', com os ajustes' : '') + ').');
     if (s.lacunas.length) {
       lista.push(periodoDosMeses(s, s.lacunas) + plural(s.lacunas, ' não tem balancete e fica', ' não têm balancete e ficam') + ' entre meses reais: entr' + plural(s.lacunas, 'ou', 'aram') +
-        ' pela simulação (o mesmo mês de ' + anoAnt + ' ' + sinalPercentual(s.percentual) + '). Carregue o balancete para usar o valor real.');
+        ' pela simulação (' + anoAnt + ' ' + sinalPercentual(s.percentual) + '). Carregue o balancete para usar o valor real.');
     }
     if (s.vazios.length) {
       lista.push(periodoDosMeses(s, s.vazios) + plural(s.vazios, ' fica vazio', ' ficam vazios') + ': não há balancete ' + plural(s.vazios, 'desse mês', 'desses meses') +
-        ' nem em ' + E.ano + ' nem em ' + anoAnt + '.');
+        ' nem em ' + E.ano + ' nem na base (' + anoAnt + ').');
     }
     if (s.faltamNoAnterior.length) {
-      lista.push(anoAnt + ' não tem balancete de ' + periodoDosMeses(s, s.faltamNoAnterior, true) + ': o total de ' + anoAnt + ' fica sem ' + plural(s.faltamNoAnterior, 'esse mês', 'esses meses') +
+      lista.push(rotComp + ' não tem balancete de ' + periodoNoAno(s.faltamNoAnterior, s.comparacao && s.comparacao.ano) + ': o total de ' + rotComp + ' fica sem ' + plural(s.faltamNoAnterior, 'esse mês', 'esses meses') +
         ', e a variação compara períodos diferentes.');
     }
     if (s.simulados.length && s.novas.length) {
       lista.push(s.novas.length + plural(s.novas, ' conta nova', ' contas novas') + ' em ' + E.ano + ' (' + s.novas.slice(0, 3).map((n) => n.conta + ' ' + n.rotulo).join('; ') +
-        (s.novas.length > 3 ? '; …' : '') + ')' + plural(s.novas, ' não tem', ' não têm') + ' valor em ' + anoAnt + ':' + plural(s.novas, ' fica zerada', ' ficam zeradas') + ' nos meses simulados.');
+        (s.novas.length > 3 ? '; …' : '') + ')' + plural(s.novas, ' não tem', ' não têm') + ' valor na base (' + anoAnt + '):' + plural(s.novas, ' fica zerada', ' ficam zeradas') + ' nos meses simulados.');
     }
     s.ajustesFora.forEach((f) => lista.push('O ajuste "' + (f.ajuste.descricao || 'Ajuste') + '" (' + nomeDaLinhaDre(f.ajuste.linha) + ') não entrou na simulação: ' + f.motivo + '.'));
-    if (ant.dre.naoMapeadas.length) lista.push(ant.dre.naoMapeadas.length + ' conta(s) de ' + anoAnt + ' sem linha na DRE entraram em "Outras contas de resultado": arraste cada uma pelos pontinhos até a linha certa.');
+    if (ant && ant.dre.naoMapeadas && ant.dre.naoMapeadas.length) lista.push(ant.dre.naoMapeadas.length + ' conta(s) da base (' + anoAnt + ') sem linha na DRE entraram em "Outras contas de resultado": arraste cada uma pelos pontinhos até a linha certa.');
     if (!s.conferencia.reais) lista.push('Os meses reais não conferem com a DRE mensal: não use esta simulação.');
     return lista;
   }
 
   function secaoSimulacao(op) {
     const x = simulacaoVisivel();
-    const anoAnt = E.ano - 1;
-    if (!x) return tituloSecao('DRE simulação', '') + avisoSemAnoAnterior('simular');
     const { s, ant } = x;
+    // O nome da BASE (de onde saem os meses simulados) e o do ano comparado na coluna do fim.
+    const anoAnt = nomeDaBase(s) || 'a base';
+    const rotComp = s.comparacao ? (s.comparacao.sintetica ? s.comparacao.rotulo : String(s.comparacao.ano)) : '';
+    if (!s.reais.length && !s.simulados.length) {
+      return tituloSecao('DRE simulação', '') + '<div class="aviso ambar"><span class="icone-aviso">🧮</span><div>' +
+        '<b>Não há de onde simular ' + E.ano + '.</b> Escolha a <b>base</b> lá em cima (copiar um ano, a média de dois anos ou a média dos meses deste ano) ' +
+        'ou carregue os balancetes. Com a base escolhida, os meses sem balancete saem dela com o percentual de evolução, e você pode somar ajustes linha por linha.' +
+        '</div></div>';
+    }
     const avah = E.avah;
     const abrirTudo = !!(op && op.abrirTudo);
     const comSimulado = s.simulados.length > 0, temAjustes = s.ajustes.length > 0, partes = comSimulado || temAjustes;
@@ -1517,7 +1663,7 @@
       const l = linha(id);
       const v = l.varP === null || !Math.round(l.varP * 1000) ? '' : ' · ' + variacaoCor(l.varP, (l.varP > 0 ? '▲ ' : '▼ ') + pct(Math.abs(l.varP)));
       return '<div class="apres-ficha sim-ficha"><span>' + T.esc(l.rotulo) + ' · ' + E.ano + (partes ? ' simulado' : '') + '</span><b>' + dinheiro(l.ano) + '</b>' +
-        '<small>' + anoAnt + ': ' + dinheiro(l.anterior) + v + '</small>' + (id !== 'receitaLiquida' && l.avAno !== null ? '<small>' + pct(l.avAno) + ' da receita líquida</small>' : '') + '</div>';
+        '<small>' + (rotComp || '—') + ': ' + dinheiro(l.anterior) + v + '</small>' + (id !== 'receitaLiquida' && l.avAno !== null ? '<small>' + pct(l.avAno) + ' da receita líquida</small>' : '') + '</div>';
     }).join('');
     // Os ajustes: a lista (com mudar e tirar) antes da DRE.
     const listaAjustes = temAjustes
@@ -1538,7 +1684,7 @@
       (comSimulado ? '<th class="num per sim">Simulado<small>' + T.esc(per(s.simulados)) + '</small></th>' : '') +
       (temAjustes ? '<th class="num per aj">Ajustes<small>' + s.ajustes.length + ' lançamento' + (s.ajustes.length > 1 ? 's' : '') + '</small></th>' : '') +
       '<th class="num per acum">' + E.ano + '<small>' + ['real'].concat(comSimulado ? ['simulado'] : [], temAjustes ? ['ajustes'] : []).join(' + ') + '</small></th>' + (avah ? '<th class="num pct acum">AV %</th>' : '') +
-      '<th class="num per tri">' + anoAnt + '<small>' + T.esc(per(s.mesesAnterior, true) || 'sem balancete') + '</small></th>' + (avah ? '<th class="num pct tri">AV %</th>' : '') +
+      '<th class="num per tri">' + (rotComp || '—') + '<small>' + T.esc(rotComp ? (periodoNoAno(s.mesesAnterior, s.comparacao.ano) || 'sem balancete') : 'sem comparação') + '</small></th>' + (avah ? '<th class="num pct tri">AV %</th>' : '') +
       '<th class="num per acum">Variação R$</th><th class="num pct acum">Variação %</th></tr></thead>';
     const nCols = 1 + idx.length + (partes ? 1 : 0) + (comSimulado ? 1 : 0) + (temAjustes ? 1 : 0) + 4 + (avah ? 2 : 0);
     const celulas = (l) => idx.map((i) => '<td class="num' + (s.meses[i].origem === 'simulado' ? ' sim' : '') + '">' + dinheiro(l.valores[i]) + '</td>').join('') +
@@ -1559,7 +1705,8 @@
       const aberto = abrirTudo || E.abertos.has(l.grupo || l.id);
       if (l.tipo === 'analitica') {
         if (!aberto || (E.semZeradas && zerada(l))) return faixa;
-        const so = l.soNoAnterior ? ' <small class="suave">(só em ' + anoAnt + ')</small>' : l.soNoAtual ? ' <small class="suave">(nova em ' + E.ano + ')</small>' : '';
+        const so = l.soNoAnterior && s.reais.length ? ' <small class="suave">(só em ' + anoAnt + ')</small>'
+          : l.soNoAtual && s.simulados.length ? ' <small class="suave">(nova em ' + E.ano + ')</small>' : '';
         return faixa + '<tr class="' + classeDaConta(l) + '" data-de="' + T.esc(l.grupo) + '"' + atributosArrastar(l, op) + '><td class="fixa">' + alcaArrastar(l, op) + '<span class="cod">' + T.esc(l.conta) + '</span> ' + T.esc(l.rotulo) + so + '</td>' + celulas(l) + '</tr>';
       }
       if (l.tipo === 'ajuste') {
@@ -1583,9 +1730,9 @@
           (temAjustes ? ', antes dos ajustes' : '') + ' (cada conta é arredondada no centavo e os subtotais são a soma delas).' : '') +
         (temAjustes ? ' ' + E.ano + ' = realizado' + (comSimulado ? ' + simulado' : '') + ' + ajustes.' : '') + '</p>'
       : '';
-    const notaAcumulado = s.acumulado.semJaneiro ? '<p class="apres-nota suave">O lucro acumulado no ano soma desde janeiro: sem janeiro (nem em ' + E.ano + ' nem em ' + anoAnt + '), a última linha fica vazia.</p>'
+    const notaAcumulado = s.acumulado.semJaneiro ? '<p class="apres-nota suave">O lucro acumulado no ano soma desde janeiro: sem janeiro (nem em ' + E.ano + ' nem na base), a última linha fica vazia.</p>'
       : s.acumulado.paraEm ? '<p class="apres-nota suave">O lucro acumulado no ano fica vazio a partir de ' + T.esc(s.acumulado.paraEm) + ', que não tem balancete em nenhum dos dois anos.</p>' : '';
-    const sub = E.ano + ' · real: ' + T.esc(per(s.reais) || '—') + (comSimulado ? ' · simulado: ' + T.esc(per(s.simulados)) + ' = o mesmo mês de ' + anoAnt + ' ' + sinalPercentual(s.percentual) + ' em todas as linhas' : '') +
+    const sub = E.ano + ' · real: ' + T.esc(per(s.reais) || '—') + (comSimulado ? ' · simulado: ' + T.esc(per(s.simulados)) + ' = ' + anoAnt + ' ' + sinalPercentual(s.percentual) + ' em todas as linhas' : '') +
       (temAjustes ? ' · ' + s.ajustes.length + ' ajuste' + (s.ajustes.length > 1 ? 's' : '') : '') + ' · ' + valoresEm() + ' · receitas positivas, custos e despesas entre parênteses' + semZeradasTexto();
     return tituloSecao('DRE simulação', sub) +
       (avisos.length ? '<div class="aviso ambar" style="margin:0 0 10px"><span class="icone-aviso">⚠️</span><div>' + avisos.map((a) => T.esc(a)).join('<br>') + '</div></div>' : '') +
@@ -1615,6 +1762,31 @@
       .then(() => guardarConfig(config, 'apresentacao-simulacao', texto2))
       .then(() => T.avisoRapido(texto2 + ' · guardado.', 'ok', 2500))
       .catch((e) => { T.avisoRapido('Não foi possível guardar o percentual: ' + T.mensagemDeErro(e), 'erro'); app().mostrarRota(); });
+  }
+
+  // Trocar a BASE da simulação: guarda a escolha e, se for preciso, lê os balancetes daquele ano.
+  async function aplicarBase(el, valor) {
+    const nova = lerValorDaBase(valor);
+    if (!nova) return;
+    const antes = valorDaBase(baseSimulacao());
+    if (valorDaBase(nova) === antes) return;
+    // Os anos da base que ainda não foram lidos entram agora.
+    const faltam = nova.anos.filter((a) => a !== E.ano && a !== E.ano - 1 && !(E.balancetesPorAno || {})[a] && (E.anosComBalancete || []).indexOf(a) >= 0);
+    if (faltam.length) {
+      T.avisoRapido('Lendo os balancetes de ' + faltam.join(', ') + '…', null, 3000);
+      try {
+        for (const a of faltam) E.balancetesPorAno[a] = await lerBalancetesDoAno(app().armazenamento, E.doTipo, a, E.plano);
+      } catch (e) { T.avisoRapido('Não consegui ler os balancetes: ' + T.mensagemDeErro(e), 'erro'); return; }
+    }
+    E.config = Object.assign({}, E.config, { simulacao: Object.assign({}, E.config.simulacao || {}, { base: { tipo: nova.tipo, anos: nova.anos } }) });
+    redesenharFolha(el);
+    const config = E.config;
+    const rot = (opcoesDaBase().find((o) => o.valor === valorDaBase(nova)) || {}).rotulo || valorDaBase(nova);
+    const texto2 = 'Simulação de ' + E.ano + ': base ' + rot.toLowerCase();
+    E.fila = (E.fila || Promise.resolve())
+      .then(() => guardarConfig(config, 'apresentacao-simulacao', texto2))
+      .then(() => T.avisoRapido(texto2 + ' · guardado.', 'ok', 2500))
+      .catch((e) => { T.avisoRapido('Não foi possível guardar a base: ' + T.mensagemDeErro(e), 'erro'); app().mostrarRota(); });
   }
 
   // ＋ Adicionar ajuste e ✎ Mudar: o mês, a linha da DRE, débito ou crédito, o valor (sem sinal) e a descrição.
@@ -2292,7 +2464,7 @@
       corpo: '<p class="suave pequeno" style="margin:0 0 8px">Escolha as partes. Cada uma começa numa folha nova, deitada. O balancete sai até o nível e com as opções que estão na tela.' +
         (dreFechada() ? ' <b>A DRE e os indicadores ficam de fora até as linhas da DRE desta empresa serem conferidas.</b>' : '') + '</p>' +
         ABAS.filter((a) => GRUPO_RELATORIOS.indexOf(a.id) < 0 && !(dreFechada() && (/^dre-/.test(a.id) || a.id === 'indicadores' || a.id === 'comparativo' || a.id === 'simulacao')) &&
-          !((a.id === 'comparativo' || a.id === 'simulacao') && !E.balancetesAnt.length))
+          !(a.id === 'comparativo' && !E.balancetesAnt.length) && !(a.id === 'simulacao' && !temSimulacao()) && !(soSimulacao() && a.id !== 'simulacao'))
           // A simulação (uma projeção) só vai para o papel quando quem imprime marca.
           .map((a) => '<label class="item-aba"><input type="checkbox" value="' + a.id + '"' + (/^balancete/.test(a.id) || a.id === 'simulacao' ? '' : ' checked') + '> ' + a.titulo + '</label>').join('') +
         '<label class="item-aba" style="margin-top:8px"><input type="checkbox" id="apres-imp-abrir" checked> DRE com todas as contas analíticas abertas</label>',
@@ -2542,7 +2714,8 @@
   function folhaSimulacao() {
     const { s, ant } = simulacaoVisivel();
     const avah = E.avah;
-    const anoAnt = E.ano - 1;
+    const anoAnt = nomeDaBase(s) || 'a base';
+    const rotComp = s.comparacao ? (s.comparacao.sintetica ? s.comparacao.rotulo : String(s.comparacao.ano)) : '';
     const comSimulado = s.simulados.length > 0, temAjustes = s.ajustes.length > 0, partes = comSimulado || temAjustes;
     const per = (ns, doAnt) => periodoDosMeses(s, ns, doAnt);
     const larg = larguraValor([].concat(...s.linhas.map((l) => [l.valores, [l.realizado, l.simulado, l.ajustes, l.ano, l.anterior, l.varR]])), 15);
@@ -2550,7 +2723,7 @@
     const idx = mesesNaTabela(s);
     const f = novaFolha('DRE simulação', [52, 18].concat(idx.map(() => larg), partes ? [larg] : [], comSimulado ? [larg] : [], temAjustes ? [larg] : [], [larg], avah ? [9] : [], [larg],
       avah ? [9] : [], [larg, lpct]), { resumoAcima: true });
-    f.titulo('DRE simulação', E.ano + ' · real: ' + (per(s.reais) || '—') + (comSimulado ? ' · simulado: ' + per(s.simulados) + ' = o mesmo mês de ' + anoAnt + ' ' + sinalPercentual(s.percentual) +
+    f.titulo('DRE simulação', E.ano + ' · real: ' + (per(s.reais) || '—') + (comSimulado ? ' · simulado: ' + per(s.simulados) + ' = ' + anoAnt + ' ' + sinalPercentual(s.percentual) +
       ' em todas as linhas (cada conta arredondada no centavo; os subtotais são a soma delas)' : '') + (temAjustes ? ' · ' + s.ajustes.length + ' ajuste(s), na coluna Ajustes e embaixo da linha da DRE de cada um' : '') +
       ' · receitas positivas, custos e despesas entre parênteses' + semZeradasTexto());
     avisosSimulacao(s, ant).forEach((a) => f.add([{ v: a, e: 'subtitulo' }]));
@@ -2559,7 +2732,7 @@
         partes ? [{ v: 'Realizado\n' + (per(s.reais) || '—'), e: 'cabTri' }] : [], comSimulado ? [{ v: 'Simulado\n' + per(s.simulados), e: 'cabSim' }] : [],
         temAjustes ? [{ v: 'Ajustes\n' + s.ajustes.length + ' lançamento(s)', e: 'cabTri' }] : [],
         [{ v: E.ano + '\n' + ['real'].concat(comSimulado ? ['simulado'] : [], temAjustes ? ['ajustes'] : []).join(' + '), e: 'cabAcum' }], avah ? [{ v: 'AV %', e: 'cabAcum' }] : [],
-        [{ v: anoAnt + '\n' + (per(s.mesesAnterior, true) || 'sem balancete'), e: 'cabTri' }], avah ? [{ v: 'AV %', e: 'cabTri' }] : [],
+        [{ v: (rotComp || '—') + '\n' + (rotComp ? (periodoNoAno(s.mesesAnterior, s.comparacao.ano) || 'sem balancete') : 'sem comparação'), e: 'cabTri' }], avah ? [{ v: 'AV %', e: 'cabTri' }] : [],
         [{ v: 'Variação R$', e: 'cabAcum' }, { v: 'Variação %', e: 'cabAcum' }]);
     const r1 = f.add(cab, { altura: temAjustes ? 44 : 32 }); // com ajuste, o cabeçalho do mês e do ano pode ter 3 linhas
     const valores = (t, l) => idx.map((i) => ({ v: R(l.valores[i]), e: t + '.val' + (s.meses[i].origem === 'simulado' ? '.sim' : '') }))
@@ -2590,7 +2763,7 @@
     });
     if (s.acumulado.semJaneiro || s.acumulado.paraEm) {
       f.vazia();
-      f.add([{ v: s.acumulado.semJaneiro ? 'O lucro acumulado no ano soma desde janeiro: sem janeiro (nem em ' + E.ano + ' nem em ' + anoAnt + '), a última linha fica vazia.'
+      f.add([{ v: s.acumulado.semJaneiro ? 'O lucro acumulado no ano soma desde janeiro: sem janeiro (nem em ' + E.ano + ' nem na base), a última linha fica vazia.'
         : 'O lucro acumulado no ano fica vazio a partir de ' + s.acumulado.paraEm + ', que não tem balancete em nenhum dos dois anos.', e: 'subtitulo' }]);
     }
     // A lista dos ajustes (a linha da DRE e a descrição; o mês; débito ou crédito; o efeito no lucro).
@@ -2797,7 +2970,7 @@
         ' · clique no + à esquerda para abrir as contas de um subtotal' + semZeradasTexto(), dreMensalVisivel(), ficamNaDre('mensal')), fechada],
       ['dre-trimestral', () => folhaDre('DRE trimestral', 'DRE CPC 51 trimestral detalhada', E.ano + ' · ' + valoresEm() + ' · AV % sobre a receita líquida · AH % sobre o trimestre anterior · clique no + à esquerda para abrir as contas' + semZeradasTexto(),
         E.rel.dre.trimestral, ficamNaDre('trimestral')), fechada],
-      ['simulacao', () => folhaSimulacao(), fechada || !E.balancetesAnt.length],
+      ['simulacao', () => folhaSimulacao(), fechada || !temSimulacao()],
       ['balancete-mensal', () => folhaBalancete('Balancete mensal', 'Balancete analítico mensal', E.ano + ' · contas 1 e 2: saldo final do mês · 3, 4 e 5: movimento do mês · AV % sobre a conta-mãe' + escolha +
         ' · use os números 1 a 5 no canto esquerdo do Excel para abrir ou fechar os níveis', balanceteMensalVisivel())],
       ['balancete-trimestral', () => folhaBalancete('Balancete trimestral', 'Balancete analítico trimestral', E.ano + ' · contas 1 e 2: saldo no fim do trimestre · 3, 4 e 5: soma dos meses · AV % sobre a conta-mãe', E.rel.trimestral)],
