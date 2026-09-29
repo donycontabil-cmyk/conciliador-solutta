@@ -162,11 +162,13 @@
           const codigos = linhas.slice(r + t.altura).map((l) => { const c = l && lerCodigo(l[m.conta]); return c ? c.codigo : ''; }).filter(Boolean);
           if (codigos.length && new Set(codigos).size < codigos.length * 0.9) {
             // …ou um sistema em que VÁRIAS CONTAS têm a mesma classificação e quem separa é o código
-            // reduzido (Dony, 29/09/2026, a Omega: 265 clientes na mesma classificação). Nesse caso o
-            // reduzido não repete — e o balancete é legítimo.
+            // reduzido (Dony, 29/09/2026, a Omega: 265 clientes na mesma classificação). O que separa os dois
+            // casos: na tabela de vários meses a conta repete E o reduzido repete junto (é a mesma conta em
+            // meses diferentes); aqui o reduzido SEPARA mais contas que a classificação. Basta isso — contar
+            // vazio ou repetido com percentagem era frágil demais.
             const reduzidos = m.reduzido === undefined ? [] : linhas.slice(r + t.altura)
               .map((l) => (l && l[m.reduzido] !== null && l[m.reduzido] !== undefined ? String(l[m.reduzido]).trim() : '')).filter(Boolean);
-            if (reduzidos.length < codigos.length * 0.9 || new Set(reduzidos).size < reduzidos.length * 0.9) continue;
+            if (!reduzidos.length || new Set(reduzidos).size <= new Set(codigos).size) continue;
           }
           return { aba: a, linha: r, altura: t.altura, mapa: m };
         }

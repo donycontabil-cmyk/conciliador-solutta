@@ -154,6 +154,20 @@
         return pelo;
       }
     }
+    // Arquivo que abriu VAZIO: não adianta pedir as colunas de uma tabela que não existe (Dony, 29/09/2026:
+    // a janela das colunas apareceu com a prévia em branco). Diz o que o programa viu, para dar para agir.
+    const cheia = (x) => x !== null && x !== undefined && String(x).trim() !== '';
+    const comDados = (abas || []).reduce((s, a) => s + (a.linhas || []).filter((l) => l && l.filter(cheia).length >= 2).length, 0);
+    if (!comDados) {
+      const desenho = (abas || []).map((a) => '“' + (a.nome || 'sem nome') + '”: ' + (a.linhas || []).length + ' linha(s)').join(' · ');
+      await T.janela({ titulo: 'Não consegui abrir este arquivo',
+        corpo: '<p style="line-height:1.55"><b>' + T.esc(arquivo.name) + '</b> abriu <b>sem nenhuma linha de tabela</b> — por isso não dá nem para perguntar quais são as colunas.<br><br>' +
+          'O que o programa achou dentro dele: ' + T.esc(desenho || 'nada') + '.<br><br>' +
+          'Quase sempre é arquivo salvo pelo sistema contábil com o nome de Excel mas por dentro em outro formato (HTML ou texto). ' +
+          'Abra o arquivo no Excel e salve de novo como <b>.xlsx</b> (ou exporte em <b>.csv</b>) e carregue outra vez. ' +
+          'Se ele abre certo no Excel, me mande pelo menu <b>“Ver o desenho de um arquivo”</b> que eu ensino o programa a ler.</p>' });
+      return false;
+    }
     // 4) Primeira vez na empresa (ou não entendeu): quem usa confere ou indica as colunas.
     const sugestao = pelo && pelo.contas.length ? pelo.mapa : emp.mapaBalancete || null;
     const mapa = await escolherColunasDoBalancete(abas, arquivo.name, sugestao, balanceteBom(pelo));
@@ -208,7 +222,13 @@
     const letra = (i) => { let s = '', k = i + 1; while (k > 0) { const r = (k - 1) % 26; s = String.fromCharCode(65 + r) + s; k = Math.floor((k - 1) / 26); } return s; };
     const estado = { aba: sugestao && abas[sugestao.aba] ? sugestao.aba : 0, colunas: Object.assign({}, (sugestao && sugestao.colunas) || {}) };
     const cheia = (v) => v !== null && v !== undefined && String(v).trim() !== '';
-    const linhasPrevia = () => ((abas[estado.aba] || {}).linhas || []).filter((l) => l && l.filter(cheia).length >= 2).slice(0, 14);
+    // A prévia mostra as linhas de tabela (duas células ou mais). Não havendo nenhuma, mostra o que houver —
+    // prévia em branco não ajuda ninguém a escolher coluna (Dony, 29/09/2026).
+    const linhasPrevia = () => {
+      const todas = (abas[estado.aba] || {}).linhas || [];
+      const deTabela = todas.filter((l) => l && l.filter(cheia).length >= 2);
+      return (deTabela.length ? deTabela : todas.filter((l) => l && l.some(cheia))).slice(0, 14);
+    };
     const nCols = () => Math.min(40, linhasPrevia().reduce((m, l) => Math.max(m, l.length), 0));
     const amostra = (i) => { const v = linhasPrevia().map((l) => l[i]).find(cheia); return v === undefined ? '' : String(v).replace(/\s+/g, ' ').trim().slice(0, 18); };
     const previa = () => {
