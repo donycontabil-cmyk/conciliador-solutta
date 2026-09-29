@@ -260,6 +260,14 @@
     if (E.codigo !== codigo || E.ano !== anoEscolhido) { E.abertos = new Set(); E.selecao = null; E.dreEdicao = null; }
     Object.assign(E, { codigo, ano: anoEscolhido, emp, metas, lugares, registro, balancetes, balancetesAnt, relAnt: null,
       balancetesPorAno: porAno, relsPorAno: {}, plano, doTipo, config: configLida, grupo, membros, consolidado });
+    // O plano de contas guardado serve para estas contas? Um plano lido na coluna errada não renomeia mais
+    // nada (o programa recusa), mas o aviso precisa aparecer: foi ele que encheu a árvore de nome de cliente
+    // (Dony, 29/09/2026, a Omega: "o sistema leu o plano de contas todo errado, que merdada é essa?").
+    E.planoRuim = null;
+    if (plano && balancetes.length && raiz.LerPlano) {
+      const c = raiz.LerPlano.conferir(plano, balancetes[balancetes.length - 1].contas);
+      if (!c.serve) E.planoRuim = c;
+    }
     E.rel = montarRel();
     // O ano anterior sempre aparece na escolha (Dony, 21/09/2026: "quero poder jogar os balancetes de 2025 das
     // empresas, para poder fazer comparação"): sem balancete nenhum dele ainda, é por ali que eles sobem.
@@ -316,6 +324,9 @@
   function avisos() {
     const rel = E.rel;
     const lista = (E.consolidado ? E.consolidado.avisos.slice() : []).concat(rel.avisos);
+    if (E.planoRuim) lista.push('O PLANO DE CONTAS guardado nesta empresa não bate com as contas do balancete (acertou ' +
+      E.planoRuim.pelaConta + ' de ' + E.planoRuim.contas + ' pelo código da conta), então o nome das contas está saindo do próprio balancete. ' +
+      'Ele foi lido com a coluna errada: abra o quadro de arquivos aqui de cima e, no cartão "Plano de contas", clique em "🔄 Ler de novo".');
     if (rel.lalur.ajustesSemConta.length) lista.push(rel.lalur.ajustesSemConta.length + ' conta(s) da lista de ajustes do LALUR não aparecem nos balancetes (' + rel.lalur.ajustesSemConta.slice(0, 3).join(', ') + (rel.lalur.ajustesSemConta.length > 3 ? ', …' : '') + '): confira a lista na aba LALUR.');
     if (!rel.lalur.pat.noBalancete && rel.lalur.contaPAT) lista.push('A conta do PAT (' + rel.lalur.contaPAT + ') não aparece nos balancetes: confira na aba LALUR.');
     return lista.length ? '<div class="aviso ambar nao-imprimir" style="margin-top:12px"><span class="icone-aviso">⚠️</span><div>' + lista.map((a) => T.esc(a)).join('<br>') + '</div></div>' : '';

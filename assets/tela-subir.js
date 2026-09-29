@@ -80,7 +80,7 @@
   function guardarPlano(codigo, r, comp, extra) {
     const p = r.plano;
     const meta = Object.assign({ tipo: 'plano', arquivo: r.nomeArquivo, competencia: comp, contas: p.total,
-      empresaNoArquivo: p.empresa, hashDoConteudo: r.hash }, extra || {});
+      comArvore: p.comArvore, colunas: p.colunas, empresaNoArquivo: p.empresa, hashDoConteudo: r.hash }, extra || {});
     return app().armazenamento.guardarArquivo(codigo, meta, { tipo: 'plano', empresa: p.empresa, contas: p.contas }, r.bytes);
   }
 
@@ -330,7 +330,15 @@
         (m.confere === false ? ' · <span class="falta">não fecha</span>' + (m.diferenca ? ' por ' + T.moeda(Math.abs(m.diferenca)) : '') : '') +
         (m.linhasIgnoradas ? ' · <span class="falta">' + m.linhasIgnoradas + ' linha(s) não entraram</span>' : '');
     }
-    if (m.tipo === 'plano') return (m.contas || 0) + ' contas · o nome vem daqui';
+    // Plano lido na coluna errada: os códigos vêm sem hierarquia (1, 2, 3… em vez de 1.01.05). Um plano
+    // assim não renomeia mais nada — mas precisa aparecer, porque foi ele que encheu a tela de nome de
+    // cliente (Dony, 29/09/2026, a Omega: "o sistema leu o plano de contas todo errado").
+    if (m.tipo === 'plano') {
+      const semArvore = m.comArvore !== undefined && m.comArvore < (m.contas || 0) * 0.6;
+      return (m.contas || 0) + ' contas · ' + (semArvore
+        ? '<span class="falta">os códigos não são classificação (1.01.05): este plano não está sendo usado</span>'
+        : 'o nome vem daqui');
+    }
     return m.tipo === 'razao'
       ? 'conta ' + T.esc(m.conta.codigo + ' ' + (m.conta.nome || '')) + ' · ' + (m.lancamentos || 0) + ' lanç.' + (m.periodo ? ' · ' + T.esc(m.periodo.de + ' a ' + m.periodo.ate) : '')
       : (m.titulos || 0) + ' títulos · ' + T.moeda(m.total || 0);
@@ -362,6 +370,9 @@
       // 28/09/2026: "ele não me dá nenhum comando para ajustar").
       (m.tipo === 'balancete' && (m.confere === false || m.linhasIgnoradas > 0)
         ? '<button type="button" class="botao pequeno" data-colunas-balancete="' + T.esc(m.id) + '" title="Abrir este arquivo de novo e dizer qual coluna é cada coisa">✎ Conferir as colunas</button> ' : '') +
+      // Plano guardado por uma versão antiga do programa: relê o mesmo arquivo do zero, sem o padrão velho.
+      (m.tipo === 'plano'
+        ? '<button type="button" class="botao pequeno" data-reler-plano="' + T.esc(m.id) + '" title="Abrir este mesmo arquivo de novo e achar as colunas do zero">🔄 Ler de novo</button> ' : '') +
       '<button type="button" class="botao pequeno perigo" data-apagar-arquivo="' + T.esc(m.id) + '" title="Excluir esta versão (a cópia vai para _apagados)">🗑 Excluir</button></div>' +
       (antigas.length ? '<details class="versoes-lugar"><summary>' + antigas.length + (antigas.length === 1 ? ' versão anterior guardada' : ' versões anteriores guardadas') + '</summary>' +
         antigas.map((v, k) => {
@@ -509,6 +520,12 @@
         await conferirColunasDeNovo(codigo, l, await metaDoBotao(l, col.getAttribute('data-colunas-balancete')));
         return;
       }
+      const rp = ev.target.closest('[data-reler-plano]');
+      if (rp) {
+        const l = doLugar(rp.closest('[data-lugar]').getAttribute('data-lugar'));
+        await relerPlano(codigo, l, await metaDoBotao(l, rp.getAttribute('data-reler-plano')));
+        return;
+      }
       const ap = ev.target.closest('[data-apagar-arquivo]');
       if (ap) {
         const l = doLugar(ap.closest('[data-lugar]').getAttribute('data-lugar'));
@@ -651,7 +668,8 @@
         r = await raiz.Leitor.lerArquivo(bytes, arquivo.name, {
           pdf: { aoAndar: (feitas, total) => { if (total > 8 && feitas % 25 === 0) T.avisoRapido('Lendo o PDF: página ' + feitas + ' de ' + total + '…', null, 2500); } },
           // Os PADRÕES guardados desta empresa vêm primeiro (Dony, 29/09/2026: "um padrão para cada cliente").
-          desenhos: (app().empresas.find((e) => String(e.codigo) === String(codigo)) || {}).desenhos || null,
+          // O botão "🔄 Ler de novo" é justamente para quando o padrão guardado está furado: ali vai sem ele.
+          desenhos: op && op.semPadrao ? null : ((app().empresas.find((e) => String(e.codigo) === String(codigo)) || {}).desenhos || null),
         });
         r.bytes = bytes;
       } catch (e) { T.avisoRapido('Não consegui ler ' + arquivo.name + ': ' + T.mensagemDeErro(e), 'erro'); return false; }
@@ -921,6 +939,27 @@
     let arquivo;
     try { arquivo = new File([bytes], meta.arquivo || 'balancete', { type: '' }); } catch (e) { arquivo = { name: meta.arquivo || 'balancete' }; }
     await subir(codigo, lugar, arquivo, { forcarColunas: true });
+  }
+
+  // 🔄 LER DE NOVO o plano de contas já guardado, do zero (Dony, 29/09/2026, a Omega: o plano tinha sido
+  // lido com a coluna de sequência no lugar da classificação e a tela ficou cheia de nome de cliente). Pega
+  // o arquivo original guardado e lê ignorando o padrão de colunas da empresa. Entra como versão nova.
+  async function relerPlano(codigo, lugar, meta) {
+    if (!meta || !lugar) return;
+    const arm = app().armazenamento;
+    if (typeof arm.bytesOriginais !== 'function') {
+      T.avisoRapido('Este jeito de guardar não tem o arquivo original: carregue o plano de novo no cartão dele.', 'erro', 6000);
+      return;
+    }
+    let bytes = null;
+    try { bytes = await arm.bytesOriginais(meta.id); } catch (e) { bytes = null; }
+    if (!bytes || !bytes.length) {
+      T.avisoRapido('Não achei o arquivo original de ' + meta.arquivo + ' nesta pasta: carregue o plano de novo.', 'erro', 6000);
+      return;
+    }
+    let arquivo;
+    try { arquivo = new File([bytes], meta.arquivo || 'plano de contas', { type: '' }); } catch (e) { arquivo = { name: meta.arquivo || 'plano de contas' }; }
+    await subir(codigo, lugar, arquivo, { semPadrao: true });
   }
 
   // O lugar do PLANO DE CONTAS: um por empresa, opcional. Serve para empresa cujo sistema imprime o nome da

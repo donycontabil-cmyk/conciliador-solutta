@@ -25,6 +25,11 @@
   const vazio = (v) => texto(v) === '';
   const EH_CODIGO = /^\d+(?:[.\-]\d+)*\.?$/;
   const soDigitos = (c) => String(c || '').replace(/\D+/g, '');
+  // Conta de verdade tem HIERARQUIA (1.01.05.05). Número seco (4908) é sequência ou código reduzido — e os
+  // dois nunca se comparam. Sem essa regra o reduzido 4908 de uma conta casava pelos dígitos com a sequência
+  // 4908 de outra, e o plano trocava o nome de 289 contas por nome de cliente (Dony, 29/09/2026, a Omega:
+  // "o sistema leu o plano de contas todo errado, que merdada é essa?").
+  const temHierarquia = (c) => /[.\-]/.test(String(c === null || c === undefined ? '' : c));
   const ehCodigo = (v) => { const t = texto(v); return !!t && t.length <= 30 && EH_CODIGO.test(t); };
   const temNome = (v) => { const t = texto(v); return t.length >= 3 && /[A-Za-zÀ-ÿ]{3}/.test(t); };
 
@@ -80,17 +85,43 @@
     return null;
   }
 
+  // A coluna tem contas de verdade (com hierarquia) ou é uma sequência (1, 2, 3…)?
+  function colunaComArvore(linhas, i) {
+    let codigos = 0, comPonto = 0;
+    (linhas || []).forEach((l) => {
+      const t = texto(l && l[i]);
+      if (!t || !ehCodigo(t)) return;
+      codigos++;
+      if (temHierarquia(t)) comPonto++;
+    });
+    return codigos >= 5 && comPonto >= codigos * 0.6;
+  }
+
   // Lê o plano. op: { nomeArquivo, aceitar (o lugar do plano manda), colunas (o padrão guardado da empresa:
-  // { conta, titulo } — Dony, 29/09/2026: "precisa ter um padrão para cada cliente") }
+  // { conta, titulo } — Dony, 29/09/2026: "precisa ter um padrão para cada cliente"), semPadrao }
   function ler(abas, op) {
     const opc = op || {};
-    const guardado = opc.colunas && Number.isInteger(opc.colunas.conta) && Number.isInteger(opc.colunas.titulo)
+    const guardado = !opc.semPadrao && opc.colunas && Number.isInteger(opc.colunas.conta) && Number.isInteger(opc.colunas.titulo)
       ? { tipo: 'plano', aba: Number.isInteger(opc.colunas.aba) ? opc.colunas.aba : 0, colunas: { conta: opc.colunas.conta, titulo: opc.colunas.titulo, quantas: 0 } } : null;
-    const rec = (guardado && abas[guardado.aba] ? guardado : null) || reconhecer(abas, opc);
+    let rec = guardado && abas[guardado.aba] ? guardado : null;
+    let doPadrao = '';
+    // O padrão guardado manda — menos quando ele aponta para uma coluna SEM hierarquia (uma sequência) e o
+    // arquivo tem uma com hierarquia. Padrão assim ficou guardado antes de o programa saber escolher, e
+    // prendia a empresa no erro a cada recarga (Dony, 29/09/2026, a Omega).
+    if (rec && !colunaComArvore((abas[rec.aba].linhas || []), rec.colunas.conta)) {
+      const auto = reconhecer(abas, Object.assign({}, opc, { aceitar: true }));
+      if (auto && colunaComArvore((abas[auto.aba].linhas || []), auto.colunas.conta)) {
+        doPadrao = 'O padrão guardado apontava a coluna ' + (rec.colunas.conta + 1) + ', que é uma sequência (números sem hierarquia).' +
+          ' Usei a coluna ' + (auto.colunas.conta + 1) + ', que é a classificação das contas.';
+        rec = auto;
+      }
+    }
+    if (!rec) rec = reconhecer(abas, opc);
     if (!rec) throw new Error('Não achei neste arquivo uma lista de contas (código e nome).');
     const linhas = abas[rec.aba].linhas || [];
     const c = rec.colunas;
     const avisos = [];
+    if (doPadrao) avisos.push(doPadrao);
     // Texto que aparece em muitas linhas sozinho na coluna do nome é cabeçalho de página (o nome da empresa,
     // por exemplo), e não a continuação de um nome.
     const soltas = new Map();
@@ -141,7 +172,12 @@
     if (repetidas) avisos.push(repetidas + ' linha(s) repetiram a classificação de outra: ficou a primeira.');
     if (ambiguas) avisos.push(ambiguas + ' classificação(ões) aparecem com NOMES DIFERENTES (é uma classificação para várias contas): elas não renomeiam conta nenhuma.');
     const empresa = nomeDaEmpresa(linhas, c);
-    return { tipo: 'plano', empresa, contas: limpas, total: limpas.length, avisos, aba: rec.aba,
+    const comArvore = limpas.filter((x) => temHierarquia(x.conta)).length;
+    if (comArvore < limpas.length * 0.6) {
+      avisos.push('ATENÇÃO: os códigos deste plano não têm hierarquia (só ' + comArvore + ' de ' + limpas.length +
+        ' são do tipo 1.01.05). Isso costuma ser a coluna errada — confira antes de usar.');
+    }
+    return { tipo: 'plano', empresa, contas: limpas, total: limpas.length, comArvore, avisos, aba: rec.aba,
       colunas: { conta: c.conta, titulo: c.titulo, aba: rec.aba } };
   }
 
@@ -178,27 +214,54 @@
       if (!cod || !x.titulo) return;
       if ((nomes.get(cod) || new Set()).size > 1) { if (!porCodigo.has('#' + cod)) { porCodigo.set('#' + cod, 1); ambiguos++; } return; }
       if (!porCodigo.has(cod)) porCodigo.set(cod, x.titulo);
+      // Só pelos dígitos vale entre contas do mesmo jeito — a mesma conta com máscaras diferentes
+      // ("1.1.1.002.0001" no balancete, "1.1.10.020.001" no diário). Número seco fica de fora.
       const d = soDigitos(cod);
-      if (d && !porDigitos.has(d)) porDigitos.set(d, x.titulo);
+      if (d && temHierarquia(cod) && !porDigitos.has(d)) porDigitos.set(d, x.titulo);
     });
     const achar = (codigo) => {
       const cod = String(codigo === null || codigo === undefined ? '' : codigo).trim();
       if (!cod) return '';
       if (porCodigo.has('#' + cod)) return '';   // código ambíguo: não renomeia
-      return porCodigo.get(cod) || porDigitos.get(soDigitos(cod)) || '';
+      return porCodigo.get(cod) || (temHierarquia(cod) ? porDigitos.get(soDigitos(cod)) : '') || '';
     };
-    return { achar, quantas: porCodigo.size - ambiguos, ambiguos };
+    const comArvore = Array.from(porCodigo.keys()).filter((c) => c.charAt(0) !== '#' && temHierarquia(c)).length;
+    return { achar, quantas: porCodigo.size - ambiguos, ambiguos, comArvore };
+  }
+
+  // ESTE PLANO SERVE PARA ESTAS CONTAS? Ele tem que reconhecer as contas pelo CÓDIGO DELAS (a classificação).
+  // Plano que só acerta pelo código reduzido está com a coluna errada: foi o que aconteceu na Omega, em que o
+  // plano guardado tinha a coluna de sequência no lugar da classificação e 289 das 382 contas do balancete
+  // ganharam nome de cliente ("3.05 DESPESAS E RECEITAS OPERACIONAIS" virou "3.05 HONDA").
+  function conferir(plano, contas) {
+    const p = plano && typeof plano.achar === 'function' ? plano : paraProcurar(plano);
+    const lista = (contas || []).filter((x) => x && String(x.conta === null || x.conta === undefined ? '' : x.conta).trim());
+    let pelaConta = 0, soPeloReduzido = 0;
+    lista.forEach((x) => {
+      if (p.achar(x.conta)) pelaConta++;
+      else if (p.achar(x.reduzido)) soPeloReduzido++;
+    });
+    // Serve quando reconhece uma parte de verdade das contas PELO CÓDIGO DELAS, e nunca quando acerta mais
+    // pelo reduzido do que pela conta (é o retrato do plano lido na coluna errada).
+    const serve = !lista.length || (pelaConta >= lista.length * 0.25 && pelaConta >= soPeloReduzido);
+    return { serve, pelaConta, soPeloReduzido, contas: lista.length,
+      motivo: serve ? '' : 'Este plano não reconhece as contas do balancete: acertou ' + pelaConta + ' de ' + lista.length +
+        ' pelo código da conta' + (soPeloReduzido ? ' (e ' + soPeloReduzido + ' só pelo código reduzido, que não vale)' : '') +
+        '. Provavelmente ele foi lido com a coluna errada — carregue o plano de novo.' };
   }
 
   // Troca o nome das contas pelo do plano (só quando o plano tem aquela conta). Devolve uma lista nova.
   function comOsNomes(contas, plano) {
     const p = plano && typeof plano.achar === 'function' ? plano : paraProcurar(plano);
     if (!p.quantas) return contas || [];
+    if (!conferir(p, contas).serve) return contas || [];   // plano com a coluna errada não renomeia nada
+    // Plano de classificação só casa com classificação: o código reduzido ("4908") não vai procurar nome.
+    const planoDeArvore = p.comArvore > p.quantas / 2;
     return (contas || []).map((x) => {
-      const nome = p.achar(x.conta) || p.achar(x.reduzido);
+      const nome = p.achar(x.conta) || (!planoDeArvore || temHierarquia(x.reduzido) ? p.achar(x.reduzido) : '');
       return nome && nome !== x.titulo ? Object.assign({}, x, { titulo: nome, tituloDoArquivo: x.titulo }) : x;
     });
   }
 
-  return { reconhecer, ler, paraProcurar, comOsNomes, acharColunas };
+  return { reconhecer, ler, paraProcurar, comOsNomes, conferir, acharColunas };
 });
