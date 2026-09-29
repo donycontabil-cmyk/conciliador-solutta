@@ -39,7 +39,7 @@
     debito: ['debito', 'debitos', 'valordebito', 'vlrdebito', 'debitors'],
     credito: ['credito', 'creditos', 'valorcredito', 'vlrcredito', 'creditors'],
     historico: ['historico', 'historicopadrao', 'complemento', 'historicocomplemento', 'descricaodolancamento'],
-    lote: ['lote', 'lotelcto', 'lotelancamento', 'lancamento', 'lcto', 'nlancamento', 'numerolancamento', 'lotelan'],
+    lote: ['lote', 'lotelcto', 'lotelancamento', 'lancamento', 'lcto', 'nlancamento', 'numerolancamento', 'lotelan', 'chave', 'chavelancamento'],
     documento: ['ndocto', 'numerodocto', 'documento', 'ndocumento', 'numerodocumento', 'doc', 'ndoc'],
     nomeDaConta: ['descricao', 'descricaoconta', 'nomedaconta', 'nomeconta', 'descricaodaconta'],
   };
@@ -88,14 +88,76 @@
     return c;
   }
 
+  // DESENHO "POR CONTA, COM CONTRAPARTIDA" (Dony, 29/09/2026, o diário da Omega): o relatório é organizado
+  // como um razão — cada dia tem blocos "Conta: <nome> <classificação> <reduzido>" e, dentro do bloco, cada
+  // linha traz a CONTRAPARTIDA e o valor em Débito ou em Crédito. Cada lançamento aparece DUAS vezes (uma em
+  // cada conta), então só as linhas de DÉBITO entram: a conta do bloco é o débito e a contrapartida é o
+  // crédito. O "TOTAL DO DIA" impresso pelo próprio relatório confere a leitura.
+  const NOMES_BLOCO = {
+    contrapartida: ['classificacao', 'contrapartida', 'ctacontrapartida', 'contacontrapartida', 'classificacaocontrapartida', 'classifcontrapartida'],
+    reduzidoContra: ['contrap', 'contrapartida', 'reduzido', 'red', 'codigo', 'contrapart'],
+  };
+  function cabecalhoPorBloco(linha) {
+    const ch = (linha || []).map(chave);
+    if (ch.indexOf('saldo') >= 0) return null;
+    const achar = (lista) => ch.findIndex((x) => lista.indexOf(x) >= 0);
+    const debito = achar(NOMES_PERNA.debito), credito = achar(NOMES_PERNA.credito);
+    const historico = achar(NOMES_PERNA.historico);
+    const contra = achar(NOMES_BLOCO.contrapartida);
+    // A conta não vem em coluna nenhuma: ela é o bloco "Conta: …". Havendo coluna de conta, é o desenho por perna.
+    if (debito < 0 || credito < 0 || historico < 0 || contra < 0) return null;
+    if (achar(NOMES_PERNA.conta) >= 0) return null;
+    const c = { porBloco: true, conta: -1, contrapartida: contra, debito, credito, historico,
+      lote: achar(NOMES_PERNA.lote), documento: achar(NOMES_PERNA.documento), reduzidoContra: achar(NOMES_BLOCO.reduzidoContra) };
+    const iData = achar(NOMES.data);
+    c.data = iData;
+    c.semColunaDeData = iData < 0;
+    c.identificacao = c.lote >= 0 ? [c.lote] : [];
+    return c;
+  }
+  // A linha "Conta: ASSOC BRASILEIRA…  2.01.05.05.05.0152  F00152" (às vezes partida em várias células).
+  const LINHA_DE_CONTA = /^\s*conta\s*:?\s*(.+)$/i;
+  function contaDoBloco(linha) {
+    const cheias = (linha || []).filter((x) => !(x === null || x === undefined || String(x).trim() === ''));
+    if (!cheias.length) return null;
+    const todo = cheias.map((x) => String(x).trim()).join(' ').replace(/\s+/g, ' ');
+    const m = todo.match(LINHA_DE_CONTA);
+    if (!m) return null;
+    const resto = m[1];
+    const achados = resto.match(/\d+(?:\.\d+){2,}/g);   // a classificação tem pelo menos três pedaços
+    if (!achados || !achados.length) return null;
+    const conta = achados[achados.length - 1];
+    const i = resto.lastIndexOf(conta);
+    let nome = resto.slice(0, i).replace(/[-–\s]+$/, '').trim();
+    let reduzido = resto.slice(i + conta.length).replace(/^[-–\s]+/, '').trim();
+    // "69 - 1.01.01.01.01.0001 - Caixa Matriz": o que veio antes é o reduzido e o que veio depois é o nome.
+    if (!/[A-Za-zÀ-ÿ]/.test(nome) && /[A-Za-zÀ-ÿ]/.test(reduzido)) { const t = nome; nome = reduzido; reduzido = t; }
+    return { conta, nome, reduzido };
+  }
+  // Uma linha do bloco é UMA PERNA do lançamento, como no desenho da Zelco — só que a conta não vem na
+  // linha: é a conta do bloco. O valor está em Débito ou em Crédito, e a chave junta as duas pernas.
+  // (A coluna de contrapartida é o que identifica o desenho e completa a perna que ficou sozinha.)
+  function lerBloco(l, c, bloco) {
+    if (!bloco) return { debito: '', credito: '', valor: null };
+    const vd = valorDe(l[c.debito]);
+    const vc = valorDe(l[c.credito]);
+    const contra = c.contrapartida >= 0 ? contaDe(l[c.contrapartida]) : '';
+    if (vd) return { debito: bloco.conta, credito: '', contrapartida: contra, valor: vd };
+    if (vc) return { debito: '', credito: bloco.conta, contrapartida: contra, valor: vc };
+    return { debito: '', credito: '', valor: null };
+  }
+
   // Linha que só traz a DATA DO DIA ("18/05/2026" e o resto vazio): dali para a frente, os lançamentos são
   // desse dia. É assim que alguns relatórios separam os dias em vez de repetir a data em cada linha.
   function dataDoDia(linha) {
     const cheias = (linha || []).map((x, i) => [i, x]).filter(([, x]) => !(x === null || x === undefined || String(x).trim() === ''));
     if (cheias.length !== 1) return null;
     const bruto = String(cheias[0][1]).trim();
-    if (!/^\d{1,2}[\/.-]\d{1,2}[\/.-]\d{2,4}$/.test(bruto)) return null;
-    const d = Util.lerData(bruto);
+    // Só a data ("18/05/2026") ou a data enfeitada pelo relatório ("**** DATA: 01/01/2026 ****", a Omega):
+    // o que vem em volta não pode ter outro número.
+    const m = bruto.match(/^[^\d]*(\d{1,2}[\/.-]\d{1,2}[\/.-]\d{2,4})[^\d]*$/);
+    if (!m) return null;
+    const d = Util.lerData(m[1]);
     return d && d.valida !== false ? d : null;
   }
   // Linha de fechamento do relatório: total do dia, total do mês, transporte, página.
@@ -195,6 +257,31 @@
           return { tipo: null, semTitulo: true, motivo: 'Tem conta, débitos e créditos linha a linha, mas não o título de livro diário.' };
         }
       }
+      // O desenho "por conta, com contrapartida" (a Omega): blocos "Conta: …" e a contrapartida na linha.
+      const rb = linhas.slice(0, 40).findIndex((l) => l && !cabecalho(l) && !cabecalhoPorPerna(l) && cabecalhoPorBloco(l));
+      if (rb >= 0) {
+        const cb = cabecalhoPorBloco(linhas[rb]);
+        let blocos = 0, comValor = 0, comContra = 0, bloco = null;
+        for (const l of linhas.slice(rb + 1, rb + 200)) {
+          if (!l) continue;
+          const nova = contaDoBloco(l);
+          if (nova) { bloco = nova; blocos++; continue; }
+          const primeira = l.find((x) => !(x === null || x === undefined || String(x).trim() === ''));
+          if (primeira !== undefined && LINHA_DE_TOTAL.test(String(primeira))) continue;   // "TOTAL DO DIA" não é lançamento
+          const p = lerBloco(l, cb, bloco);
+          if (p.valor === null) continue;
+          comValor++;
+          if (p.contrapartida) comContra++;   // a contrapartida escrita na linha é a cara deste desenho
+        }
+        if (blocos >= 2 && comValor >= 3 && comContra >= comValor * 0.5) {
+          const tituloB = tituloNoNome || linhas.slice(0, rb).some((l) => l && l.some((x) => /\bdiario\b/i.test(Util.semAcento(String(x === null || x === undefined ? '' : x)))));
+          if (tituloB || opc.semTitulo) {
+            return { tipo: 'diario', porBloco: true,
+              motivo: 'Livro diário por conta: cada dia tem blocos "Conta: …" e cada linha traz a contrapartida e o valor em Débito ou em Crédito.' };
+          }
+          return { tipo: null, semTitulo: true, motivo: 'Tem blocos de conta com contrapartida, débitos e créditos, mas não o título de livro diário.' };
+        }
+      }
       const r = linhas.slice(0, 40).findIndex((l) => l && cabecalho(l));
       if (r < 0) continue;
       const c = cabecalho(linhas[r]);
@@ -229,14 +316,14 @@
     const limparHistorico = (x) => String(vazio(x) ? '' : x).replace(/^"+|"+$/g, '').replace(/\s+/g, ' ').trim();
     for (const aba of abas || []) {
       const linhas = aba.linhas || [];
-      let c = null, data = null, ultima = null;
+      let c = null, data = null, ultima = null, bloco = null;
       for (let r = 0; r < linhas.length; r++) {
         const l = linhas[r];
         if (!l) continue;
         const texto = l.map((x) => (x === null || x === undefined ? '' : String(x))).join(' ');
         if (!empresa) { const m = texto.match(/Empresa:\s*(?:\d+\s*-\s*)?(.+?)(?:\s{2,}|$)/); if (m) empresa = m[1].replace(/\s+/g, ' ').trim(); }
         if (!cnpj) { const m = texto.match(/CNPJ\s*:?\s*(\d{2}\.?\d{3}\.?\d{3}\/?\d{4}-?\d{2})/i); if (m && Util.cnpjValido(Util.limparCnpj(m[1]))) cnpj = Util.limparCnpj(m[1]); }
-        const cab = cabecalho(l) || cabecalhoPorPerna(l);
+        const cab = cabecalho(l) || cabecalhoPorPerna(l) || cabecalhoPorBloco(l);
         if (cab) {
           // Cabeçalho repetido no alto de cada página. Há relatório que, da segunda página em diante, põe a DATA
           // no lugar da palavra "Data" ("05/01/2026 | Histórico | … "): nesse caso o cabeçalho continua o mesmo
@@ -251,6 +338,11 @@
           continue;
         }
         if (!c) continue;
+        // A linha "Conta: …" abre o bloco de uma conta (desenho por conta, com contrapartida).
+        if (c.porBloco) {
+          const nova = contaDoBloco(l);
+          if (nova) { bloco = nova; ultima = null; continue; }
+        }
         // A data do dia numa linha só dela (diário sem coluna de data).
         const doDia = dataDoDia(l);
         if (doDia) { data = doDia; ultima = null; continue; }
@@ -267,7 +359,7 @@
           continue;
         }
         const d = c.data >= 0 ? Util.lerData(l[c.data]) : null;
-        const partida = c.porPerna ? lerPerna(l, c) : lerPartida(l, c);
+        const partida = c.porBloco ? lerBloco(l, c, bloco) : c.porPerna ? lerPerna(l, c) : lerPartida(l, c);
         const debito = partida.debito, credito = partida.credito;
         const v = partida.valor;
         // Linha só com texto no histórico, depois de uma partida: a continuação do histórico (o relatório quebra o
@@ -286,10 +378,11 @@
         ultima = { n: lancamentos.length + 1, linha: r + 1, data: data.texto, dia: data.dia, mes: data.mes, ano: data.ano, historico: hist,
           debito: troca ? credito : debito, credito: troca ? debito : credito, valor: Math.abs(v) };
         // O lote/número do lançamento junta as pernas da mesma partida (no desenho por perna).
-        if (c.porPerna && (c.identificacao || []).length) {
+        if ((c.porPerna || c.porBloco) && (c.identificacao || []).length) {
           ultima.lote = c.identificacao.map((i) => (l[i] === null || l[i] === undefined ? '' : String(l[i]))).join(' ').replace(/s+/g, ' ').trim();
         }
         if (c.porPerna && c.nomeDaConta >= 0 && c.nomeDaConta !== c.historico) ultima.nomeDaConta = limparHistorico(l[c.nomeDaConta]);
+        if (c.porBloco && bloco && bloco.nome) ultima.nomeDaConta = bloco.nome;
         lancamentos.push(ultima);
       }
     }

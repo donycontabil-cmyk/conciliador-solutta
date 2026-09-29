@@ -160,7 +160,14 @@
           }
           // Conta repetida em muitas linhas também é tabela de vários meses (ou relatório de outro tipo).
           const codigos = linhas.slice(r + t.altura).map((l) => { const c = l && lerCodigo(l[m.conta]); return c ? c.codigo : ''; }).filter(Boolean);
-          if (codigos.length && new Set(codigos).size < codigos.length * 0.9) continue;
+          if (codigos.length && new Set(codigos).size < codigos.length * 0.9) {
+            // …ou um sistema em que VÁRIAS CONTAS têm a mesma classificação e quem separa é o código
+            // reduzido (Dony, 29/09/2026, a Omega: 265 clientes na mesma classificação). Nesse caso o
+            // reduzido não repete — e o balancete é legítimo.
+            const reduzidos = m.reduzido === undefined ? [] : linhas.slice(r + t.altura)
+              .map((l) => (l && l[m.reduzido] !== null && l[m.reduzido] !== undefined ? String(l[m.reduzido]).trim() : '')).filter(Boolean);
+            if (reduzidos.length < codigos.length * 0.9 || new Set(reduzidos).size < reduzidos.length * 0.9) continue;
+          }
           return { aba: a, linha: r, altura: t.altura, mapa: m };
         }
       }
@@ -571,7 +578,8 @@
     const texto = (l, i) => (i === undefined || i === null || l[i] === null || l[i] === undefined ? '' : String(l[i]).replace(/\s+/g, ' ').trim());
     const contas = [];
     const vistas = new Set();
-    let total = null, linhasIgnoradas = 0, repetidas = 0, comLado = 0, negativos = 0, primeiraConta = -1;
+    let total = null, linhasIgnoradas = 0, repetidas = 0, juntadas = 0, comLado = 0, negativos = 0, primeiraConta = -1;
+    const porConta = new Map();   // conta -> a linha já lida (para somar outra conta com a mesma classificação)
     const ignoradas = [];   // linhas com código de conta em que o valor não foi lido (alguma coluna saiu do lugar)
     for (let r = escolha.inicio || 0; r < linhas.length; r++) {
       const l = linhas[r];
@@ -602,7 +610,23 @@
       // Linha com código mas sem nenhum valor: é título de grupo, não conta. (No balancete da Zelco o grupo
       // aparece duas vezes: em cima só o nome e embaixo o total — o que vale é o de baixo.)
       if (va.vazio && vd.vazio && vc.vazio && vf.vazio) { linhasIgnoradas++; continue; }
-      if (vistas.has(cod.codigo)) { repetidas++; continue; } // cabeçalho de página repetido ou conta em dobro
+      // A MESMA CLASSIFICAÇÃO EM VÁRIAS CONTAS (Dony, 29/09/2026, a Omega: 265 clientes na classificação
+      // 1.01.05.05.01.0001, cada um com o seu código reduzido). Quando o reduzido é diferente, são contas
+      // DIFERENTES com a mesma classificação: os valores somam (senão o balancete perderia 264 clientes e
+      // deixaria de fechar). Sem reduzido diferente, é cabeçalho repetido ou conta em dobro: fica de fora.
+      if (vistas.has(cod.codigo)) {
+        const red = texto(l, col.reduzido);
+        const outra = porConta.get(cod.codigo);
+        if (outra && red && red !== outra.reduzido) {
+          outra.saldoAnterior += va.centavos;
+          outra.debitos += Math.abs(vd.centavos);
+          outra.creditos += Math.abs(vc.centavos);
+          outra.saldoAtual += vf.centavos;
+          outra.juntadas = (outra.juntadas || 1) + 1;
+          juntadas++;
+        } else repetidas++;
+        continue;
+      }
       vistas.add(cod.codigo);
       if (primeiraConta < 0) primeiraConta = r;
       let sa = va.centavos, sf = vf.centavos;
@@ -613,14 +637,26 @@
       if (sa < 0 || sf < 0) negativos++;
       // Recuo do nome (espaços no começo): em alguns sistemas é o que diz o nível da conta.
       const brutoNome = col.titulo !== undefined && typeof l[col.titulo] === 'string' ? l[col.titulo] : typeof l[col.conta] === 'string' ? l[col.conta] : '';
-      contas.push({ conta: cod.codigo, reduzido: texto(l, col.reduzido), titulo: tit || cod.resto, nivel: 1, pai: '', analitica: true,
-        saldoAnterior: sa, debitos: Math.abs(vd.centavos), creditos: Math.abs(vc.centavos), saldoAtual: sf, recuo: brutoNome.match(/^\s*/)[0].length });
+      const nova = { conta: cod.codigo, reduzido: texto(l, col.reduzido), titulo: tit || cod.resto, nivel: 1, pai: '', analitica: true,
+        saldoAnterior: sa, debitos: Math.abs(vd.centavos), creditos: Math.abs(vc.centavos), saldoAtual: sf, recuo: brutoNome.match(/^\s*/)[0].length };
+      contas.push(nova);
+      porConta.set(cod.codigo, nova);
     }
     const avisos = [];
     // A árvore das contas (mãe e nível): pelos pontos do código, pelo começo do código (sem pontos) ou pela
     // máscara com número sequencial no fim.
     const arvore = montarArvore(contas);
     contas.forEach((c) => { delete c.recuo; });
+    // Conta que juntou várias (mesma classificação): o nome de uma só delas enganaria — vale o nome da
+    // conta-mãe com quantas são ("DUPLICATAS A RECEBER (265 contas)"), que é o que ela representa.
+    if (juntadas) {
+      const porCodigo = new Map(contas.map((c) => [c.conta, c]));
+      contas.forEach((c) => {
+        if (!c.juntadas) return;
+        const mae = c.pai ? porCodigo.get(c.pai) : null;
+        c.titulo = (mae && mae.titulo ? mae.titulo : c.titulo) + ' (' + c.juntadas + ' contas)';
+      });
+    }
     if (arvore === 'sem-pontos') avisos.push('Os códigos das contas vieram sem pontos: a hierarquia saiu das próprias contas do balancete (a conta-mãe é o maior código que é o começo da filha).');
     if (arvore === 'plana') avisos.push('Não deu para montar a árvore das contas pelo código (todas ficaram no 1º nível).');
     // Saldo sem sinal nenhum (nem D/C): o lado sai da própria conta.
@@ -669,6 +705,11 @@
     const maesErradas = contas.filter((c) => filhas.has(c.conta) && soma(filhas.get(c.conta), 'saldoAtual') !== c.saldoAtual);
     if (maesErradas.length) avisos.push(maesErradas.length + ' conta(s) sintética(s) com saldo diferente da soma das filhas (ex.: ' + maesErradas[0].conta + ').');
     if (repetidas) avisos.push(repetidas + ' linha(s) de conta repetida ignorada(s).');
+    if (juntadas) {
+      const maiores = contas.filter((c) => c.juntadas).sort((a, b) => b.juntadas - a.juntadas).slice(0, 3);
+      avisos.push(juntadas + ' conta(s) com a mesma classificação de outra foram SOMADAS (o sistema separa pelo código reduzido): ' +
+        maiores.map((c) => c.conta + ' (' + c.juntadas + ' contas)').join(', ') + '.');
+    }
     if (!contas.length) { confere = false; avisos.push('Não achei nenhuma conta neste balancete.'); }
     const qualidade = contas.length ? (contas.length - erradas.length) / contas.length : 0;
     if (escolha.como === 'conteudo') avisos.push('As colunas foram achadas pelo conteúdo (o cabeçalho do arquivo não tem os nomes conhecidos).');

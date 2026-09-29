@@ -140,9 +140,21 @@
   // máscaras diferentes em cada relatório do sistema).
   function paraProcurar(plano) {
     const porCodigo = new Map(), porDigitos = new Map();
+    // O MESMO CÓDIGO COM NOMES DIFERENTES não serve para renomear nada (Dony, 29/09/2026, a Omega: 265
+    // clientes na classificação 1.01.05.05.01.0001, cada um com o seu nome). Códigos assim ficam de fora.
+    const nomes = new Map();
     ((plano && plano.contas) || []).forEach((x) => {
       const cod = String(x.conta || '').trim();
       if (!cod || !x.titulo) return;
+      const lista = nomes.get(cod) || new Set();
+      lista.add(Util.semAcento(String(x.titulo)).toUpperCase().replace(/\s+/g, ' ').trim());
+      nomes.set(cod, lista);
+    });
+    let ambiguos = 0;
+    ((plano && plano.contas) || []).forEach((x) => {
+      const cod = String(x.conta || '').trim();
+      if (!cod || !x.titulo) return;
+      if ((nomes.get(cod) || new Set()).size > 1) { if (!porCodigo.has('#' + cod)) { porCodigo.set('#' + cod, 1); ambiguos++; } return; }
       if (!porCodigo.has(cod)) porCodigo.set(cod, x.titulo);
       const d = soDigitos(cod);
       if (d && !porDigitos.has(d)) porDigitos.set(d, x.titulo);
@@ -150,9 +162,10 @@
     const achar = (codigo) => {
       const cod = String(codigo === null || codigo === undefined ? '' : codigo).trim();
       if (!cod) return '';
+      if (porCodigo.has('#' + cod)) return '';   // código ambíguo: não renomeia
       return porCodigo.get(cod) || porDigitos.get(soDigitos(cod)) || '';
     };
-    return { achar, quantas: porCodigo.size };
+    return { achar, quantas: porCodigo.size - ambiguos, ambiguos };
   }
 
   // Troca o nome das contas pelo do plano (só quando o plano tem aquela conta). Devolve uma lista nova.
