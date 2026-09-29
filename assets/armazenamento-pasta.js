@@ -375,6 +375,33 @@
       return limpo;
     }
 
+    // O PADRÃO DE CADA TIPO DE ARQUIVO DESTA EMPRESA (Dony, 29/09/2026: "precisa gravar os padrões para cada
+    // cliente; nada de apagar o resto"). { razao: { desenho, arquivo, em }, diario: {…}, plano: { colunas } }.
+    // Cada tipo é guardado separado: gravar o do razão não pode derrubar o do diário nem o de outra empresa.
+    const COLUNAS_CONHECIDAS = ['aba', 'conta', 'titulo', 'reduzido', 'classificacao', 'contrapartida', 'historico', 'data', 'valor',
+      'debito', 'credito', 'debitos', 'creditos', 'saldoAnterior', 'saldoAtual', 'dcAnterior', 'dcAtual', 'lote', 'documento', 'nomeDaConta'];
+    function limparDesenhos(valor, anterior) {
+      const limpo = Object.assign({}, anterior && typeof anterior === 'object' ? anterior : {});
+      if (valor && typeof valor === 'object') {
+        ['razao', 'diario', 'plano', 'balancete'].forEach((tipo) => {
+          const d = valor[tipo];
+          if (d === null) { delete limpo[tipo]; return; }
+          if (!d || typeof d !== 'object') return;
+          const x = {};
+          if (typeof d.desenho === 'string' && d.desenho.length <= 30) x.desenho = d.desenho;
+          if (typeof d.arquivo === 'string' && d.arquivo.trim()) x.arquivo = d.arquivo.trim().slice(0, 160);
+          if (typeof d.em === 'string' && d.em.length <= 40) x.em = d.em;
+          if (d.colunas && typeof d.colunas === 'object') {
+            const c = {};
+            Object.keys(d.colunas).forEach((k) => { const v = d.colunas[k]; if (COLUNAS_CONHECIDAS.indexOf(k) >= 0 && Number.isInteger(v) && v >= 0 && v < 200) c[k] = v; });
+            if (Object.keys(c).length) x.colunas = c;
+          }
+          if (Object.keys(x).length) limpo[tipo] = Object.assign({}, limpo[tipo] || {}, x);
+        });
+      }
+      return Object.keys(limpo).length ? limpo : null;
+    }
+
     // A consolidação de um grupo: os códigos das empresas somadas e as contas de operações ENTRE elas, que
     // são eliminadas. Só códigos válidos entram; sem empresa nenhuma, o campo some.
     function limparConsolidacao(valor) {
@@ -542,6 +569,9 @@
       // ele guarda"): { aba, colunas: { conta, titulo, saldoAnterior, debitos, creditos, saldoAtual, dcAnterior, dcAtual } }.
       const mapaBal = limparMapaBalancete(empresa.mapaBalancete !== undefined ? empresa.mapaBalancete : (anterior && anterior.mapaBalancete));
       if (mapaBal) registro.mapaBalancete = mapaBal;
+      // O padrão de cada tipo de arquivo (razão, diário, plano): o que vem na chamada SOMA ao que já estava.
+      const desenhos = limparDesenhos(empresa.desenhos, anterior && anterior.desenhos);
+      if (desenhos) registro.desenhos = desenhos;
       // CONSOLIDAÇÃO (Dony, 28/09/2026: "existem algumas empresas em que eu preciso consolidar; quero escolher
       // as empresas que eu quero consolidar"). Um "grupo" é um cadastro sem balancete próprio: o relatório
       // dele é a soma dos balancetes das empresas escolhidas, com as contas marcadas eliminadas.
@@ -920,7 +950,7 @@
     // balancete, as assinaturas, o logo, as conciliações livres, os papéis de conta, as contas do diário, as
     // abas escondidas e a nota escrita à mão. Numa importação, isso nunca se perde: se o lado de cá não tem,
     // vem do backup; se os dois têm, fica o do cadastro mais novo.
-    const CONFIG_DA_EMPRESA = ['mapaDre', 'mapaBalancete', 'assinaturas', 'logo', 'corRelatorio', 'conciliacoesLivres',
+    const CONFIG_DA_EMPRESA = ['mapaDre', 'mapaBalancete', 'desenhos', 'assinaturas', 'logo', 'corRelatorio', 'conciliacoesLivres',
       'papeisDeConta', 'contasDoDiario', 'abasOcultas', 'notasExtras', 'consolidacao'];
     const semConteudo = (x) => x === undefined || x === null || x === '' ||
       (Array.isArray(x) && !x.length) ||

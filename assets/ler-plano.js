@@ -36,18 +36,22 @@
     const cols = [];
     for (let i = 0; i < largura; i++) {
       const cheias = [], codigos = new Set(), nomes = new Set();
-      let comCodigo = 0, comNome = 0;
+      let comCodigo = 0, comNome = 0, comPontos = 0;
       linhas.forEach((l) => {
         const t = texto(l && l[i]);
         if (!t) return;
         cheias.push(t);
-        if (ehCodigo(t)) { comCodigo++; codigos.add(t); }
+        if (ehCodigo(t)) { comCodigo++; codigos.add(t); if (t.indexOf('.') > 0) comPontos++; }
         if (temNome(t)) { comNome++; nomes.add(t); }
       });
-      cols.push({ i, cheias: cheias.length, comCodigo, comNome, codigos: codigos.size, nomes: nomes.size });
+      cols.push({ i, cheias: cheias.length, comCodigo, comNome, comPontos, codigos: codigos.size, nomes: nomes.size });
     }
-    const deCodigo = cols.filter((c) => c.cheias >= 5 && c.comCodigo >= c.cheias * 0.8)
-      .sort((a, b) => b.codigos - a.codigos || a.i - b.i)[0];
+    const deCodigoTodas = cols.filter((c) => c.cheias >= 5 && c.comCodigo >= c.cheias * 0.8);
+    // A conta do plano tem HIERARQUIA (pontos). Sem isso, uma coluna de sequência ("Seq.: 1, 2, 3…") ganharia
+    // por ter mais valores diferentes que a classificação — foi o que aconteceu no plano da Omega, em que a
+    // mesma classificação serve a 265 clientes (Dony, 29/09/2026).
+    const comArvore = deCodigoTodas.filter((c) => c.comPontos >= c.comCodigo * 0.6);
+    const deCodigo = (comArvore.length ? comArvore : deCodigoTodas).sort((a, b) => b.codigos - a.codigos || a.i - b.i)[0];
     if (!deCodigo) return null;
     const deNome = cols.filter((c) => c.i !== deCodigo.i && c.cheias >= 5 && c.comNome >= c.cheias * 0.6)
       .sort((a, b) => b.nomes - a.nomes || a.i - b.i)[0];
@@ -76,10 +80,13 @@
     return null;
   }
 
-  // Lê o plano. op: { nomeArquivo, aceitar (o lugar do plano manda: lê mesmo sem o título) }
+  // Lê o plano. op: { nomeArquivo, aceitar (o lugar do plano manda), colunas (o padrão guardado da empresa:
+  // { conta, titulo } — Dony, 29/09/2026: "precisa ter um padrão para cada cliente") }
   function ler(abas, op) {
     const opc = op || {};
-    const rec = reconhecer(abas, opc);
+    const guardado = opc.colunas && Number.isInteger(opc.colunas.conta) && Number.isInteger(opc.colunas.titulo)
+      ? { tipo: 'plano', aba: Number.isInteger(opc.colunas.aba) ? opc.colunas.aba : 0, colunas: { conta: opc.colunas.conta, titulo: opc.colunas.titulo, quantas: 0 } } : null;
+    const rec = (guardado && abas[guardado.aba] ? guardado : null) || reconhecer(abas, opc);
     if (!rec) throw new Error('Não achei neste arquivo uma lista de contas (código e nome).');
     const linhas = abas[rec.aba].linhas || [];
     const c = rec.colunas;
@@ -115,14 +122,27 @@
     });
     if (!contas.length) throw new Error('Não achei nenhuma conta neste plano.');
     if (continuadas) avisos.push(continuadas + ' nome(s) que continuavam na linha de baixo foram juntados.');
-    // Contas repetidas: fica a primeira (e avisa).
-    const vistas = new Set();
+    // Contas repetidas: fica a primeira. Quando as repetidas têm NOMES DIFERENTES (a Omega: 265 clientes na
+    // mesma classificação), o nome é ambíguo — essa conta não serve para renomear nada.
+    const porConta = new Map();
     const limpas = [];
-    let repetidas = 0;
-    contas.forEach((x) => { if (vistas.has(x.conta)) { repetidas++; return; } vistas.add(x.conta); limpas.push(x); });
-    if (repetidas) avisos.push(repetidas + ' conta(s) apareceram mais de uma vez: ficou a primeira.');
+    let repetidas = 0, ambiguas = 0;
+    const chaveNome = (t) => Util.semAcento(String(t || '')).toUpperCase().replace(/\s+/g, ' ').trim();
+    contas.forEach((x) => {
+      const anterior = porConta.get(x.conta);
+      if (anterior) {
+        repetidas++;
+        if (!anterior.ambiguo && chaveNome(anterior.titulo) !== chaveNome(x.titulo)) { anterior.ambiguo = true; ambiguas++; }
+        return;
+      }
+      porConta.set(x.conta, x);
+      limpas.push(x);
+    });
+    if (repetidas) avisos.push(repetidas + ' linha(s) repetiram a classificação de outra: ficou a primeira.');
+    if (ambiguas) avisos.push(ambiguas + ' classificação(ões) aparecem com NOMES DIFERENTES (é uma classificação para várias contas): elas não renomeiam conta nenhuma.');
     const empresa = nomeDaEmpresa(linhas, c);
-    return { tipo: 'plano', empresa, contas: limpas, total: limpas.length, avisos, aba: rec.aba, colunas: c };
+    return { tipo: 'plano', empresa, contas: limpas, total: limpas.length, avisos, aba: rec.aba,
+      colunas: { conta: c.conta, titulo: c.titulo, aba: rec.aba } };
   }
 
   // O nome da empresa: a linha de cima que é só texto comprido, antes da primeira conta.
@@ -148,6 +168,8 @@
       if (!cod || !x.titulo) return;
       const lista = nomes.get(cod) || new Set();
       lista.add(Util.semAcento(String(x.titulo)).toUpperCase().replace(/\s+/g, ' ').trim());
+      // A leitura já marcou a classificação que serve a várias contas com nomes diferentes.
+      if (x.ambiguo) lista.add('#ambiguo');
       nomes.set(cod, lista);
     });
     let ambiguos = 0;

@@ -122,10 +122,19 @@
     if (primeira === 'conta' || /^conta\d/.test(primeira)) {
       let resto = cheias.slice(1).map((c) => String(c.v).trim());
       if (primeira !== 'conta') resto = [String(cheias[0].v).replace(/^\s*conta\s*:?\s*/i, '')].concat(resto);
+      // "69 - 1.01.01.01.01.0001 - Caixa Matriz" (a Omega, 29/09/2026): são TRÊS pedaços — o código reduzido,
+      // a classificação e o nome. Sem separar os três, a classificação ficava colada no nome e o programa não
+      // tinha como cruzar a conta com o balancete. Vai tirando do começo enquanto for código ou classificação.
       const partes = [];
       resto.forEach((t) => {
-        const m = t.match(/^(\d+)\s*-\s*(.+)$/);
-        if (m) { partes.push(m[1]); partes.push(m[2]); } else partes.push(t);
+        let s = String(t).trim();
+        for (;;) {
+          const m = s.match(/^(\d[\d.]*\d|\d)\s*-\s*(\S.*)$/);
+          if (!m) break;
+          partes.push(m[1]);
+          s = m[2].trim();
+        }
+        if (s) partes.push(s);
       });
       let codigo = null, classificacao = null;
       const nomes = [];

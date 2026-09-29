@@ -231,11 +231,45 @@
   // título de livro diário (no começo do arquivo ou no nome dele): sem ele é uma planilha de lançamentos (importação,
   // reclassificação, depreciação), que o leitor geral continua sem tomar por diário. op: { nomeArquivo, semTitulo (aceita
   // sem o título: o arquivo foi posto no lugar do diário) }.
+  // O reconhecimento do desenho "por conta, com contrapartida", numa função só: ele é usado na ordem normal
+  // e também na frente, quando a empresa já tem esse padrão guardado.
+  function reconhecerPorBloco(linhas, rb, opc, tituloNoNome) {
+    const cb = cabecalhoPorBloco(linhas[rb]);
+    if (!cb) return null;
+    let blocos = 0, comValor = 0, comContra = 0, bloco = null;
+    for (const l of linhas.slice(rb + 1, rb + 200)) {
+      if (!l) continue;
+      const nova = contaDoBloco(l);
+      if (nova) { bloco = nova; blocos++; continue; }
+      const primeira = l.find((x) => !(x === null || x === undefined || String(x).trim() === ''));
+      if (primeira !== undefined && LINHA_DE_TOTAL.test(String(primeira))) continue;   // "TOTAL DO DIA" não é lançamento
+      const p = lerBloco(l, cb, bloco);
+      if (p.valor === null) continue;
+      comValor++;
+      if (p.contrapartida) comContra++;   // a contrapartida escrita na linha é a cara deste desenho
+    }
+    if (!(blocos >= 2 && comValor >= 3 && comContra >= comValor * 0.5)) return null;
+    const tituloB = tituloNoNome || linhas.slice(0, rb).some((l) => l && l.some((x) => /\bdiario\b/i.test(Util.semAcento(String(x === null || x === undefined ? '' : x)))));
+    if (tituloB || opc.semTitulo) {
+      return { tipo: 'diario', porBloco: true,
+        motivo: 'Livro diário por conta: cada dia tem blocos "Conta: …" e cada linha traz a contrapartida e o valor em Débito ou em Crédito.' };
+    }
+    return { tipo: null, semTitulo: true, motivo: 'Tem blocos de conta com contrapartida, débitos e créditos, mas não o título de livro diário.' };
+  }
+
   function reconhecer(abas, op) {
     const opc = op || {};
     const tituloNoNome = /diario/i.test(Util.semAcento(String(opc.nomeArquivo || '')));
     for (const aba of abas || []) {
       const linhas = aba.linhas || [];
+      // Com o PADRÃO GUARDADO da empresa, o desenho dela é procurado primeiro.
+      if (opc.desenho === 'porBloco') {
+        const rr = linhas.slice(0, 40).findIndex((l) => l && cabecalhoPorBloco(l));
+        if (rr >= 0 && !cabecalho(linhas[rr])) {
+          const guardado = reconhecerPorBloco(linhas, rr, opc, tituloNoNome);
+          if (guardado) return guardado;
+        }
+      }
       // O desenho "uma linha por perna" (a Zelco): conta numa coluna e o valor em Débitos ou em Créditos.
       const rp = linhas.slice(0, 40).findIndex((l) => l && !cabecalho(l) && cabecalhoPorPerna(l));
       if (rp >= 0) {
@@ -260,27 +294,8 @@
       // O desenho "por conta, com contrapartida" (a Omega): blocos "Conta: …" e a contrapartida na linha.
       const rb = linhas.slice(0, 40).findIndex((l) => l && !cabecalho(l) && !cabecalhoPorPerna(l) && cabecalhoPorBloco(l));
       if (rb >= 0) {
-        const cb = cabecalhoPorBloco(linhas[rb]);
-        let blocos = 0, comValor = 0, comContra = 0, bloco = null;
-        for (const l of linhas.slice(rb + 1, rb + 200)) {
-          if (!l) continue;
-          const nova = contaDoBloco(l);
-          if (nova) { bloco = nova; blocos++; continue; }
-          const primeira = l.find((x) => !(x === null || x === undefined || String(x).trim() === ''));
-          if (primeira !== undefined && LINHA_DE_TOTAL.test(String(primeira))) continue;   // "TOTAL DO DIA" não é lançamento
-          const p = lerBloco(l, cb, bloco);
-          if (p.valor === null) continue;
-          comValor++;
-          if (p.contrapartida) comContra++;   // a contrapartida escrita na linha é a cara deste desenho
-        }
-        if (blocos >= 2 && comValor >= 3 && comContra >= comValor * 0.5) {
-          const tituloB = tituloNoNome || linhas.slice(0, rb).some((l) => l && l.some((x) => /\bdiario\b/i.test(Util.semAcento(String(x === null || x === undefined ? '' : x)))));
-          if (tituloB || opc.semTitulo) {
-            return { tipo: 'diario', porBloco: true,
-              motivo: 'Livro diário por conta: cada dia tem blocos "Conta: …" e cada linha traz a contrapartida e o valor em Débito ou em Crédito.' };
-          }
-          return { tipo: null, semTitulo: true, motivo: 'Tem blocos de conta com contrapartida, débitos e créditos, mas não o título de livro diário.' };
-        }
+        const doBloco = reconhecerPorBloco(linhas, rb, opc, tituloNoNome);
+        if (doBloco) return doBloco;
       }
       const r = linhas.slice(0, 40).findIndex((l) => l && cabecalho(l));
       if (r < 0) continue;
@@ -306,11 +321,20 @@
     return { tipo: null };
   }
 
+  // A ordem em que os desenhos são testados. Com o PADRÃO GUARDADO da empresa (Dony, 29/09/2026: "precisa
+  // ter um padrão para cada cliente"), o dela vem primeiro — só se não servir é que o programa adivinha.
+  function naOrdem(l, desenho) {
+    if (desenho === 'porBloco') return cabecalhoPorBloco(l) || cabecalho(l) || cabecalhoPorPerna(l);
+    if (desenho === 'porPerna') return cabecalhoPorPerna(l) || cabecalho(l) || cabecalhoPorBloco(l);
+    return cabecalho(l) || cabecalhoPorPerna(l) || cabecalhoPorBloco(l);
+  }
+
   function ler(abas, opcoes) {
+    const opc = opcoes || {};
     const nomeArquivo = (opcoes && opcoes.nomeArquivo) || '';
     const avisos = [];
     const lancamentos = [];
-    let empresa = '', cnpj = '', linhasIgnoradas = 0;
+    let empresa = '', cnpj = '', linhasIgnoradas = 0, desenhoUsado = null;
     const totaisDoDia = [];
     const vazio = (x) => x === null || x === undefined || String(x).trim() === '';
     const limparHistorico = (x) => String(vazio(x) ? '' : x).replace(/^"+|"+$/g, '').replace(/\s+/g, ' ').trim();
@@ -323,7 +347,7 @@
         const texto = l.map((x) => (x === null || x === undefined ? '' : String(x))).join(' ');
         if (!empresa) { const m = texto.match(/Empresa:\s*(?:\d+\s*-\s*)?(.+?)(?:\s{2,}|$)/); if (m) empresa = m[1].replace(/\s+/g, ' ').trim(); }
         if (!cnpj) { const m = texto.match(/CNPJ\s*:?\s*(\d{2}\.?\d{3}\.?\d{3}\/?\d{4}-?\d{2})/i); if (m && Util.cnpjValido(Util.limparCnpj(m[1]))) cnpj = Util.limparCnpj(m[1]); }
-        const cab = cabecalho(l) || cabecalhoPorPerna(l) || cabecalhoPorBloco(l);
+        const cab = naOrdem(l, opc.desenho);
         if (cab) {
           // Cabeçalho repetido no alto de cada página. Há relatório que, da segunda página em diante, põe a DATA
           // no lugar da palavra "Data" ("05/01/2026 | Histórico | … "): nesse caso o cabeçalho continua o mesmo
@@ -335,6 +359,7 @@
             continue;
           }
           c = cab;
+          desenhoUsado = c.porBloco ? 'porBloco' : c.porPerna ? 'porPerna' : 'linha';
           continue;
         }
         if (!c) continue;
@@ -438,7 +463,7 @@
       if (vazios.length) avisos.push('Sem lançamento em ' + vazios.join(', ') + ': confira se o diário está completo.');
     } else avisos.push('Não achei nenhum lançamento neste diário.');
     const contas = Array.from(new Set([].concat(...lancamentos.map((x) => [x.debito, x.credito])).filter(Boolean))).sort((x, y) => Number(x) - Number(y));
-    return { tipo: 'diario', empresa, cnpj, nomeArquivo, periodo, meses, lancamentos, lancamentosDeVarias: lancamentos.filter((x) => !x.debito || !x.credito).length,
+    return { tipo: 'diario', desenho: desenhoUsado, empresa, cnpj, nomeArquivo, periodo, meses, lancamentos, lancamentosDeVarias: lancamentos.filter((x) => !x.debito || !x.credito).length,
       grupos, contas, totalDebitos, totalCreditos, confere: totalDebitos === totalCreditos && !abertosNoFim && !diasQueNaoBatem.length, avisos, linhasIgnoradas,
       diasConferidos: diasConferidos.length, diasQueNaoBatem: diasQueNaoBatem.length };
   }

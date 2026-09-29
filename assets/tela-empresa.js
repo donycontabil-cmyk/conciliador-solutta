@@ -20,6 +20,14 @@
     const deFornecedores = arquivos.filter((a) => (a.conta && a.conta.familia === 'fornecedores') || a.tipo === 'financeiro_pagar' || a.tipo === 'financeiro_adiantamento');
     const competencias = Array.from(new Set(deFornecedores.map((a) => U.anoMes(a.competencia)))).sort().reverse();
     const detalhes = [emp.cnpj ? 'CNPJ ' + U.formatarCnpj(emp.cnpj) : null, emp.regime, emp.atividade, emp.grupo ? 'Grupo ' + emp.grupo : null].filter(Boolean);
+    // Os PADRÕES de arquivo guardados nesta empresa (Dony, 29/09/2026: "precisa gravar os padrões para cada
+    // cliente"): o que o programa já aprendeu do sistema dela, à vista de quem usa.
+    const NOME_DESENHO = { porBloco: 'por conta, com contrapartida', porPerna: 'uma linha por perna', linha: 'uma partida por linha' };
+    const d = emp.desenhos || {};
+    const padroes = [emp.mapaBalancete ? 'balancete: colunas guardadas' : null,
+      d.razao && d.razao.desenho ? 'razão: desenho ' + d.razao.desenho : null,
+      d.diario && d.diario.desenho ? 'diário: ' + (NOME_DESENHO[d.diario.desenho] || d.diario.desenho) : null,
+      d.plano && d.plano.colunas ? 'plano de contas: colunas guardadas' : null].filter(Boolean);
 
     const cartoes = raiz.Familias.FAMILIAS.map((f) => {
       // Família com passos prontos (Fornecedores e Clientes): abre com o último mês que tem arquivo dela.
@@ -99,7 +107,8 @@
       return;
     }
     el.innerHTML = '<a class="voltar" href="#/">← Empresas</a>' +
-      '<div class="cabecalho"><div class="titulos"><h1>' + T.esc(emp.nome) + '</h1><p class="suave">Código ' + T.esc(emp.codigo) + (detalhes.length ? ' · ' + T.esc(detalhes.join(' · ')) : '') + '</p></div>' +
+      '<div class="cabecalho"><div class="titulos"><h1>' + T.esc(emp.nome) + '</h1><p class="suave">Código ' + T.esc(emp.codigo) + (detalhes.length ? ' · ' + T.esc(detalhes.join(' · ')) : '') + '</p>' +
+      (padroes.length ? '<p class="suave pequeno" title="O que o programa já aprendeu do sistema desta empresa: os próximos arquivos entram por aqui">🧠 Padrões desta empresa · ' + T.esc(padroes.join(' · ')) + '</p>' : '') + '</div>' +
       '<button class="botao" id="bt-editar">Editar cadastro</button></div>' +
       '<div class="grade-3">' + cartaoApresentacao + cartaoDiario + cartoes + cartaoLivres + cartaoResultado + cartaoBackup + '</div>';
     el.querySelector('#bt-editar').addEventListener('click', () => raiz.TelaCarteira.formulario(emp));

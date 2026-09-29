@@ -163,6 +163,33 @@
     await guardarMapaDoBalancete(codigo, b.mapa || mapa);
     return b;
   }
+  // ------------------------------------------------------------------
+  // O PADRÃO DE CADA TIPO DE ARQUIVO DA EMPRESA (Dony, 29/09/2026: "precisa gravar os padrões para cada
+  // cliente; nada de apagar o resto"). Guardado no cadastro, um por tipo: razão, diário e plano de contas
+  // (o do balancete é o mapaBalancete, que já existia). Gravar um NÃO mexe nos outros nem em outra empresa.
+  // ------------------------------------------------------------------
+  const desenhoDaEmpresa = (emp, tipo) => ((emp && emp.desenhos && emp.desenhos[tipo]) || null);
+  async function guardarDesenho(codigo, tipo, desenho, arquivo) {
+    if (!tipo || !desenho) return;
+    try {
+      const arm = app().armazenamento;
+      const cad = (await arm.empresas()).find((e) => String(e.codigo) === String(codigo)); // relido: outra pessoa pode ter mexido
+      if (!cad) return;
+      const antes = (cad.desenhos && cad.desenhos[tipo]) || null;
+      const igual = antes && antes.desenho === desenho.desenho && JSON.stringify(antes.colunas || null) === JSON.stringify(desenho.colunas || null);
+      if (igual) return;
+      const novo = Object.assign({}, desenho, { arquivo: arquivo || '', em: U.agoraISO() });
+      const salvo = await arm.salvarEmpresa(Object.assign({}, cad, { desenhos: Object.assign({}, cad.desenhos || {}, { [tipo]: novo }) }));
+      const ix = app().empresas.findIndex((e) => String(e.codigo) === String(codigo));
+      if (ix >= 0) app().empresas[ix] = salvo;
+      // Desenho diferente do que a empresa vinha usando: avisa em vez de trocar calado.
+      if (antes && antes.desenho && desenho.desenho && antes.desenho !== desenho.desenho) {
+        T.avisoRapido('Atenção: este ' + NOME_DO_TIPO[tipo] + ' veio no desenho "' + desenho.desenho + '" e os anteriores desta empresa eram "' + antes.desenho + '". Confira se é o relatório certo.', 'erro', 8000);
+      }
+    } catch (e) { /* guardar o padrão ajuda na próxima vez; não impede esta leitura */ }
+  }
+  const NOME_DO_TIPO = { razao: 'razão', diario: 'livro diário', plano: 'plano de contas', balancete: 'balancete' };
+
   async function guardarMapaDoBalancete(codigo, mapa) {
     try {
       const arm = app().armazenamento;
@@ -603,6 +630,8 @@
         if (ehPdf) T.avisoRapido('Abrindo o PDF ' + arquivo.name + '… isso pode levar alguns segundos.', null, 6000);
         r = await raiz.Leitor.lerArquivo(bytes, arquivo.name, {
           pdf: { aoAndar: (feitas, total) => { if (total > 8 && feitas % 25 === 0) T.avisoRapido('Lendo o PDF: página ' + feitas + ' de ' + total + '…', null, 2500); } },
+          // Os PADRÕES guardados desta empresa vêm primeiro (Dony, 29/09/2026: "um padrão para cada cliente").
+          desenhos: (app().empresas.find((e) => String(e.codigo) === String(codigo)) || {}).desenhos || null,
         });
         r.bytes = bytes;
       } catch (e) { T.avisoRapido('Não consegui ler ' + arquivo.name + ': ' + T.mensagemDeErro(e), 'erro'); return false; }
@@ -635,6 +664,8 @@
         if (r.tipo !== 'razao' || !r.contas || !r.contas.length) { await naoServe('um razão', r.tipo !== 'razao' && r.tipo !== 'desconhecido'); return false; }
         const emp = app().empresas.find((e) => String(e.codigo) === String(codigo)) || {};
         const rz = r.razao;
+        // O desenho do razão desta empresa fica guardado (e, se mudar, o programa avisa).
+        if (rz.desenho) await guardarDesenho(codigo, 'razao', { desenho: rz.desenho }, arquivo.name);
         if (rz.cnpj && emp.cnpj && String(rz.cnpj).slice(0, 8) !== String(emp.cnpj).slice(0, 8)) {
           const ok = await T.confirmar({ titulo: 'Esse razão é de outra empresa?',
             texto: 'O CNPJ do razão (' + U.formatarCnpj(rz.cnpj) + ') não é o de <b>' + T.esc(emp.nome) + '</b> (' + U.formatarCnpj(emp.cnpj) + ').',
@@ -711,6 +742,7 @@
           }
           const comparacao = ativo ? await compararComEmUso(ativo, 'diario', junto) : null;
           const extra = comparacao ? { comparacao } : {};
+          await guardarDesenho(codigo, 'diario', { desenho: r.diario.desenho || 'linha' }, arquivo.name);
           let g = await guardarDiario(codigo, r, doAno, extra, junto);
           if (g.jaExistia && (!ativo || g.meta.id !== ativo.id)) g = await guardarDiario(codigo, r, doAno, Object.assign({ recarga: U.agoraISO() }, extra), junto);
           await versaoNova(g, ativo, comparacao);
@@ -743,6 +775,7 @@
         const ativo = emUsoNoLugar(lugar);
         if (!(ativo && ativo.hashDoConteudo === r.hash)) {
           jaEra = false;
+          await guardarDesenho(codigo, 'plano', { colunas: p.colunas }, arquivo.name);
           let g = await guardarPlano(codigo, r, lugar.competencia);
           if (g.jaExistia && (!ativo || g.meta.id !== ativo.id)) g = await guardarPlano(codigo, r, lugar.competencia, { recarga: U.agoraISO() });
           await versaoNova(g, ativo, null);

@@ -44,7 +44,7 @@
     return !!bytes && bytes.length > 4 && bytes[0] === 0x25 && bytes[1] === 0x50 && bytes[2] === 0x44 && bytes[3] === 0x46;
   }
 
-  function ler(bytes, nomeArquivo) {
+  function ler(bytes, nomeArquivo, op) {
     const r = { nomeArquivo, hash: Util.hashBytes(bytes), tipo: 'desconhecido', motivo: '', avisos: [], previa: [] };
     let planilha;
     try {
@@ -54,11 +54,14 @@
       r.motivo = e.message;
       return fechar(r);
     }
-    return lerAbas(planilha.abas, r, planilha.avisos.slice());
+    return lerAbas(planilha.abas, r, planilha.avisos.slice(), op);
   }
 
   // A mesma leitura, com o arquivo já aberto em abas (planilha ou PDF).
-  function lerAbas(abasDoArquivo, r, avisosAbertura) {
+  // op: { desenhos } — os PADRÕES guardados desta empresa (razão, diário, plano). Eles vêm primeiro; só se
+  // não servirem é que o programa adivinha de novo (Dony, 29/09/2026).
+  function lerAbas(abasDoArquivo, r, avisosAbertura, op) {
+    const desenhos = (op && op.desenhos) || {};
     const nomeArquivo = r.nomeArquivo;
     const planilha = { abas: abasDoArquivo, avisos: avisosAbertura || [] };
     r.avisos = planilha.avisos.slice();
@@ -71,9 +74,10 @@
     // (saldo de abertura por fornecedor: formato a definir com o Dony — Parte 5.3)
 
     // Livro diário (todas as contas, uma partida por linha): antes do razão, que confundiria a lista de lançamentos.
-    const recDiario = LerDiario ? LerDiario.reconhecer(planilha.abas, { nomeArquivo }) : { tipo: null };
+    const doDiario = (desenhos.diario && desenhos.diario.desenho) || '';
+    const recDiario = LerDiario ? LerDiario.reconhecer(planilha.abas, { nomeArquivo, desenho: doDiario }) : { tipo: null };
     if (recDiario.tipo === 'diario') {
-      const d = LerDiario.ler(planilha.abas, { nomeArquivo });
+      const d = LerDiario.ler(planilha.abas, { nomeArquivo, desenho: doDiario });
       r.tipo = 'diario';
       r.motivo = recDiario.motivo;
       r.diario = d;
@@ -104,7 +108,7 @@
     const recPlano = LerPlano && LerPlano.reconhecer(planilha.abas, { nomeArquivo });
     if (recPlano) {
       try {
-        const p = LerPlano.ler(planilha.abas, { nomeArquivo });
+        const p = LerPlano.ler(planilha.abas, { nomeArquivo, colunas: desenhos.plano && desenhos.plano.colunas });
         r.tipo = 'plano';
         r.motivo = recPlano.motivo;
         r.plano = p;
@@ -173,7 +177,7 @@
   // A leitura que serve para qualquer arquivo: planilha ou PDF. É assíncrona porque abrir PDF é assíncrono.
   // op: { pdf: { pdfjs, aoAndar, maximoPaginas } }
   async function lerArquivo(bytes, nomeArquivo, op) {
-    if (!ehPdf(bytes)) return ler(bytes, nomeArquivo);
+    if (!ehPdf(bytes)) return ler(bytes, nomeArquivo, op);
     const r = { nomeArquivo, hash: Util.hashBytes(bytes), tipo: 'desconhecido', motivo: '', avisos: [], previa: [], dePdf: true };
     const LerPdf = (op && op.lerPdf) || (typeof self !== 'undefined' ? self.LerPdf : null);
     if (!LerPdf) { r.motivo = 'Não achei o leitor de PDF.'; return fechar(r); }
@@ -186,7 +190,7 @@
     }
     r.paginas = lido.paginas;
     const avisos = lido.lidas < lido.paginas ? ['O PDF tem ' + lido.paginas + ' páginas e foram lidas ' + lido.lidas + '.'] : [];
-    return lerAbas(lido.abas, r, avisos);
+    return lerAbas(lido.abas, r, avisos, op);
   }
 
   return { ler, lerArquivo, lerAbas, ehPdf, NOMES_DOS_TIPOS };
