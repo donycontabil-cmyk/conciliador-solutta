@@ -192,6 +192,9 @@
         else if (h === 'receitaBruta' && (casadas.indexOf('deducoes') >= 0 || menos || /\b(ICMS|PIS|COFINS|ISS|ISSQN|IPI|DAS)\b|SUBSTITUICAO TRIBUTARIA/.test(n))) decisao = { linha: 'deducoes', fonte: 'nome' };
         else if (h === 'cmv' && casadas[0] === 'perdas') decisao = { linha: 'perdas', fonte: 'nome' };
         else if (NATUREZA[h] && h !== 'depreciacao' && casadas[0] === 'depreciacao') decisao = { linha: 'depreciacao', fonte: 'nome' };
+        // "Fora da DRE" (encerramento) NÃO se herda por cima de uma conta que tem linha própria pelo nome:
+        // senão uma conta-mãe chamada "Lucro ou prejuízo do exercício" leva junto tudo o que está abaixo.
+        else if (h === 'fora' && casadas.length && casadas[0] !== 'fora') decisao = { linha: casadas[0], fonte: 'nome' };
         else decisao = { linha: h, fonte: herdada.fonte };
       } else if (dica === 'fin' && !(ehContainerFinanceiro(n) && !c.analitica)) {
         decisao = { linha: casadas[0] === 'tributos' ? 'tributos' : reserva('fin', n), fonte: 'nome' };
@@ -203,6 +206,11 @@
         const naturezas = casadas.filter((l) => NATUREZA[l]);
         // "UTILIDADES E SERVIÇOS": duas naturezas no nome de uma conta-mãe — decide nas de baixo.
         if (!c.analitica && naturezas.length >= 2 && naturezas.length === casadas.length) novaDica = { ambiguas: naturezas };
+        // Nome de ENCERRAMENTO numa conta SINTÉTICA é o nome do grupo, não de uma conta de fechamento: na
+        // Omega o grupo 3 inteiro se chama "LUCRO OU PREJUIZO DO EXERCICIO", e isso mandava 100 contas — a
+        // receita bruta, o CMV e todas as despesas — para fora da DRE (Dony, 29/09/2026). Quem decide são as
+        // contas de baixo; a conta de encerramento de verdade é analítica e continua ficando de fora.
+        else if (casadas[0] === 'fora' && !c.analitica) novaDica = dicaDoNome(n) || dica;
         else decisao = { linha: casadas[0], fonte: 'nome' };
       } else if (c.analitica) {
         const l = reserva(dica || dicaDoNome(n), n);
@@ -518,7 +526,9 @@
       const l = mapaUsado ? linhaNoMapa(mapaUsado, indice, c.conta) : linhaDoModelo(c.conta);
       if (l === 'fora') {
         const f = mapaUsado ? null : FORA_DA_DRE.find((x) => comeca(c.conta, x.prefixo));
-        foraDaDre.push({ conta: c.conta, titulo: c.titulo, motivo: f ? f.motivo : 'marcada fora da DRE nas linhas da empresa' });
+        // O valor que ficou de fora: é ele que desencaixa o balanço, então a tela precisa mostrar.
+        foraDaDre.push({ conta: c.conta, titulo: c.titulo, valor: movimentoNoAno(c.conta) || 0,
+          motivo: f ? f.motivo : (mapaEmpresa ? 'marcada fora da DRE nas linhas da empresa' : 'o programa entendeu que é conta de encerramento (o nome dela)') });
         continue;
       }
       if (l && analiticasDoGrupo.has(l) && l !== 'semLinha') { analiticasDoGrupo.get(l).push(c); continue; }

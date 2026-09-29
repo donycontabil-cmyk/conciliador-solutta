@@ -329,7 +329,31 @@
       'Ele foi lido com a coluna errada: abra o quadro de arquivos aqui de cima e, no cartão "Plano de contas", clique em "🔄 Ler de novo".');
     if (rel.lalur.ajustesSemConta.length) lista.push(rel.lalur.ajustesSemConta.length + ' conta(s) da lista de ajustes do LALUR não aparecem nos balancetes (' + rel.lalur.ajustesSemConta.slice(0, 3).join(', ') + (rel.lalur.ajustesSemConta.length > 3 ? ', …' : '') + '): confira a lista na aba LALUR.');
     if (!rel.lalur.pat.noBalancete && rel.lalur.contaPAT) lista.push('A conta do PAT (' + rel.lalur.contaPAT + ') não aparece nos balancetes: confira na aba LALUR.');
-    return lista.length ? '<div class="aviso ambar nao-imprimir" style="margin-top:12px"><span class="icone-aviso">⚠️</span><div>' + lista.map((a) => T.esc(a)).join('<br>') + '</div></div>' : '';
+    return (lista.length ? '<div class="aviso ambar nao-imprimir" style="margin-top:12px"><span class="icone-aviso">⚠️</span><div>' + lista.map((a) => T.esc(a)).join('<br>') + '</div></div>' : '') + avisoDaDre();
+  }
+
+  // CONTA DE RESULTADO QUE FICOU FORA DA DRE. É ela que faz o balanço não fechar, porque o balanço usa o
+  // lucro da DRE. Dony, 29/09/2026: "eu não consigo parar e tentar achar, mano. Ele precisa entender que
+  // quando não bater ativo e passivo e o problema é na DRE, tem que ABRIR A DRE para eu poder olhar de novo."
+  // Então o aviso mostra QUAIS contas, QUANTO dá, e leva até elas com um clique.
+  function avisoDaDre() {
+    const d = E.rel && E.rel.dre;
+    if (!d) return '';
+    const fora = (d.foraDaDre || []).filter((x) => x.valor);
+    const meses = (d.conferencia || []).filter((c) => c.diferenca);
+    if (!fora.length && !meses.length) return '';
+    const total = fora.reduce((s, x) => s + x.valor, 0);
+    const lista = fora.slice().sort((a, b) => Math.abs(b.valor) - Math.abs(a.valor));
+    return '<div class="aviso vermelho nao-imprimir" style="margin-top:12px"><span class="icone-aviso">📉</span><div>' +
+      '<b>' + (fora.length ? fora.length + ' conta(s) de resultado estão FORA da DRE' : 'A DRE não bate com o resultado do balancete') + '.</b> ' +
+      'É por isso que o balanço não fecha: o balanço usa o lucro da DRE.' +
+      (meses.length ? ' Meses com diferença: ' + T.esc(meses.map((c) => c.mes + ' (' + U.formatarCentavos(c.diferenca) + ')').join(', ')) + '.' : '') +
+      (fora.length ? '<div class="pequeno" style="margin-top:6px">' +
+        lista.slice(0, 6).map((x) => '<div><b>' + T.esc(x.conta) + '</b> ' + T.esc(x.titulo) + ' · <b>' + U.formatarCentavos(x.valor) + '</b> <span class="suave">· ' + T.esc(x.motivo) + '</span></div>').join('') +
+        (lista.length > 6 ? '<div class="suave">e mais ' + (lista.length - 6) + ' conta(s)…</div>' : '') +
+        '<div style="margin-top:4px">Somam <b>' + U.formatarCentavos(total) + '</b> no ano.</div></div>' : '') +
+      '<div style="margin-top:8px"><button type="button" class="botao pequeno" data-aba="dre-mensal" data-ver-fora="1">📉 Abrir a DRE nessas contas</button></div>' +
+      '</div></div>';
   }
 
   // ------------------------------------------------------------------
@@ -773,9 +797,18 @@
     const d = E.rel.dre;
     const nota = d.naoMapeadas.length ? '<p class="apres-nota">⚠️ "Outras contas de resultado" reúne conta(s) de resultado que nenhuma linha da DRE pega: ' +
       d.naoMapeadas.map((x) => T.esc(x.conta + ' ' + x.titulo)).join('; ') + '. Abra o subtotal e arraste cada conta pelos pontinhos à esquerda até a linha certa (ou use <b>⚙ Linhas da DRE</b>): fica guardado para a empresa.</p>' : '';
-    const fora = !d.foraDaDre.length ? '' : d.situacao === 'modelo'
-      ? '<p class="apres-nota suave">Fora da DRE, como na planilha: ' + d.foraDaDre.length + ' conta(s) de compras e estoque (4.2), que somam zero no mês.</p>'
-      : '<p class="apres-nota suave">Fora da DRE (marcadas nas linhas da DRE da empresa): ' + d.foraDaDre.length + ' conta(s) — ' + d.foraDaDre.slice(0, 3).map((x) => T.esc(x.conta + ' ' + x.titulo)).join('; ') + (d.foraDaDre.length > 3 ? '; …' : '') + '.</p>';
+    // As contas que ficaram FORA da DRE. As que têm valor aparecem uma a uma, com quanto é: são elas que
+    // fazem o balanço não fechar, e é aqui que ele vem parar quando clica no aviso (Dony, 29/09/2026).
+    const comValor = d.foraDaDre.filter((x) => x.valor).sort((a, b) => Math.abs(b.valor) - Math.abs(a.valor));
+    const fora = !d.foraDaDre.length ? '' : comValor.length
+      ? '<div class="aviso vermelho nao-imprimir" style="margin:10px 0"><span class="icone-aviso">📉</span><div>' +
+        '<b>' + comValor.length + ' conta(s) de resultado estão fora desta DRE</b>, somando ' + dinheiro(comValor.reduce((s, x) => s + x.valor, 0)) + ' no ano. ' +
+        'Enquanto estiverem fora, o lucro da DRE não bate com o resultado do balancete e o balanço não fecha.' +
+        '<div class="pequeno" style="margin-top:6px">' + comValor.map((x) => '<div><b>' + T.esc(x.conta) + '</b> ' + T.esc(x.titulo) + ' · <b>' + dinheiro(x.valor) + '</b> <span class="suave">· ' + T.esc(x.motivo) + '</span></div>').join('') + '</div>' +
+        '<div style="margin-top:6px">Para trazer uma delas de volta, abra <b>⚙ Linhas da DRE</b> e escolha a linha da conta.</div></div></div>'
+      : d.situacao === 'modelo'
+        ? '<p class="apres-nota suave">Fora da DRE, como na planilha: ' + d.foraDaDre.length + ' conta(s) de compras e estoque (4.2), que somam zero no mês.</p>'
+        : '<p class="apres-nota suave">Fora da DRE (sem valor no ano): ' + d.foraDaDre.length + ' conta(s) — ' + d.foraDaDre.slice(0, 3).map((x) => T.esc(x.conta + ' ' + x.titulo)).join('; ') + (d.foraDaDre.length > 3 ? '; …' : '') + '.</p>';
     const salvo = mapaDaEmpresa();
     const origem = d.situacao === 'mapa'
       ? 'linhas da DRE desta empresa' + (salvo && salvo.conferidoEm ? ', conferidas em ' + T.esc(U.dataHoraLocal(salvo.conferidoEm).slice(0, 10)) : '')
@@ -904,6 +937,14 @@
     const fecha = Math.abs(ll - resBal) <= 1;
     const conferencia = '<p class="md-conf ' + (fecha ? 'ok' : 'neg') + '">' + (fecha ? '✓ ' : '⚠ ') + 'Lucro líquido pela DRE <b>' + dinheiro(ll) + '</b> · resultado do balancete nos mesmos meses <b>' + dinheiro(resBal) + '</b>' +
       (fecha ? ' — iguais.' : ' — a diferença são as contas marcadas "Fora da DRE".') + '</p>';
+    // QUAIS contas estão fora, e quanto são. É aqui que ele chega clicando em "Abrir a DRE nessas contas":
+    // a lista fica ao lado da árvore, onde se escolhe a linha de cada uma (Dony, 29/09/2026).
+    const foraPrevia = (previa.dre.foraDaDre || []).filter((x) => x.valor).sort((a, b) => Math.abs(b.valor) - Math.abs(a.valor));
+    const listaFora = !foraPrevia.length ? '' : '<div class="aviso vermelho" style="margin:8px 0 0"><span class="icone-aviso">📉</span><div>' +
+      '<b>' + foraPrevia.length + ' conta(s) de resultado estão FORA da DRE</b>, somando ' + dinheiro(foraPrevia.reduce((s, x) => s + x.valor, 0)) + ' no período. ' +
+      'Enquanto estiverem fora, o lucro da DRE não bate com o balancete e o balanço não fecha. Escolha a linha de cada uma na lista ao lado:' +
+      '<div class="pequeno" style="margin-top:6px">' + foraPrevia.slice(0, 12).map((x) => '<div><b>' + T.esc(x.conta) + '</b> ' + T.esc(x.titulo) + ' · <b>' + dinheiro(x.valor) + '</b></div>').join('') +
+      (foraPrevia.length > 12 ? '<div class="suave">e mais ' + (foraPrevia.length - 12) + ' conta(s)…</div>' : '') + '</div></div></div>';
     // Por que o modelo não serve: as contas em que o código do modelo e o nome da conta discordam.
     const exemplos = ((d.avaliacao && d.avaliacao.divergencias) || []).slice(0, 3).map((x) => '<b>' + T.esc(x.conta + ' ' + x.titulo) + '</b>: pelo código do modelo iria para “' +
       T.esc(x.modelo ? rotuloDaLinha(x.modelo) : 'sem linha') + '”, pelo nome é “' + T.esc(rotuloDaLinha(x.pelosNomes)) + '”');
@@ -925,7 +966,7 @@
       '<div class="md-grade"><div class="apres-caixa md-arvore"><table class="apres md-tabela"><thead><tr><th class="fixa">Conta de resultado</th><th class="num md-c-valor">' + T.esc(periodo) + '</th><th class="md-c-linha">Linha da DRE</th></tr></thead><tbody>' +
       (linhas || '<tr><td colspan="3" class="suave">Nenhuma conta de resultado com movimento.</td></tr>') + '</tbody></table></div>' +
       '<div class="md-lado"><h3 class="apres-sub">Prévia da DRE <small>' + T.esc(periodo) + ' · muda na hora · clique no nome de uma linha para mudar como ela aparece</small></h3>' +
-      '<table class="apres md-previa"><tbody>' + linhasPrevia + '</tbody></table>' + conferencia + '</div></div>';
+      '<table class="apres md-previa"><tbody>' + linhasPrevia + '</tbody></table>' + conferencia + listaFora + '</div></div>';
   }
   // Muda a linha de uma conta. Numa conta-mãe, a escolha vale para todas as de baixo (as escolhas de baixo saem).
   function mudarLinhaDre(el, conta, valor) {
@@ -1161,7 +1202,7 @@
     if (bi) bi.addEventListener('click', imprimir);
     el.addEventListener('click', async (ev) => {
       const aba = ev.target.closest('[data-aba]');
-      if (aba) { irParaAba(el, aba.getAttribute('data-aba')); return; }
+      if (aba) { E.verFora = aba.hasAttribute('data-ver-fora'); irParaAba(el, aba.getAttribute('data-aba')); return; }
       const botaoGrupo = ev.target.closest('[data-aba-grupo]');
       if (botaoGrupo) { const g = GRUPOS_DE_ABAS.find((x) => x.id === botaoGrupo.getAttribute('data-aba-grupo')); if (g) irParaAba(el, g.abas.indexOf(E[g.ultima]) >= 0 ? E[g.ultima] : g.abas[0]); return; }
       // Balanço, DRE e fluxo de caixa para assinar: período, detalhe, assinaturas e impressão.
