@@ -889,6 +889,48 @@
     }
 
     // ------------------------------------------------------------------
+    // DOCUMENTOS DO ERP (Dony, 01/10/2026: "vamos criar um sistema contábil nosso… e depois deixar ele
+    // independente, tem como?"). Cada tabela do ERP — o layout do plano, as contas, os centros de resultado,
+    // as naturezas de operação — é um JSON em empresas/<código>/erp/<chave>.json. Numa pasta só dela: no dia
+    // em que o ERP virar programa próprio, é essa pasta que vai junto, sem desmanchar nada daqui.
+    // ------------------------------------------------------------------
+    const CHAVE_DOCUMENTO = /^[a-z0-9][a-z0-9_-]{0,40}$/;
+    function validarChave(chave) {
+      const c = String(chave === null || chave === undefined ? '' : chave);
+      if (!CHAVE_DOCUMENTO.test(c)) throw erro('Validacao', 'Nome de documento inválido: ' + c);
+      return c;
+    }
+    async function documento(codigo, chave) {
+      exigirConexao();
+      const c = validarChave(chave);
+      const dir = await pastaDaEmpresa(codigo, false);
+      const dirErp = dir && await pasta(dir, ['erp'], false);
+      return dirErp ? ((await lerJson(dirErp, c + '.json')) || null) : null;
+    }
+    async function salvarDocumento(codigo, chave, dados) {
+      exigirConexao();
+      const c = validarChave(chave);
+      const cod = validarCodigo(codigo);
+      const dirErp = await pasta(await pastaDaEmpresa(cod, true), ['erp'], true);
+      const doc = Object.assign({}, dados, { chave: c, codigo: cod, atualizadoEm: Util.agoraISO(), atualizadoPor: quem() });
+      await gravar(dirErp, c + '.json', JSON.stringify(doc));
+      return doc;
+    }
+    async function documentos(codigo) {
+      exigirConexao();
+      const dir = await pastaDaEmpresa(codigo, false);
+      const dirErp = dir && await pasta(dir, ['erp'], false);
+      if (!dirErp) return [];
+      const r = [];
+      for (const item of await listar(dirErp)) {
+        if (item.tipo !== 'file' || !item.nome.endsWith('.json')) continue;
+        const d = await lerJson(dirErp, item.nome);
+        if (d) r.push(d);
+      }
+      return r;
+    }
+
+    // ------------------------------------------------------------------
     // Rastro
     // ------------------------------------------------------------------
     async function registrarNoLog(acao) {
@@ -921,7 +963,7 @@
       const lista = codigoSo ? todas.filter((e) => String(e.codigo) === String(codigoSo)) : todas;
       if (codigoSo && !lista.length) throw erro('Validacao', 'A empresa ' + codigoSo + ' não está nesta pasta de dados.');
       const pacote = { programa: PROGRAMA, formato: FORMATO, exportadoEm: Util.agoraISO(), exportadoPor: quem(),
-        so: codigoSo ? String(codigoSo) : null, empresas: lista, arquivos: [], conciliacoes: [], congelados: [], log: [] };
+        so: codigoSo ? String(codigoSo) : null, empresas: lista, arquivos: [], conciliacoes: [], congelados: [], documentos: [], log: [] };
       for (const emp of lista) {
         for (const meta of await arquivos(emp.codigo)) {
           const conteudo = await conteudoDoArquivo(meta.id);
@@ -929,6 +971,8 @@
           pacote.arquivos.push({ meta, conteudo, original: b ? bytesParaBase64(b) : null });
         }
         pacote.conciliacoes.push.apply(pacote.conciliacoes, await conciliacoes(emp.codigo));
+        // As tabelas do ERP (plano de contas, centros, naturezas) vão no backup como tudo o mais.
+        pacote.documentos.push.apply(pacote.documentos, await documentos(emp.codigo));
         const dir = await pastaDaEmpresa(emp.codigo, false);
         const dirCong = dir && await pasta(dir, ['congelados'], false);
         for (const item of await listar(dirCong)) {
@@ -972,7 +1016,7 @@
       exigirConexao();
       if (!pacote || pacote.programa !== PROGRAMA) throw erro('Validacao', 'Este pacote não é do Conciliador Solutta.');
       const substituir = !!(opcoes && opcoes.substituir);
-      const r = { empresas: 0, arquivos: 0, conciliacoes: 0, congelados: 0, log: 0, jaTinha: { arquivos: 0, conciliacoes: 0 } };
+      const r = { empresas: 0, arquivos: 0, conciliacoes: 0, congelados: 0, documentos: 0, log: 0, jaTinha: { arquivos: 0, conciliacoes: 0, documentos: 0 } };
       const listaAtual = (await lerJson(raiz, 'empresas.json')) || [];
       for (const e of pacote.empresas || []) {
         const i = listaAtual.findIndex((x) => String(x.codigo) === String(e.codigo));
@@ -1010,6 +1054,15 @@
         await gravar(dir, c.id + '.json', JSON.stringify(c));
         r.conciliacoes++;
       }
+      // Tabelas do ERP: o mais novo manda (ou o do pacote, quando se mandou substituir).
+      for (const d of pacote.documentos || []) {
+        if (!d || !d.chave || !d.codigo) continue;
+        const atual = await documento(d.codigo, d.chave);
+        if (atual && !substituir && Util.paraMs(d.atualizadoEm) <= Util.paraMs(atual.atualizadoEm)) { r.jaTinha.documentos++; continue; }
+        const dirErp = await pasta(await pastaDaEmpresa(d.codigo, true), ['erp'], true);
+        await gravar(dirErp, validarChave(d.chave) + '.json', JSON.stringify(d));
+        r.documentos++;
+      }
       for (const c of pacote.congelados || []) {
         if (!c || !c.id) continue;
         const p = partesDoId(c.id);
@@ -1043,6 +1096,7 @@
       arquivos, conteudoDoArquivo, guardarArquivo, apagarArquivo, arquivoApagado,
       conciliacoes, salvarConciliacao, apagarConciliacao, versoes,
       congelar, congelado,
+      documento, salvarDocumento, documentos,
       registrarNoLog,
       exportarTudo, importarTudo,
       // extras desta casa

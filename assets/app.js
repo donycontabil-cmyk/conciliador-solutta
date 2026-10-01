@@ -11,7 +11,8 @@
   // Aqui se confere: faltando algum, a tela diz qual.
   const MODULOS = ['CONFIG', 'XLSX', 'Util', 'LerPlanilha', 'LerRazao', 'LerFinanceiro', 'LerBalancete', 'LerDiario', 'Familias', 'Leitor', 'MotorNomes',
     'MotorReclass', 'MotorFechamento', 'MotorTerceiro', 'MotorApresentacao', 'MotorDiario', 'MotorResultado', 'ExcelBonito', 'Backup', 'RelatorioCliente', 'LayoutAjustes', 'Demonstracao', 'Diagnostico', 'Armazenamento', 'ArmazenamentoPasta', 'ArmazenamentoMemoria',
-    'Tela', 'TelaPasta', 'TelaCarteira', 'TelaEmpresa', 'TelaFamilia', 'TelaSubir', 'TelaPasso1', 'TelaPasso13', 'TelaPasso4', 'TelaPasso3', 'TelaRelatorio3', 'TelaApresentacao', 'TelaDiario', 'TelaLivre', 'TelaBackup', 'TelaResultado', 'TelaSuporte'];
+    'ErpCadastros', 'ErpDados',
+    'Tela', 'TelaPasta', 'TelaCarteira', 'TelaEmpresa', 'TelaFamilia', 'TelaSubir', 'TelaPasso1', 'TelaPasso13', 'TelaPasso4', 'TelaPasso3', 'TelaRelatorio3', 'TelaApresentacao', 'TelaDiario', 'TelaLivre', 'TelaBackup', 'TelaResultado', 'TelaSuporte', 'TelaErp'];
 
   const CHAVE_USUARIO = 'conciliador-solutta.usuario';
   // Menu da esquerda fixo ou flutuante (Dony, 18/09/2026: "uma setinha que eu possa fixar quando eu quiser;
@@ -136,6 +137,19 @@
     partes.push('<div class="grupo">Programa</div>');
     partes.push('<a href="#/suporte" class="' + (r.nome === 'suporte' ? 'ativo' : '') + '">🔎 Ver o desenho de um arquivo<span class="sub">para adaptar a um sistema novo</span></a>');
     partes.push('<a href="#/sobre" class="' + (r.nome === 'sobre' ? 'ativo' : '') + '">ℹ️ Onde ficam os dados<span class="sub">hoje e no servidor da Solutta</span></a>');
+    // ERP SOLUTTA (Dony, 01/10/2026: "quero que você crie um menu ERP Solutta… bem aqui"). Começa dentro do
+    // Conciliador e vai crescendo: por enquanto, as tabelas básicas do sistema contábil.
+    partes.push('<div class="grupo">ERP Solutta</div>');
+    partes.push('<a href="#/erp" class="' + (r.nome === 'erp' && !r.parte ? 'ativo' : '') + '">🧮 Sistema contábil<span class="sub">as tabelas e, aos poucos, a escrituração</span></a>');
+    if (r.nome === 'erp') {
+      const cod = r.codigo || (raiz.TelaErp && raiz.TelaErp.empresaLembrada()) || '';
+      if (cod) {
+        raiz.TelaErp.PARTES.forEach((x) => {
+          partes.push('<a href="#/erp/' + x.id + '/' + encodeURIComponent(cod) + '" class="' + (r.parte === x.id ? 'ativo' : '') + '">' +
+            x.icone + ' ' + T.esc(x.titulo) + '<span class="sub">' + T.esc(x.sub) + '</span></a>');
+        });
+      }
+    }
     const publicado = App.config.build && App.config.build !== 'local';
     const versaoLinha = publicado
       ? 'versão ' + (App.config.numero || '?') + ' · ' + App.config.build
@@ -154,6 +168,8 @@
     if (!p.length) return { nome: 'carteira' };
     if (p[0] === 'sobre') return { nome: 'sobre' };
     if (p[0] === 'suporte') return { nome: 'suporte' };
+    // ERP Solutta: #/erp (início) e #/erp/<parte>/<código da empresa>
+    if (p[0] === 'erp') return { nome: 'erp', parte: p[1] || '', codigo: p[2] || '' };
     if (p[0] === 'empresa' && p[1]) {
       // Relatório de apresentação: #/empresa/<código>/apresentacao[/<ano>]
       if (p[2] === 'apresentacao') return { codigo: p[1], nome: 'apresentacao', ano: /^\d{4}$/.test(p[3] || '') ? Number(p[3]) : null };
@@ -203,6 +219,7 @@
       const r = App.rota;
       const conferir = () => minhaRodada === rodada;
       if (r.nome === 'carteira') await raiz.TelaCarteira.mostrar(conteudo, conferir);
+      else if (r.nome === 'erp') await raiz.TelaErp.mostrar(conteudo, r.parte, r.codigo, conferir);
       else if (r.nome === 'sobre') mostrarSobre(conteudo);
       else if (r.nome === 'empresa') await raiz.TelaEmpresa.mostrar(conteudo, r.codigo, conferir);
       else if (r.nome === 'apresentacao') await raiz.TelaApresentacao.mostrar(conteudo, r.codigo, r.ano, conferir);

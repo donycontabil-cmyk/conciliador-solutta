@@ -10,6 +10,7 @@
  *   conciliacoes(codigo, competencia), salvarConciliacao(registro), apagarConciliacao(id), versoes(id)
  *   exportarEmpresa(codigo) -> pacote de backup de uma empresa; importarTudo(pacote, { substituir })
  *   congelar(codigo, meta, conteudo), congelado(id)
+ *   documento(codigo, chave), salvarDocumento(codigo, chave, dados), documentos(codigo)  — tabelas do ERP
  *   registrarNoLog(acao)
  *   exportarTudo(), importarTudo(pacote)
  *
@@ -31,6 +32,8 @@
     'arquivos', 'conteudoDoArquivo', 'guardarArquivo', 'apagarArquivo', 'arquivoApagado',
     'conciliacoes', 'salvarConciliacao', 'apagarConciliacao', 'versoes',
     'congelar', 'congelado',
+    // Tabelas do ERP Solutta: um JSON por tabela, na pasta erp/ da empresa (ver erp-dados.js).
+    'documento', 'salvarDocumento', 'documentos',
     'registrarNoLog',
     'exportarTudo', 'exportarEmpresa', 'importarTudo',
   ];

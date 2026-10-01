@@ -1109,3 +1109,16 @@ table.rc-tabela-contas { font-size: 7.6pt; }
 .dem-tabela.dem-dmpl td.num, .dem-tabela.dem-dmpl th.num { width: auto; min-width: 26mm; }
 .dem-tabela.dem-dmpl th { font-size: 8pt; }
 .dem-tabela.dem-dmpl tr.dem-conta td:first-child { padding-left: 4mm; }
+
+/* ---------- ERP Solutta (Dony, 01/10/2026: "um menu ERP Solutta... aí vamos construindo aos poucos") ----------
+   Começa dentro do Conciliador e usa as peças de tela que já existem; só o que é dele mora aqui embaixo,
+   para sair junto no dia em que o ERP virar programa próprio. */
+.erp-abas { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 14px; border-bottom: 1px solid var(--borda); padding-bottom: 8px; }
+.erp-abas a { padding: 6px 12px; border-radius: 8px; text-decoration: none; color: var(--texto); font-size: 13.5px; border: 1px solid transparent; }
+.erp-abas a:hover { background: var(--fundo-suave); }
+.erp-abas a.ativa { background: var(--primaria); color: #fff; font-weight: 600; }
+.erp-abas a.suave { margin-left: auto; color: var(--suave); }
+.cartao.cartao-link { display: block; text-decoration: none; color: inherit; transition: box-shadow .12s, transform .12s; }
+.cartao.cartao-link:hover { box-shadow: 0 4px 14px rgba(0,0,0,0.10); transform: translateY(-1px); }
+table.md-tabela tr.erp-inativa td { opacity: .55; }
+table.md-tabela tr.erp-inativa td .cod { text-decoration: line-through; }

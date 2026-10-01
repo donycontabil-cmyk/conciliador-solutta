@@ -64,6 +64,8 @@
       exportadoEm: pacote.exportadoEm || '', exportadoPor: pacote.exportadoPor || '',
       arquivos: arqs.length, comOriginal: arqs.filter((a) => a.original).length, porTipo,
       conciliacoes: (pacote.conciliacoes || []).length, congelados: (pacote.congelados || []).length, log: (pacote.log || []).length,
+      // As tabelas do ERP Solutta (plano de contas, centros, naturezas) viajam junto com a empresa.
+      documentos: (pacote.documentos || []).length,
       meses, de: meses[0] || '', ate: meses[meses.length - 1] || '',
       conciliacoesLivres: (emp.conciliacoesLivres || []).length,
       // O trabalho conferido que vai junto com a empresa: quem recebe não refaz (Dony, 25/09/2026).
@@ -96,6 +98,7 @@
     por('arquivos.json', texto(semOriginal));
     por('conciliacoes.json', texto(pacote.conciliacoes || []));
     por('congelados.json', texto(pacote.congelados || []));
+    por('erp.json', texto(pacote.documentos || []));
     por('log.jsonl', texto((pacote.log || []).map((l) => JSON.stringify(l)).join('\n')));
     // Os arquivos originais entram crus, com o id no nome (nada de acento ou espaço no caminho do zip).
     (pacote.arquivos || []).forEach((a) => { if (a.original) por('originais/' + a.meta.id, base64ParaBytes(a.original)); });
@@ -139,7 +142,7 @@
     const pacote = { programa: PROGRAMA, formato: manifesto.formato, exportadoEm: manifesto.exportadoEm, exportadoPor: manifesto.exportadoPor,
       so: manifesto.empresa ? manifesto.empresa.codigo : null,
       empresas: json('empresas.json', []) || [], arquivos, conciliacoes: json('conciliacoes.json', []) || [],
-      congelados: json('congelados.json', []) || [], log };
+      congelados: json('congelados.json', []) || [], documentos: json('erp.json', []) || [], log };
     if (!pacote.empresas.length) throw erro('Validacao', 'Este backup não tem empresa dentro.');
     // Confere o que o manifesto prometeu com o que veio (arquivo cortado pela metade, por exemplo).
     const r = resumo(pacote);
