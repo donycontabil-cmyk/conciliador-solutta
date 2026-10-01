@@ -141,12 +141,18 @@
     // Conciliador e vai crescendo: por enquanto, as tabelas básicas do sistema contábil.
     partes.push('<div class="grupo">ERP Solutta</div>');
     partes.push('<a href="#/erp" class="' + (r.nome === 'erp' && !r.parte ? 'ativo' : '') + '">🧮 Sistema contábil<span class="sub">as tabelas e, aos poucos, a escrituração</span></a>');
+    // Dentro do ERP o menu abre em três degraus (Dony, 01/10/2026): Configurações › Contabilidade › tabelas.
     if (r.nome === 'erp') {
       const cod = r.codigo || (raiz.TelaErp && raiz.TelaErp.empresaLembrada()) || '';
-      if (cod) {
-        raiz.TelaErp.PARTES.forEach((x) => {
-          partes.push('<a href="#/erp/' + x.id + '/' + encodeURIComponent(cod) + '" class="' + (r.parte === x.id ? 'ativo' : '') + '">' +
-            x.icone + ' ' + T.esc(x.titulo) + '<span class="sub">' + T.esc(x.sub) + '</span></a>');
+      const item = raiz.TelaErp.itemDe(r.parte);
+      partes.push('<a href="#/erp/config' + (cod ? '/' + encodeURIComponent(cod) : '') + '" class="menu-n1 ' + (r.parte === 'config' ? 'ativo' : '') + '">⚙️ Configurações<span class="sub">as tabelas do sistema</span></a>');
+      if (cod && (r.parte === 'config' || item)) {
+        raiz.TelaErp.SECOES.forEach((s) => {
+          partes.push('<div class="grupo menu-n2">' + s.icone + ' ' + T.esc(s.titulo) + '</div>');
+          s.itens.forEach((x) => {
+            partes.push('<a href="#/erp/' + x.id + '/' + encodeURIComponent(cod) + '" class="menu-n2 ' + (r.parte === x.id ? 'ativo' : '') + '">' +
+              x.icone + ' ' + T.esc(x.titulo) + '</a>');
+          });
         });
       }
     }

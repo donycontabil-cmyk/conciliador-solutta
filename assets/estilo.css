@@ -1122,3 +1122,11 @@ table.rc-tabela-contas { font-size: 7.6pt; }
 .cartao.cartao-link:hover { box-shadow: 0 4px 14px rgba(0,0,0,0.10); transform: translateY(-1px); }
 table.md-tabela tr.erp-inativa td { opacity: .55; }
 table.md-tabela tr.erp-inativa td .cod { text-decoration: line-through; }
+/* Os degraus do menu do ERP: Configurações › Contabilidade › tabelas (Dony, 01/10/2026). */
+.menu a.menu-n1 { padding-left: 26px; }
+.menu a.menu-n2 { padding-left: 38px; font-size: 13px; }
+.menu .grupo.menu-n2 { padding-left: 26px; margin-top: 8px; font-size: 10.5px; }
+.erp-trilha { font-size: 12.5px; color: var(--suave); margin: 0 0 6px; }
+.erp-trilha a { color: var(--suave); text-decoration: none; }
+.erp-trilha a:hover { text-decoration: underline; }
+.erp-trilha b { color: var(--texto); }

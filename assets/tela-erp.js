@@ -16,11 +16,24 @@
   function app() { return raiz.App; }
 
   const CHAVE_EMPRESA = 'erp-solutta.empresa';
-  const PARTES = [
-    { id: 'plano', titulo: 'Plano de contas', icone: '📘', sub: 'o layout e as contas' },
-    { id: 'centros', titulo: 'Centros de resultado', icone: '🎯', sub: 'por loja, obra, projeto ou setor' },
-    { id: 'naturezas', titulo: 'Naturezas de operação', icone: '🔖', sub: 'o que a nota é, e o que ela gera' },
+  // ------------------------------------------------------------------
+  // O MENU DO ERP (Dony, 01/10/2026: "você vai criar um menu chamado CONFIGURAÇÕES; dentro dele,
+  // CONTABILIDADE; e dentro de contabilidade você joga o plano de contas, o centro de resultado e a
+  // natureza de operação"). É esta lista que desenha o menu da esquerda, a tela de Configurações e a
+  // trilha no alto de cada tabela — mexer aqui muda os três de uma vez. As outras seções (fiscal,
+  // financeiro, estoque, folha) entram aqui embaixo quando chegar a vez delas.
+  // ------------------------------------------------------------------
+  const SECOES = [
+    { id: 'contabilidade', titulo: 'Contabilidade', icone: '📚', sub: 'as tabelas que a escrituração usa', itens: [
+      { id: 'plano', titulo: 'Plano de contas', icone: '📘', sub: 'o layout e as contas' },
+      { id: 'centros', titulo: 'Centros de resultado', icone: '🎯', sub: 'por loja, obra, projeto ou setor' },
+      { id: 'naturezas', titulo: 'Naturezas de operação', icone: '🔖', sub: 'o que a nota é, e o que ela gera' },
+    ] },
   ];
+  // Todas as tabelas numa lista só (quem procura por id não precisa saber em que seção ela está).
+  const PARTES = [].concat.apply([], SECOES.map((s) => s.itens.map((i) => Object.assign({ secao: s.id }, i))));
+  const itemDe = (id) => PARTES.find((x) => x.id === id) || null;
+  const secaoDe = (id) => { const i = itemDe(id); return i ? SECOES.find((s) => s.id === i.secao) : null; };
 
   // Estado da tela (só desta sessão): o que está aberto na árvore e o que foi digitado na busca.
   const E = { codigo: null, parte: null, abertos: null, busca: '', plano: null, centros: null, naturezas: null };
@@ -32,17 +45,30 @@
   // ------------------------------------------------------------------
   // Moldura: o cabeçalho com a empresa e as abas do ERP
   // ------------------------------------------------------------------
-  function moldura(codigo, parte, corpo) {
-    const emp = empresaDe(codigo);
-    const p = PARTES.find((x) => x.id === parte) || PARTES[0];
+  function seletorDeEmpresa(codigo) {
     const opcoes = (app().empresas || []).map((e) => '<option value="' + T.esc(e.codigo) + '"' + (String(e.codigo) === String(codigo) ? ' selected' : '') + '>' +
       T.esc(e.codigo + ' · ' + e.nome) + '</option>').join('');
-    return '<div class="cabecalho"><div class="titulos"><h1>' + p.icone + ' ' + T.esc(p.titulo) + '</h1>' +
-      '<p class="suave">ERP Solutta · ' + T.esc(p.sub) + '</p></div>' +
-      '<div class="acoes"><label class="pequeno suave" for="erp-empresa" style="margin-right:6px">Empresa</label>' +
-      '<select id="erp-empresa" class="apres-campo" style="max-width:320px">' + opcoes + '</select></div></div>' +
-      '<div class="erp-abas nao-imprimir">' + PARTES.map((x) => '<a href="#/erp/' + x.id + '/' + encodeURIComponent(codigo) + '" class="' + (x.id === parte ? 'ativa' : '') + '">' +
-        x.icone + ' ' + T.esc(x.titulo) + '</a>').join('') + '<a href="#/erp" class="suave">↩ Início do ERP</a></div>' +
+    return '<div class="acoes"><label class="pequeno suave" for="erp-empresa" style="margin-right:6px">Empresa</label>' +
+      '<select id="erp-empresa" class="apres-campo" style="max-width:320px">' + opcoes + '</select></div>';
+  }
+  // Onde estou: ERP Solutta › Configurações › Contabilidade › Plano de contas.
+  function trilha(codigo, parte) {
+    const s = secaoDe(parte);
+    const i = itemDe(parte);
+    return '<nav class="erp-trilha nao-imprimir"><a href="#/erp">ERP Solutta</a> › <a href="#/erp/config/' + encodeURIComponent(codigo) + '">⚙️ Configurações</a>' +
+      (s ? ' › <a href="#/erp/config/' + encodeURIComponent(codigo) + '#' + s.id + '">' + s.icone + ' ' + T.esc(s.titulo) + '</a>' : '') +
+      (i ? ' › <b>' + T.esc(i.titulo) + '</b>' : '') + '</nav>';
+  }
+  function moldura(codigo, parte, corpo) {
+    const emp = empresaDe(codigo);
+    const p = itemDe(parte) || PARTES[0];
+    const s = secaoDe(parte) || SECOES[0];
+    return trilha(codigo, parte) +
+      '<div class="cabecalho"><div class="titulos"><h1>' + p.icone + ' ' + T.esc(p.titulo) + '</h1>' +
+      '<p class="suave">' + T.esc(p.sub) + '</p></div>' + seletorDeEmpresa(codigo) + '</div>' +
+      // As irmãs da mesma seção ficam à mão: pular de uma tabela para a outra sem voltar ao menu.
+      '<div class="erp-abas nao-imprimir">' + s.itens.map((x) => '<a href="#/erp/' + x.id + '/' + encodeURIComponent(codigo) + '" class="' + (x.id === parte ? 'ativa' : '') + '">' +
+        x.icone + ' ' + T.esc(x.titulo) + '</a>').join('') + '<a href="#/erp/config/' + encodeURIComponent(codigo) + '" class="suave">↩ Configurações</a></div>' +
       (emp ? '' : '<div class="aviso ambar"><span class="icone-aviso">⚠️</span><div>A empresa <b>' + T.esc(codigo) + '</b> não está cadastrada. <a href="#/">Ver as empresas</a></div></div>') +
       corpo;
   }
@@ -81,33 +107,56 @@
     const escolhida = empresas.find((e) => String(e.codigo) === lembrada) || empresas[0];
     const sit = await D().situacao(escolhida.codigo);
     if (conferir && !conferir()) return;
-    E.parte = 'plano';
+    E.parte = '';
+    const cod = escolhida.codigo;
     pintar(el,
-      '<div class="cabecalho"><div class="titulos"><h1>ERP Solutta</h1>' +
-      '<p class="suave">O sistema contábil do escritório. Começa pelas tabelas básicas: <b>plano de contas</b>, <b>centros de resultado</b> e <b>naturezas de operação</b>.</p></div>' +
-      '<div class="acoes"><label class="pequeno suave" for="erp-empresa" style="margin-right:6px">Empresa</label>' +
-      '<select id="erp-empresa" class="apres-campo" style="max-width:320px">' +
-      empresas.map((e) => '<option value="' + T.esc(e.codigo) + '"' + (String(e.codigo) === String(escolhida.codigo) ? ' selected' : '') + '>' +
-        T.esc(e.codigo + ' · ' + e.nome) + '</option>').join('') + '</select></div></div>' +
+      '<div class="cabecalho"><div class="titulos"><h1>🧮 ERP Solutta</h1>' +
+      '<p class="suave">O sistema contábil do escritório.</p></div>' + seletorDeEmpresa(cod) + '</div>' +
       '<div class="grade-3">' +
-      cartaoInicio('plano', escolhida.codigo, sit.temLayout
-        ? '<b>' + sit.contas + '</b> conta(s) cadastrada(s)'
-        : '<span class="falta">ainda sem layout</span> — é por aqui que começa') +
-      cartaoInicio('centros', escolhida.codigo, sit.centros ? '<b>' + sit.centros + '</b> centro(s)' : '<span class="suave">nenhum ainda</span>') +
-      cartaoInicio('naturezas', escolhida.codigo, sit.naturezas ? '<b>' + sit.naturezas + '</b> natureza(s)' : '<span class="suave">nenhuma ainda</span>') +
+      '<a class="cartao corpo cartao-link" href="#/erp/config/' + encodeURIComponent(cod) + '"><h3>⚙️ Configurações</h3>' +
+      '<p class="suave pequeno" style="margin:6px 0 10px">As tabelas do sistema, por módulo.</p>' +
+      '<p class="pequeno">📚 <b>Contabilidade</b>: plano de contas' + (sit.temLayout ? ' (' + sit.contas + ')' : ' <span class="falta">a fazer</span>') +
+      ', centros de resultado' + (sit.centros ? ' (' + sit.centros + ')' : '') + ', naturezas de operação' + (sit.naturezas ? ' (' + sit.naturezas + ')' : '') + '</p></a>' +
+      '<div class="cartao corpo"><h3>📝 Escrituração</h3><p class="suave pequeno" style="margin:6px 0 10px">Lançamento, lote, estorno e histórico padrão.</p>' +
+      '<p class="pequeno suave">Próximo pedaço — depende das tabelas de contabilidade estarem de pé.</p></div>' +
+      '<div class="cartao corpo"><h3>📚 Livros e obrigações</h3><p class="suave pequeno" style="margin:6px 0 10px">Diário, razão, balancete, SPED e impostos.</p>' +
+      '<p class="pequeno suave">Vem depois da escrituração.</p></div>' +
       '</div>' +
       '<div class="cartao corpo" style="margin-top:14px"><h3>Como isso cresce</h3>' +
-      '<p class="suave" style="margin-top:8px;line-height:1.6">Estas três tabelas são a base. Com elas de pé, o próximo passo é o <b>lançamento contábil</b> ' +
+      '<p class="suave" style="margin-top:8px;line-height:1.6">As tabelas de <b>Configurações › Contabilidade</b> são a base. Com elas de pé, o próximo passo é o <b>lançamento contábil</b> ' +
       '(partida dobrada, lote, estorno e histórico padrão) e, depois dele, os <b>livros oficiais</b>, a <b>entrada automática</b> de nota e extrato, o <b>SPED</b> e a <b>apuração de impostos</b>. ' +
       'Cada pedaço entra funcionando, sem mexer no que já está pronto.</p>' +
       '<p class="suave pequeno" style="margin-top:8px">Os dados do ERP ficam numa pasta só dele, dentro de cada empresa (<b>erp/</b>), e entram no backup. ' +
       'No dia em que o ERP virar programa próprio, essa pasta vai junto.</p></div>');
   }
-  function cartaoInicio(id, codigo, resumo) {
-    const p = PARTES.find((x) => x.id === id);
-    return '<a class="cartao corpo cartao-link" href="#/erp/' + id + '/' + encodeURIComponent(codigo) + '">' +
-      '<h3>' + p.icone + ' ' + T.esc(p.titulo) + '</h3>' +
-      '<p class="suave pequeno" style="margin:6px 0 10px">' + T.esc(p.sub) + '</p><p>' + resumo + '</p></a>';
+
+  // ------------------------------------------------------------------
+  // CONFIGURAÇÕES: as seções e, dentro de cada uma, as tabelas
+  // ------------------------------------------------------------------
+  async function mostrarConfig(el, codigo, conferir) {
+    T.carregando(el, 'Abrindo as configurações…');
+    const empresas = app().empresas || [];
+    const cod = String(codigo || empresaLembrada() || (empresas[0] || {}).codigo || '');
+    if (!cod) { await mostrarInicio(el, conferir); return; }
+    E.codigo = cod; E.parte = 'config';
+    lembrarEmpresa(cod);
+    const sit = await D().situacao(cod);
+    if (conferir && !conferir()) return;
+    const resumos = {
+      plano: sit.temLayout ? '<b>' + sit.contas + '</b> conta(s) · layout pronto' : '<span class="falta">ainda sem layout</span> — comece por aqui',
+      centros: sit.centros ? '<b>' + sit.centros + '</b> centro(s)' : '<span class="suave">nenhum ainda</span>',
+      naturezas: sit.naturezas ? '<b>' + sit.naturezas + '</b> natureza(s)' : '<span class="suave">nenhuma ainda</span>',
+    };
+    pintar(el,
+      '<nav class="erp-trilha nao-imprimir"><a href="#/erp">ERP Solutta</a> › <b>⚙️ Configurações</b></nav>' +
+      '<div class="cabecalho"><div class="titulos"><h1>⚙️ Configurações</h1>' +
+      '<p class="suave">As tabelas do sistema, por módulo. Elas valem para esta empresa.</p></div>' + seletorDeEmpresa(cod) + '</div>' +
+      SECOES.map((s) => '<h3 class="apres-sub" id="' + s.id + '" style="margin-top:8px">' + s.icone + ' ' + T.esc(s.titulo) +
+        ' <small class="suave">' + T.esc(s.sub) + '</small></h3>' +
+        '<div class="grade-3">' + s.itens.map((i) => '<a class="cartao corpo cartao-link" href="#/erp/' + i.id + '/' + encodeURIComponent(cod) + '">' +
+          '<h3>' + i.icone + ' ' + T.esc(i.titulo) + '</h3>' +
+          '<p class="suave pequeno" style="margin:6px 0 10px">' + T.esc(i.sub) + '</p><p>' + (resumos[i.id] || '') + '</p></a>').join('') + '</div>').join('') +
+      '<p class="apres-nota suave" style="margin-top:14px">Os outros módulos — fiscal, financeiro, estoque, folha — ganham a seção deles aqui conforme forem entrando.</p>');
   }
 
   // ------------------------------------------------------------------
@@ -697,11 +746,12 @@
 
   // ------------------------------------------------------------------
   async function mostrar(el, parte, codigo, conferir) {
+    if (parte === 'config') return mostrarConfig(el, codigo, conferir);
     if (!parte || !codigo) return mostrarInicio(el, conferir);
     if (parte === 'centros') return mostrarCentros(el, codigo, conferir);
     if (parte === 'naturezas') return mostrarNaturezas(el, codigo, conferir);
     return mostrarPlano(el, codigo, conferir);
   }
 
-  raiz.TelaErp = { mostrar, PARTES, empresaLembrada, _teste: { estado: () => E } };
+  raiz.TelaErp = { mostrar, SECOES, PARTES, itemDe, secaoDe, empresaLembrada, _teste: { estado: () => E } };
 })(self);
