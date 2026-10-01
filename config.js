@@ -15,8 +15,8 @@
     // Número e carimbo da versão publicada. Preenchidos sozinhos pelo montar-site.js a cada
     // publicação (o número sobe 1, 2, 3…), para quem usa saber se pegou a versão nova (Ctrl+F5).
     // build 'local' = rodando neste PC, ainda não publicado.
-    numero: 92,
-    build: '01/10/2026 12:12',
+    numero: 93,
+    build: '01/10/2026 13:07',
 
     // Onde os dados moram:
     //   'pasta'    -> numa pasta do computador de quem usa (hoje)
@@ -43,6 +43,16 @@
     // Participante | Valor | Histórico, sem títulos) ou 'texto' (o layout antigo de referência).
     layoutAjustes: {
       formato: 'planilha',
+    },
+
+    // ERP Solutta: a área fica ESCONDIDA no menu até alguém digitar a senha (Dony, 01/10/2026: "para
+    // acessar esse menu, digite uma senha… ele é secreto dentro dele"). Entra-se pelo atalho do teclado ou
+    // pelo endereço #/erp. Aqui fica só o RESUMO da senha — nunca a senha.
+    // Trocar: node ferramentas/senha-erp.js <senha nova> --gravar
+    // Deixar em branco ('') tira a tranca e o menu volta a aparecer para todo mundo.
+    erp: {
+      senha: '9eacbdb4728d8705',
+      atalho: 'Ctrl+Shift+E',
     },
   };
   if (typeof module === 'object' && module.exports) module.exports = CONFIG;

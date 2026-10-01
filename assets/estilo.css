@@ -1130,3 +1130,7 @@ table.md-tabela tr.erp-inativa td .cod { text-decoration: line-through; }
 .erp-trilha a { color: var(--suave); text-decoration: none; }
 .erp-trilha a:hover { text-decoration: underline; }
 .erp-trilha b { color: var(--texto); }
+/* A tranca do ERP: tela sóbria, centrada, sem contar o que tem atrás dela. */
+.erp-tranca { max-width: 420px; margin: 8vh auto 0; }
+.erp-tranca .cartao { padding: 22px 24px; }
+.erp-tranca input { width: 100%; font-size: 18px; letter-spacing: 3px; text-align: center; }

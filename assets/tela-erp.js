@@ -80,6 +80,8 @@
     raizEl.innerHTML = html;
     const sel = raizEl.querySelector('#erp-empresa');
     if (sel) sel.addEventListener('change', () => { lembrarEmpresa(sel.value); app().ir('#/erp/' + (E.parte || 'plano') + '/' + encodeURIComponent(sel.value)); });
+    const bt = raizEl.querySelector('[data-erp="trancar"]');
+    if (bt) bt.addEventListener('click', trancar);
     return raizEl;
   }
 
@@ -111,7 +113,9 @@
     const cod = escolhida.codigo;
     pintar(el,
       '<div class="cabecalho"><div class="titulos"><h1>🧮 ERP Solutta</h1>' +
-      '<p class="suave">O sistema contábil do escritório.</p></div>' + seletorDeEmpresa(cod) + '</div>' +
+      '<p class="suave">O sistema contábil do escritório.' +
+      (raiz.ErpAcesso.temTranca() ? ' <span class="pequeno">🔓 Aberto nesta janela · <button type="button" class="lapis" data-erp="trancar">trancar</button></span>' : '') +
+      '</p></div>' + seletorDeEmpresa(cod) + '</div>' +
       '<div class="grade-3">' +
       '<a class="cartao corpo cartao-link" href="#/erp/config/' + encodeURIComponent(cod) + '"><h3>⚙️ Configurações</h3>' +
       '<p class="suave pequeno" style="margin:6px 0 10px">As tabelas do sistema, por módulo.</p>' +
@@ -745,7 +749,58 @@
   }
 
   // ------------------------------------------------------------------
+  // ------------------------------------------------------------------
+  // A TRANCA (Dony, 01/10/2026: "para acessar esse menu, digite uma senha… ele é secreto dentro dele").
+  // Trancado, o ERP nem aparece no menu da esquerda; quem sabe que ele existe entra pelo atalho do teclado
+  // ou digitando #/erp. A tela daqui é sóbria de propósito: quem cair nela por acaso não vê o que tem dentro.
+  // ------------------------------------------------------------------
+  function telaSenha(el, parte, codigo) {
+    const A = raiz.ErpAcesso;
+    const raizEl = pintar(el,
+      '<div class="erp-tranca"><div class="cartao corpo">' +
+      '<h2 style="margin:0 0 6px">🔒 Área restrita</h2>' +
+      '<p class="suave" style="margin:0 0 14px;line-height:1.55">Digite a senha para continuar.</p>' +
+      '<div class="campo"><label for="erp-senha">Senha</label>' +
+      '<input id="erp-senha" type="password" autocomplete="off" autofocus inputmode="numeric" placeholder="••••••"></div>' +
+      '<div id="erp-senha-erro" style="margin-top:10px"></div>' +
+      '<div style="margin-top:14px;display:flex;gap:8px">' +
+      '<button type="button" class="botao primario" id="erp-entrar">Entrar</button>' +
+      '<a class="botao" href="#/">Voltar</a></div>' +
+      '<p class="suave pequeno" style="margin-top:14px">A senha vale enquanto esta janela do navegador ficar aberta.</p>' +
+      '</div></div>');
+    const campo = raizEl.querySelector('#erp-senha');
+    const erro = raizEl.querySelector('#erp-senha-erro');
+    let tentativas = 0;
+    const tentar = () => {
+      if (A.conferir(campo.value)) {
+        A.liberar();
+        app().atualizarMenu();
+        campo.value = '';
+        mostrar(el, parte, codigo);
+        return;
+      }
+      tentativas++;
+      campo.value = '';
+      campo.focus();
+      erro.innerHTML = '<div class="aviso vermelho"><span class="icone-aviso">⚠️</span><div>Senha errada.' +
+        (tentativas >= 3 ? ' Se perdeu a senha, fale com quem cuida do programa: ela é trocada no <b>config.js</b>.' : '') + '</div></div>';
+    };
+    raizEl.querySelector('#erp-entrar').addEventListener('click', tentar);
+    campo.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); tentar(); } });
+  }
+
+  // Trancar de novo (o botão fica no início do ERP).
+  async function trancar() {
+    const ok = await T.confirmar({ titulo: 'Trancar o ERP?',
+      texto: 'O menu volta a ficar escondido. Para entrar de novo é preciso digitar a senha.', botao: '🔒 Trancar' });
+    if (!ok) return;
+    raiz.ErpAcesso.trancar();
+    app().atualizarMenu();
+    app().ir('#/');
+  }
+
   async function mostrar(el, parte, codigo, conferir) {
+    if (!raiz.ErpAcesso.liberado()) { telaSenha(el, parte, codigo); return; }
     if (parte === 'config') return mostrarConfig(el, codigo, conferir);
     if (!parte || !codigo) return mostrarInicio(el, conferir);
     if (parte === 'centros') return mostrarCentros(el, codigo, conferir);

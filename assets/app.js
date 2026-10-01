@@ -11,7 +11,7 @@
   // Aqui se confere: faltando algum, a tela diz qual.
   const MODULOS = ['CONFIG', 'XLSX', 'Util', 'LerPlanilha', 'LerRazao', 'LerFinanceiro', 'LerBalancete', 'LerDiario', 'Familias', 'Leitor', 'MotorNomes',
     'MotorReclass', 'MotorFechamento', 'MotorTerceiro', 'MotorApresentacao', 'MotorDiario', 'MotorResultado', 'ExcelBonito', 'Backup', 'RelatorioCliente', 'LayoutAjustes', 'Demonstracao', 'Diagnostico', 'Armazenamento', 'ArmazenamentoPasta', 'ArmazenamentoMemoria',
-    'ErpCadastros', 'ErpDados',
+    'ErpCadastros', 'ErpDados', 'ErpAcesso',
     'Tela', 'TelaPasta', 'TelaCarteira', 'TelaEmpresa', 'TelaFamilia', 'TelaSubir', 'TelaPasso1', 'TelaPasso13', 'TelaPasso4', 'TelaPasso3', 'TelaRelatorio3', 'TelaApresentacao', 'TelaDiario', 'TelaLivre', 'TelaBackup', 'TelaResultado', 'TelaSuporte', 'TelaErp'];
 
   const CHAVE_USUARIO = 'conciliador-solutta.usuario';
@@ -139,6 +139,9 @@
     partes.push('<a href="#/sobre" class="' + (r.nome === 'sobre' ? 'ativo' : '') + '">ℹ️ Onde ficam os dados<span class="sub">hoje e no servidor da Solutta</span></a>');
     // ERP SOLUTTA (Dony, 01/10/2026: "quero que você crie um menu ERP Solutta… bem aqui"). Começa dentro do
     // Conciliador e vai crescendo: por enquanto, as tabelas básicas do sistema contábil.
+    // SECRETO ENQUANTO TRANCADO ("ele é secreto dentro dele"): sem a senha, nada disto aparece. Quem sabe
+    // que existe entra pelo atalho do teclado ou digitando #/erp.
+    if (!raiz.ErpAcesso.liberado()) { montarRodapeDoMenu(partes, T); menu.innerHTML = partes.join(''); return; }
     partes.push('<div class="grupo">ERP Solutta</div>');
     partes.push('<a href="#/erp" class="' + (r.nome === 'erp' && !r.parte ? 'ativo' : '') + '">🧮 Sistema contábil<span class="sub">as tabelas e, aos poucos, a escrituração</span></a>');
     // Dentro do ERP o menu abre em três degraus (Dony, 01/10/2026): Configurações › Contabilidade › tabelas.
@@ -156,13 +159,16 @@
         });
       }
     }
+    montarRodapeDoMenu(partes, T);
+    menu.innerHTML = partes.join('');
+  }
+  function montarRodapeDoMenu(partes, T) {
     const publicado = App.config.build && App.config.build !== 'local';
     const versaoLinha = publicado
       ? 'versão ' + (App.config.numero || '?') + ' · ' + App.config.build
       : 'desenvolvimento (neste computador)';
     partes.push('<div class="rodape-menu"><b>' + T.esc(App.config.programa) + '</b> · ' + T.esc(App.config.versao) +
       '<br><span title="Número e data/hora da versão publicada. Depois de atualizar, dê Ctrl+F5 e confira se o número mudou.">' + T.esc(versaoLinha) + '</span></div>');
-    menu.innerHTML = partes.join('');
   }
 
   // ------------------------------------------------------------------
@@ -335,6 +341,18 @@
     document.body.appendChild(d);
   }
 
+  // A PORTA SECRETA do ERP: com o menu escondido, é o atalho do teclado (Ctrl+Shift+E, do config.js) que
+  // leva à tela da senha. O outro caminho é digitar #/erp no endereço.
+  function ligarAtalhoDoErp() {
+    const combinacao = String((App.config.erp && App.config.erp.atalho) || 'Ctrl+Shift+E').toLowerCase();
+    const letra = combinacao.split('+').pop().trim();
+    raiz.addEventListener('keydown', (ev) => {
+      if (!ev.ctrlKey || !ev.shiftKey || String(ev.key || '').toLowerCase() !== letra) return;
+      ev.preventDefault();
+      ir('#/erp');
+    });
+  }
+
   async function iniciar() {
     const faltam = MODULOS.filter((m) => !raiz[m]);
     if (faltam.length) {
@@ -392,6 +410,7 @@
       }
     }
     raiz.addEventListener('hashchange', mostrarRota);
+    ligarAtalhoDoErp();
     await mostrarRota();
   }
 
