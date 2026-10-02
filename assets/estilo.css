@@ -1135,22 +1135,28 @@ table.md-tabela tr.erp-inativa td .cod { text-decoration: line-through; }
 .erp-tranca .cartao { padding: 22px 24px; }
 .erp-tranca input { width: 100%; font-size: 18px; letter-spacing: 3px; text-align: center; }
 
-/* ---------- Controle de entregas (Dony, 02/10/2026) ----------
-   A grade é larga: uma coluna por entrega. O nome da coluna fica deitado para caber a carteira inteira. */
-table.ent-tabela th.ent-col { height: 118px; vertical-align: bottom; padding: 4px 2px; width: 30px; min-width: 30px; }
-table.ent-tabela th.ent-col span { display: block; writing-mode: vertical-rl; transform: rotate(180deg); white-space: nowrap;
-  font-size: 11.5px; font-weight: 600; max-height: 110px; overflow: hidden; }
-table.ent-tabela th.ent-col-mes { width: 34px; min-width: 34px; text-align: center; font-size: 11.5px; }
-table.ent-tabela td.ent-celula { text-align: center; padding: 2px; }
-table.ent-tabela td.ent-fora { color: var(--borda-forte); }
-table.ent-tabela tr.ent-grupo td { background: var(--fundo-suave); padding: 6px 8px; }
-.ent-botao { border: 0; background: none; padding: 2px; cursor: pointer; border-radius: 6px; }
-.ent-botao:hover { background: var(--fundo-suave); }
-.ent-selo { display: inline-block; min-width: 22px; height: 22px; line-height: 22px; border-radius: 6px; font-size: 12px; font-weight: 700; text-align: center; }
-.ent-verde { background: var(--verde-fundo); color: #175f3b; }
-.ent-ambar { background: var(--ambar-fundo); color: #6d4700; }
-.ent-vermelho { background: var(--vermelho-fundo); color: #8c1d17; }
-.ent-cinza { background: var(--fundo-suave); color: var(--suave); }
-.ent-legenda { font-weight: 400; }
-.ent-legenda .ent-selo { margin: 0 2px 0 8px; }
-label.caixa-opcao.ent-escolha { display: block; margin: 2px 0; }
+
+/* ---------- Controle de entregas / obrigações (Dony, 02/10/2026, no desenho dos prints dele) ---------- */
+.ent-escolha-caixa { margin-bottom: 12px; }
+.ent-vazio { text-align: center; padding: 42px 20px; }
+.ent-cartoes { display: flex; flex-wrap: wrap; gap: 28px; margin-bottom: 12px; }
+.ent-cartoes > div { min-width: 140px; line-height: 1.5; }
+.ent-barra { flex-wrap: wrap; gap: 6px; }
+.ent-barra select.pequeno { max-width: 170px; font-size: 12.5px; padding: 4px 6px; }
+.ent-caixa { overflow: auto; max-height: 68vh; }
+table.ent-obrig { font-size: 12.5px; }
+table.ent-obrig th { position: sticky; top: 0; z-index: 2; background: var(--fundo-suave); white-space: nowrap; }
+table.ent-obrig th.ent-ordena { cursor: pointer; user-select: none; }
+table.ent-obrig th.ent-ordena:hover { background: var(--borda); }
+table.ent-obrig td { vertical-align: middle; padding: 3px 6px; }
+table.ent-obrig td.ent-empresa { min-width: 240px; }
+table.ent-obrig td.ent-celula { text-align: center; }
+table.ent-obrig input.apres-campo, table.ent-obrig select.apres-campo { font-size: 12.5px; padding: 3px 6px; width: 100%; min-width: 92px; }
+table.ent-obrig td input[type="checkbox"] { width: 17px; height: 17px; }
+table.ent-obrig tr.ent-linha-atraso td.ent-empresa { box-shadow: inset 3px 0 0 var(--vermelho); }
+select.ent-status { font-weight: 600; border-radius: 6px; }
+select.ent-status.ent-verde { background: var(--verde-fundo); color: #175f3b; }
+select.ent-status.ent-ambar { background: var(--ambar-fundo); color: #6d4700; }
+select.ent-status.ent-vermelho { background: var(--vermelho-fundo); color: #8c1d17; }
+select.ent-status.ent-cinza { background: var(--fundo-suave); color: var(--texto); }
+@media print { .ent-caixa { max-height: none; overflow: visible; } }

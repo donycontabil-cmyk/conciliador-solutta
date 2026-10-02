@@ -545,6 +545,10 @@
         regime: String(empresa.regime || '').trim(),
         atividade: String(empresa.atividade || '').trim(),
         grupo: String(empresa.grupo || '').trim(),
+        // Controle de obrigações (Dony, 02/10/2026): o BPO (o serviço contratado) e a CÉLULA (a equipe
+        // que cuida da empresa) viram coluna e filtro na tela de controle.
+        bpo: String(empresa.bpo || '').trim().slice(0, 40),
+        celula: String(empresa.celula || '').trim().slice(0, 40),
         criadoEm: anterior ? anterior.criadoEm : agora,
         criadoPor: anterior ? (anterior.criadoPor || quem()) : quem(),
         atualizadoEm: agora,
@@ -1040,7 +1044,7 @@
     // abas escondidas e a nota escrita à mão. Numa importação, isso nunca se perde: se o lado de cá não tem,
     // vem do backup; se os dois têm, fica o do cadastro mais novo.
     const CONFIG_DA_EMPRESA = ['mapaDre', 'mapaBalancete', 'desenhos', 'assinaturas', 'logo', 'corRelatorio', 'conciliacoesLivres',
-      'papeisDeConta', 'contasDoDiario', 'abasOcultas', 'notasExtras', 'consolidacao', 'entregas'];
+      'papeisDeConta', 'contasDoDiario', 'abasOcultas', 'notasExtras', 'consolidacao', 'entregas', 'bpo', 'celula'];
     const semConteudo = (x) => x === undefined || x === null || x === '' ||
       (Array.isArray(x) && !x.length) ||
       (typeof x === 'object' && !Array.isArray(x) && !Object.keys(x).length) ||

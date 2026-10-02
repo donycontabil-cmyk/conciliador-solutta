@@ -137,8 +137,8 @@
     // CONTROLE DE ENTREGAS (Dony, 02/10/2026): no menu principal, à vista, sem senha — é controle de
     // equipe. Fica logo abaixo da carteira, porque é dali que se olha a carteira inteira todo dia.
     partes.push('<div class="grupo">Controle de entregas</div>');
-    partes.push('<a href="#/entregas" class="' + (r.nome === 'entregas' && !r.parte ? 'ativo' : (r.nome === 'entregas' && r.parte !== 'tipos' ? 'ativo' : '')) + '">📦 Painel do mês<span class="sub">o que falta, o que atrasou, por empresa</span></a>');
-    partes.push('<a href="#/entregas/tipos" class="' + (r.nome === 'entregas' && r.parte === 'tipos' ? 'ativo' : '') + '">⚙ Entregas do escritório<span class="sub">a lista, os prazos e os regimes</span></a>');
+    partes.push('<a href="#/entregas" class="' + (r.nome === 'entregas' && r.parte !== 'obrigacoes' ? 'ativo' : '') + '">📋 Controle de obrigações<span class="sub">ECD, ECF, IBGE, MIT… por empresa</span></a>');
+    partes.push('<a href="#/entregas/obrigacoes" class="' + (r.nome === 'entregas' && r.parte === 'obrigacoes' ? 'ativo' : '') + '">⚙ Obrigações<span class="sub">a lista, a competência e os prazos</span></a>');
     partes.push('<div class="grupo">Programa</div>');
     partes.push('<a href="#/suporte" class="' + (r.nome === 'suporte' ? 'ativo' : '') + '">🔎 Ver o desenho de um arquivo<span class="sub">para adaptar a um sistema novo</span></a>');
     partes.push('<a href="#/sobre" class="' + (r.nome === 'sobre' ? 'ativo' : '') + '">ℹ️ Onde ficam os dados<span class="sub">hoje e no servidor da Solutta</span></a>');
@@ -241,7 +241,7 @@
       const conferir = () => minhaRodada === rodada;
       if (r.nome === 'carteira') await raiz.TelaCarteira.mostrar(conteudo, conferir);
       else if (r.nome === 'erp') await raiz.TelaErp.mostrar(conteudo, r.parte, r.codigo, conferir);
-      else if (r.nome === 'entregas') await raiz.TelaEntregas.mostrar(conteudo, r.parte, r.a, r.b, conferir);
+      else if (r.nome === 'entregas') await raiz.TelaEntregas.mostrar(conteudo, r.parte, r.a, conferir);
       else if (r.nome === 'sobre') mostrarSobre(conteudo);
       else if (r.nome === 'empresa') await raiz.TelaEmpresa.mostrar(conteudo, r.codigo, conferir);
       else if (r.nome === 'apresentacao') await raiz.TelaApresentacao.mostrar(conteudo, r.codigo, r.ano, conferir);

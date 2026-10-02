@@ -1,13 +1,12 @@
 /*
  * Conciliador Solutta — tela-entregas.js
- * CONTROLE DE ENTREGAS (Dony, 02/10/2026). Três telas:
- *   📅 Painel do mês   todas as empresas × as entregas do mês, com semáforo; clicar marca como entregue
- *   🏢 Uma empresa     o ano inteiro dela, mês a mês, e quais entregas valem para ela
- *   ⚙ Entregas        o catálogo do escritório (nome, categoria, periodicidade, prazo, regimes)
+ * CONTROLE DE ENTREGAS, no desenho que o Dony mandou (02/10/2026, prints do sistema que ele usa):
+ * escolhe-se a OBRIGAÇÃO no alto ("ECF 2026", "Fechamento Contábil 08/2026") e a carteira inteira aparece
+ * embaixo, uma empresa por linha — BPO, Célula, Grupo, Empresa, Código, CNPJ, Regime, Responsável,
+ * Arquivos, Status, Validada, Validado por, Data validação e Observações.
  *
- * O catálogo é do ESCRITÓRIO (documentoGeral); o que foi entregue fica guardado por empresa e por ano
- * (documento da empresa, 'entregas-<ano>'); e quais entregas valem para cada empresa saem do REGIME dela,
- * com ajuste à mão guardado no cadastro.
+ * Tudo se edita na própria linha e grava na hora. Em cima, os cartões da obrigação (competência,
+ * vencimento e meta de entrega) e a barra com busca, filtros, Excel e PDF.
  */
 (function (raiz) {
   'use strict';
@@ -16,435 +15,357 @@
   const M = () => raiz.MotorEntregas;
   function app() { return raiz.App; }
 
-  const CHAVE_TIPOS = 'entregas-tipos';
-  const chaveDoAno = (ano) => 'entregas-' + ano;
+  const CHAVE_OBRIGACOES = 'entregas-obrigacoes';
+  const chaveDaObrigacao = (id) => 'ob-' + String(id).slice(0, 38);
+  const CHAVE_ULTIMA = 'entregas.ultima-obrigacao';
 
-  const E = { parte: '', codigo: '', competencia: '', ano: 0, categoria: '', so: '', tipos: null, marcas: {}, empresas: [] };
+  const E = { parte: '', obrigacoes: [], ob: null, dados: {}, linhas: [], filtros: {}, ordem: { col: 'nome', desc: false }, el: null };
 
   // ------------------------------------------------------------------
   // Dados
   // ------------------------------------------------------------------
-  async function lerTipos() {
-    const arm = app().armazenamento;
-    let doc = null;
-    try { doc = await arm.documentoGeral(CHAVE_TIPOS); } catch (e) { doc = null; }
-    const tipos = doc && doc.dados && Array.isArray(doc.dados.tipos) ? doc.dados.tipos : null;
-    return tipos && tipos.length ? tipos : M().CATALOGO.map((t) => Object.assign({}, t));
-  }
-  async function gravarTipos(tipos) {
-    await app().armazenamento.salvarDocumentoGeral(CHAVE_TIPOS, { dados: { tipos } });
-    E.tipos = tipos;
-  }
-  async function lerMarcas(codigo, ano) {
+  async function lerObrigacoes() {
     try {
-      const doc = await app().armazenamento.documento(codigo, chaveDoAno(ano));
-      return (doc && doc.dados && doc.dados.marcas) || {};
+      const doc = await app().armazenamento.documentoGeral(CHAVE_OBRIGACOES);
+      return (doc && doc.dados && Array.isArray(doc.dados.obrigacoes)) ? doc.dados.obrigacoes : [];
+    } catch (e) { return []; }
+  }
+  async function gravarObrigacoes(lista) {
+    await app().armazenamento.salvarDocumentoGeral(CHAVE_OBRIGACOES, { dados: { obrigacoes: lista } });
+    E.obrigacoes = lista;
+  }
+  async function lerDados(id) {
+    try {
+      const doc = await app().armazenamento.documentoGeral(chaveDaObrigacao(id));
+      return (doc && doc.dados && doc.dados.linhas) || {};
     } catch (e) { return {}; }
   }
-  async function gravarMarca(codigo, ano, chave, marca) {
-    const marcas = Object.assign({}, await lerMarcas(codigo, ano));
-    if (marca) marcas[chave] = marca; else delete marcas[chave];
-    await app().armazenamento.salvarDocumento(codigo, chaveDoAno(ano), { dados: { marcas } });
-    E.marcas[String(codigo)] = marcas;
-    return marcas;
+  async function gravarDados(id, dados) {
+    await app().armazenamento.salvarDocumentoGeral(chaveDaObrigacao(id), { dados: { linhas: dados } });
+    E.dados = dados;
   }
-  const anoDe = (comp) => Number(String(comp).slice(0, 4));
 
-  // ------------------------------------------------------------------
-  // Moldura
-  // ------------------------------------------------------------------
   function pintar(el, html) {
     el.innerHTML = '<div id="ent-raiz"></div>';
     const raizEl = el.querySelector('#ent-raiz');
     raizEl.innerHTML = html;
     return raizEl;
   }
-  function abas(parte) {
-    const comp = E.competencia || U.competenciaDe(U.hoje());
-    return '<div class="erp-abas nao-imprimir">' +
-      '<a href="#/entregas/' + U.anoMes(comp) + '" class="' + (parte === 'painel' ? 'ativa' : '') + '">📅 Painel do mês</a>' +
-      (E.codigo ? '<a href="#/entregas/empresa/' + encodeURIComponent(E.codigo) + '/' + (E.ano || anoDe(comp)) + '" class="' + (parte === 'empresa' ? 'ativa' : '') + '">🏢 Empresa</a>' : '') +
-      '<a href="#/entregas/tipos" class="' + (parte === 'tipos' ? 'ativa' : '') + '">⚙ Entregas do escritório</a>' +
+
+  // ------------------------------------------------------------------
+  // A TELA PRINCIPAL
+  // ------------------------------------------------------------------
+  async function mostrar(el, parte, id, conferir) {
+    if (parte === 'obrigacoes') return mostrarObrigacoes(el, conferir);
+    T.carregando(el, 'Abrindo o controle de entregas…');
+    E.el = el; E.parte = 'controle';
+    E.obrigacoes = await lerObrigacoes();
+    // #/entregas/<id da obrigação>: o id vem no primeiro pedaço do endereço.
+    const escolhida = parte || id || app().lerLocal(CHAVE_ULTIMA) || '';
+    E.ob = E.obrigacoes.find((o) => o.id === escolhida) || null;
+    E.dados = E.ob ? await lerDados(E.ob.id) : {};
+    if (conferir && !conferir()) return;
+    if (E.ob) app().gravarLocal(CHAVE_ULTIMA, E.ob.id);
+    desenhar(el);
+  }
+
+  function desenhar(el) {
+    const ob = E.ob;
+    const todas = ob ? M().linhas(app().empresas || [], ob, E.dados) : [];
+    E.linhas = todas;
+    const lista = M().ordenar(M().filtrar(todas, E.filtros), E.ordem.col, E.ordem.desc);
+    const res = ob ? M().resumo(todas, ob) : null;
+    const opcoes = '<option value="">Selecione a obrigação…</option>' +
+      E.obrigacoes.map((o) => '<option value="' + T.esc(o.id) + '"' + (ob && o.id === ob.id ? ' selected' : '') + '>' +
+        T.esc(o.nome) + (o.situacao === 'encerrada' ? ' (encerrada)' : '') + '</option>').join('');
+    pintar(el,
+      '<div class="cabecalho"><div class="titulos"><h1>Controle de Obrigações</h1>' +
+      '<p class="suave">Selecione uma obrigação para carregar as empresas.</p></div>' +
+      '<div class="acoes"><button type="button" class="botao primario" data-ent="nova">+ Nova obrigação</button> ' +
+      '<a class="botao pequeno" href="#/entregas/obrigacoes">⚙ Obrigações</a></div></div>' +
+      // Escolha da obrigação + competência (o quadro de cima do print)
+      '<div class="cartao corpo ent-escolha-caixa"><div class="grade-form">' +
+      '<div class="campo"><label for="ent-ob">Obrigação</label><select id="ent-ob" class="apres-campo">' + opcoes + '</select></div>' +
+      '<div class="campo"><label for="ent-comp">Competência</label><input id="ent-comp" class="apres-campo" readonly value="' + T.esc(ob ? (ob.competencia || '—') : '—') + '"></div>' +
+      '</div></div>' +
+      (!ob
+        ? '<div class="cartao corpo ent-vazio"><p class="suave">' + (E.obrigacoes.length
+          ? 'Selecione uma obrigação acima para começar.'
+          : 'Nenhuma obrigação cadastrada ainda. Clique em <b>+ Nova obrigação</b> — ECD, ECF, IBGE, MIT, Fechamento Contábil e outras já vêm com o prazo sugerido.') + '</p></div>'
+        : cartoesDaObrigacao(ob, res) + barra(todas, lista, res) + tabela(lista, ob)));
+    ligar(el);
+  }
+
+  function cartoesDaObrigacao(ob, res) {
+    const p = res.prazo;
+    const cor = (d) => (d === null ? '' : d < 0 ? 'falta' : d <= 3 ? 'falta-ambar' : '');
+    const dias = (d) => (d === null ? '' : d < 0 ? ' <span class="pequeno">(' + (-d) + ' dia(s) atrás)</span>' : d === 0 ? ' <span class="pequeno">(hoje)</span>' : ' <span class="pequeno">(em ' + d + ' dia(s))</span>');
+    return '<div class="cartao corpo ent-cartoes">' +
+      '<div><span class="pequeno suave">📋 Obrigação</span><br><b>' + T.esc(ob.nome) + '</b></div>' +
+      '<div><span class="pequeno suave">Competência</span><br><b>' + T.esc(ob.competencia || '—') + '</b></div>' +
+      '<div><span class="pequeno suave">🗓 Vencimento</span><br><b class="' + cor(p.diasVencimento) + '">' + T.esc(ob.vencimento || '—') + '</b>' + dias(p.diasVencimento) + '</div>' +
+      '<div><span class="pequeno suave">🎯 Meta de entrega</span><br><b class="' + cor(p.diasMeta) + '">' + T.esc(ob.meta || '—') + '</b>' + dias(p.diasMeta) + '</div>' +
+      '<div><span class="pequeno suave">Andamento</span><br><b>' + res.entregues + ' de ' + res.total + '</b> entregues' +
+      (res.atrasadas ? ' · <span class="falta">' + res.atrasadas + ' atrasada(s)</span>' : '') +
+      (res.validadas ? ' · ' + res.validadas + ' validada(s)' : '') + '</div>' +
       '</div>';
   }
-  const COR = { verde: 'ok', ambar: 'falta-ambar', vermelho: 'falta', cinza: 'suave' };
-  function selo(s) {
-    const marca = { entregue: '✓', dispensada: '–', atrasada: '!', 'vence-hoje': '•', 'no-prazo': '', 'sem-prazo': '' }[s.estado];
-    return '<span class="ent-selo ent-' + s.cor + '" title="' + T.esc(s.rotulo + (s.vence ? ' · vence ' + s.vence.texto : '')) + '">' + (marca || '·') + '</span>';
+
+  function barra(todas, lista, res) {
+    const f = E.filtros;
+    const sel = (campo, rotulo) => {
+      const vals = M().valoresDe(todas, campo);
+      if (!vals.length) return '';
+      return '<select class="apres-campo pequeno" data-filtro="' + campo + '"><option value="">' + rotulo + ': todos</option>' +
+        vals.map((v) => '<option value="' + T.esc(v) + '"' + (f[campo] === v ? ' selected' : '') + '>' + T.esc(v) + '</option>').join('') + '</select>';
+    };
+    return '<div class="md-barra ent-barra">' +
+      '<input id="ent-busca" class="apres-campo" style="min-width:260px;flex:1" placeholder="🔎 Busca geral…" value="' + T.esc(f.busca || '') + '">' +
+      sel('bpo', 'BPO') + sel('celula', 'Célula') + sel('grupo', 'Grupo') + sel('responsavel', 'Responsável') + sel('regime', 'Regime') +
+      '<select class="apres-campo pequeno" data-filtro="status"><option value="">Status: todos</option>' +
+      M().STATUS.map((s) => '<option value="' + s.id + '"' + (f.status === s.id ? ' selected' : '') + '>' + T.esc(s.nome) + '</option>').join('') + '</select>' +
+      '<select class="apres-campo pequeno" data-filtro="validada"><option value="">Validada: tanto faz</option>' +
+      '<option value="sim"' + (f.validada === 'sim' ? ' selected' : '') + '>Validada</option>' +
+      '<option value="nao"' + (f.validada === 'nao' ? ' selected' : '') + '>Falta validar</option></select>' +
+      '<button type="button" class="botao pequeno" data-ent="so-atrasadas"' + (f.so === 'atrasadas' ? ' style="background:var(--vermelho-fundo)"' : '') + '>⚠ Só atrasadas</button>' +
+      '<button type="button" class="botao pequeno" data-ent="limpar">✕ Limpar</button>' +
+      '<button type="button" class="botao pequeno" data-ent="excel">📗 Excel</button>' +
+      '<button type="button" class="botao pequeno" data-ent="pdf">📄 PDF</button>' +
+      '<span class="espaco"></span><span class="pequeno suave">' + lista.length + ' de ' + todas.length + ' registro(s)</span>' +
+      '</div>';
+  }
+
+  const COLUNAS = [
+    { id: 'bpo', titulo: 'BPO' }, { id: 'celula', titulo: 'Célula' }, { id: 'grupo', titulo: 'Grupo' },
+    { id: 'nome', titulo: 'Empresa' }, { id: 'codigo', titulo: 'Código' }, { id: 'cnpj', titulo: 'CNPJ' },
+    { id: 'regime', titulo: 'Regime Tributário' }, { id: 'responsavel', titulo: 'Responsável' },
+    { id: '', titulo: 'Arquivos' }, { id: 'statusNome', titulo: 'Status' }, { id: 'validada', titulo: 'Validada' },
+    { id: 'validadoPor', titulo: 'Validado por' }, { id: 'validadoEm', titulo: 'Data validação' },
+    { id: 'observacoes', titulo: 'Observações' },
+  ];
+  function tabela(lista, ob) {
+    const seta = (c) => (E.ordem.col === c ? (E.ordem.desc ? ' ▼' : ' ▲') : ' <span class="suave">⇅</span>');
+    const pessoas = M().valoresDe(E.linhas, 'responsavel');
+    const regimes = ['Lucro Real', 'Lucro Real Trimestral', 'Lucro Presumido', 'Simples Nacional', 'MEI', 'Imune / Isenta', 'Outro'];
+    return '<div class="apres-caixa ent-caixa"><table class="apres ent-obrig"><thead><tr>' +
+      COLUNAS.map((c) => '<th' + (c.id ? ' class="ent-ordena" data-ordem="' + c.id + '"' : '') + '>' + T.esc(c.titulo) + (c.id ? seta(c.id) : '') + '</th>').join('') +
+      '</tr></thead><tbody>' +
+      (lista.map((l) => '<tr' + (l.atrasada ? ' class="ent-linha-atraso"' : '') + ' data-linha="' + T.esc(l.codigo) + '">' +
+        '<td class="pequeno">' + T.esc(l.bpo || '—') + '</td>' +
+        '<td class="pequeno">' + T.esc(l.celula || '—') + '</td>' +
+        '<td class="pequeno">' + T.esc(l.grupo || '—') + '</td>' +
+        '<td class="ent-empresa"><b>' + T.esc(l.nome) + '</b></td>' +
+        '<td class="pequeno">' + T.esc(l.codigo) + '</td>' +
+        '<td class="pequeno">' + T.esc(l.cnpj ? U.formatarCnpj(l.cnpj) : '—') + '</td>' +
+        '<td><select class="apres-campo pequeno" data-campo="regime"' + (l.regimeDaLinha ? ' title="mudado nesta obrigação"' : '') + '>' +
+        ['' ].concat(regimes.indexOf(l.regime) < 0 && l.regime ? [l.regime] : []).concat(regimes)
+          .filter((x, i, a) => a.indexOf(x) === i)
+          .map((x) => '<option value="' + T.esc(x) + '"' + (l.regime === x ? ' selected' : '') + '>' + T.esc(x || '—') + '</option>').join('') + '</select></td>' +
+        '<td><input class="apres-campo pequeno" data-campo="responsavel" list="ent-pessoas" value="' + T.esc(l.responsavel) + '" placeholder="quem faz"></td>' +
+        '<td class="ent-celula"><button type="button" class="botao pequeno" data-campo="arquivos" title="Anexos desta entrega">📎' + (l.arquivos ? ' ' + l.arquivos : '') + '</button></td>' +
+        '<td><select class="apres-campo pequeno ent-status ent-' + l.statusCor + '" data-campo="status">' +
+        M().STATUS.map((s) => '<option value="' + s.id + '"' + (l.status === s.id ? ' selected' : '') + '>' + T.esc(s.nome) + '</option>').join('') + '</select></td>' +
+        '<td class="ent-celula"><input type="checkbox" data-campo="validada"' + (l.validada ? ' checked' : '') + ' title="Validada"></td>' +
+        '<td class="pequeno">' + T.esc(l.validadoPor || '—') + '</td>' +
+        '<td class="pequeno">' + T.esc(l.validadoEm ? U.dataHoraLocal(l.validadoEm) : '—') + '</td>' +
+        '<td><input class="apres-campo pequeno" data-campo="observacoes" value="' + T.esc(l.observacoes) + '" placeholder="—"></td>' +
+        '</tr>').join('') || '<tr><td colspan="' + COLUNAS.length + '" class="suave">Nenhuma empresa com esse filtro.</td></tr>') +
+      '</tbody></table></div>' +
+      '<datalist id="ent-pessoas">' + pessoas.map((p) => '<option value="' + T.esc(p) + '">').join('') + '</datalist>' +
+      '<p class="apres-nota suave">Tudo o que você muda na linha grava na hora. Mudar o <b>Status</b> derruba a validação — ' +
+      'o que foi conferido mudou, então alguém precisa validar de novo.</p>';
   }
 
   // ------------------------------------------------------------------
-  // PAINEL DO MÊS
+  // Eventos
   // ------------------------------------------------------------------
-  async function mostrarPainel(el, anoMes, conferir) {
-    T.carregando(el, 'Montando o controle de entregas…');
-    const comp = /^\d{4}-\d{2}$/.test(String(anoMes || '')) ? anoMes + '-01' : U.competenciaDe(U.hoje());
-    E.parte = 'painel'; E.competencia = comp; E.ano = anoDe(comp);
-    const empresas = (app().empresas || []).filter((e) => !e.ehGrupo);
-    E.empresas = empresas;
-    E.tipos = await lerTipos();
-    E.marcas = {};
-    for (const e of empresas) E.marcas[String(e.codigo)] = await lerMarcas(e.codigo, E.ano);
-    // A declaração anual do painel é a do exercício anterior: as marcas dela ficam no ano passado.
-    for (const e of empresas) {
-      const anterior = await lerMarcas(e.codigo, E.ano - 1);
-      E.marcas[String(e.codigo)] = Object.assign({}, anterior, E.marcas[String(e.codigo)]);
-    }
-    if (conferir && !conferir()) return;
-    desenharPainel(el);
-  }
-
-  function desenharPainel(el) {
-    const p = M().painel(E.empresas, E.tipos, E.competencia, E.marcas, { categoria: E.categoria });
-    const comp = E.competencia;
-    const mes = (n) => U.anoMes(U.somarMeses(comp, n));
-    const cats = M().CATEGORIAS;
-    const linhas = p.linhas.filter((l) => {
-      if (E.so === 'atrasadas') return l.atrasadas > 0;
-      if (E.so === 'pendentes') return l.entregues < l.total;
-      return true;
-    });
-    // As colunas são as entregas que aparecem em alguma empresa (cada regime tem as suas).
-    const colunas = [];
-    p.linhas.forEach((l) => l.celulas.forEach((c) => { if (!colunas.some((x) => x.id === c.tipo.id)) colunas.push(c.tipo); }));
-    colunas.sort((a, b) => cats.findIndex((c) => c.id === a.categoria) - cats.findIndex((c) => c.id === b.categoria) || a.nome.localeCompare(b.nome, 'pt-BR'));
-    const corpo = linhas.map((l) => {
-      const porId = new Map(l.celulas.map((c) => [c.tipo.id, c]));
-      return '<tr><td class="fixa"><a href="#/entregas/empresa/' + encodeURIComponent(l.empresa.codigo) + '/' + E.ano + '">' +
-        T.esc(l.empresa.codigo) + ' · ' + T.esc(l.empresa.nome) + '</a>' +
-        '<br><span class="pequeno suave">' + T.esc(l.empresa.regime || 'sem regime no cadastro') + '</span></td>' +
-        '<td class="num pequeno">' + l.entregues + '/' + l.total + (l.atrasadas ? ' <span class="falta">· ' + l.atrasadas + ' atrasada(s)</span>' : '') + '</td>' +
-        colunas.map((t) => {
-          const c = porId.get(t.id);
-          if (!c) return '<td class="ent-celula ent-fora" title="esta entrega não vale para esta empresa">·</td>';
-          return '<td class="ent-celula"><button type="button" class="ent-botao" data-ent-marcar="' + T.esc(l.empresa.codigo) + '|' + T.esc(t.id) + '|' + T.esc(c.competencia) + '">' + selo(c) + '</button></td>';
-        }).join('') + '</tr>';
-    }).join('');
-    pintar(el,
-      '<div class="cabecalho"><div class="titulos"><h1>📦 Controle de entregas</h1>' +
-      '<p class="suave">O que falta entregar, o que está atrasado e o que já saiu — por empresa e por mês.</p></div>' +
-      '<div class="acoes"><button type="button" class="botao pequeno" data-ent="mes-anterior">◀</button> ' +
-      '<b style="margin:0 8px">' + T.esc(U.nomeCompetencia(comp)) + '</b> ' +
-      '<button type="button" class="botao pequeno" data-ent="mes-seguinte">▶</button></div></div>' +
-      abas('painel') +
-      '<div class="md-barra">' +
-      '<label class="caixa-opcao"><input type="radio" name="ent-cat" value=""' + (!E.categoria ? ' checked' : '') + '> Tudo</label>' +
-      cats.map((c) => '<label class="caixa-opcao"><input type="radio" name="ent-cat" value="' + c.id + '"' + (E.categoria === c.id ? ' checked' : '') + '> ' + c.icone + ' ' + T.esc(c.curto) + '</label>').join('') +
-      '<span style="width:14px"></span>' +
-      '<label class="caixa-opcao"><input type="checkbox" data-ent-so="atrasadas"' + (E.so === 'atrasadas' ? ' checked' : '') + '> só com atraso</label>' +
-      '<label class="caixa-opcao"><input type="checkbox" data-ent-so="pendentes"' + (E.so === 'pendentes' ? ' checked' : '') + '> só com pendência</label>' +
-      '<span class="espaco"></span>' +
-      '<span class="' + (p.resumo.atrasadas ? 'md-falta' : 'md-ok') + '">' + p.resumo.entregues + ' de ' + p.resumo.total + ' entregues' +
-      (p.resumo.atrasadas ? ' · ' + p.resumo.atrasadas + ' atrasada(s)' : '') + (p.resumo.venceHoje ? ' · ' + p.resumo.venceHoje + ' vence(m) hoje' : '') + '</span></div>' +
-      (!E.empresas.length ? '<div class="aviso ambar"><span class="icone-aviso">🏢</span><div>Nenhuma empresa cadastrada ainda. <a href="#/">Ir para as empresas</a></div></div>' :
-        '<div class="apres-caixa"><table class="apres ent-tabela"><thead><tr>' +
-        '<th class="fixa">Empresa</th><th class="num">Feitas</th>' +
-        colunas.map((t) => '<th class="ent-col" title="' + T.esc(M().categoria(t.categoria).nome + ' · ' + M().prazoEmPalavras(t)) + '"><span>' + T.esc(t.nome) + '</span></th>').join('') +
-        '</tr></thead><tbody>' + (corpo || '<tr><td colspan="' + (colunas.length + 2) + '" class="suave">Nada aqui com esse filtro.</td></tr>') + '</tbody></table></div>') +
-      '<p class="apres-nota suave">Clique num quadradinho para marcar como entregue. ' +
-      '<b class="ent-legenda"><span class="ent-selo ent-verde">✓</span> entregue · <span class="ent-selo ent-vermelho">!</span> atrasada · ' +
-      '<span class="ent-selo ent-ambar">•</span> vence hoje ou está perto · <span class="ent-selo ent-cinza">·</span> no prazo</b></p>' +
-      '<p class="apres-nota suave">Os prazos vêm sugeridos e <b>mudam por norma e por estado</b>: confira cada um em <b>⚙ Entregas do escritório</b>.</p>');
-    ligarPainel(el);
+  function ligar(el) {
     const raizEl = el.querySelector('#ent-raiz');
-    raizEl.querySelectorAll('[name="ent-cat"]').forEach((r) => r.addEventListener('change', () => { E.categoria = r.value; desenharPainel(el); }));
-    raizEl.querySelectorAll('[data-ent-so]').forEach((c) => c.addEventListener('change', () => {
-      const qual = c.getAttribute('data-ent-so');
-      E.so = c.checked ? qual : '';
-      desenharPainel(el);
+    const sel = raizEl.querySelector('#ent-ob');
+    if (sel) sel.addEventListener('change', () => app().ir('#/entregas/' + encodeURIComponent(sel.value)));
+    const busca = raizEl.querySelector('#ent-busca');
+    if (busca) busca.addEventListener('input', T.debounce(() => {
+      E.filtros.busca = busca.value;
+      desenhar(el);
+      const novo = el.querySelector('#ent-busca');
+      if (novo) { novo.focus(); novo.setSelectionRange(novo.value.length, novo.value.length); }
+    }, 300));
+    raizEl.querySelectorAll('[data-filtro]').forEach((s) => s.addEventListener('change', () => {
+      E.filtros[s.getAttribute('data-filtro')] = s.value;
+      desenhar(el);
+    }));
+    raizEl.querySelectorAll('[data-ordem]').forEach((th) => th.addEventListener('click', () => {
+      const c = th.getAttribute('data-ordem');
+      E.ordem = { col: c, desc: E.ordem.col === c ? !E.ordem.desc : false };
+      desenhar(el);
+    }));
+    raizEl.addEventListener('click', async (ev) => {
+      const b = ev.target.closest('[data-ent]');
+      if (!b) return;
+      const q = b.getAttribute('data-ent');
+      if (q === 'nova') await janelaObrigacao(el, null);
+      else if (q === 'limpar') { E.filtros = {}; desenhar(el); }
+      else if (q === 'so-atrasadas') { E.filtros.so = E.filtros.so === 'atrasadas' ? '' : 'atrasadas'; desenhar(el); }
+      else if (q === 'excel') baixarExcel();
+      else if (q === 'pdf') window.print();
+    });
+    // Edição na própria linha
+    const mexeu = async (ev) => {
+      const campo = ev.target.getAttribute && ev.target.getAttribute('data-campo');
+      if (!campo || campo === 'arquivos') return;
+      const tr = ev.target.closest('[data-linha]');
+      if (!tr || !E.ob) return;
+      const codigo = tr.getAttribute('data-linha');
+      const valor = ev.target.type === 'checkbox' ? ev.target.checked : ev.target.value;
+      const dados = Object.assign({}, E.dados);
+      dados[codigo] = M().mudarLinha(dados[codigo], campo, valor, app().usuario.nome);
+      try {
+        await gravarDados(E.ob.id, dados);
+        desenhar(el);
+      } catch (e) { T.avisoRapido('Não consegui guardar: ' + T.mensagemDeErro(e), 'erro', 7000); }
+    };
+    raizEl.querySelectorAll('select[data-campo], input[type="checkbox"][data-campo]').forEach((x) => x.addEventListener('change', mexeu));
+    raizEl.querySelectorAll('input[data-campo="responsavel"], input[data-campo="observacoes"]').forEach((x) => {
+      x.addEventListener('change', mexeu);
+      x.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') ev.target.blur(); });
+    });
+    raizEl.querySelectorAll('[data-campo="arquivos"]').forEach((x) => x.addEventListener('click', () => {
+      T.janela({ titulo: 'Anexos', corpo: '<p style="line-height:1.55">Guardar o recibo e o arquivo de cada entrega é o próximo pedaço. ' +
+        'Por enquanto, use a coluna <b>Observações</b> para anotar o número do recibo.</p>' });
     }));
   }
 
-  function ligarPainel(el) {
-    const raizEl = el.querySelector('#ent-raiz');
-    raizEl.addEventListener('click', async (ev) => {
-      const nav = ev.target.closest('[data-ent]');
-      if (nav) {
-        const q = nav.getAttribute('data-ent');
-        if (q === 'mes-anterior' || q === 'mes-seguinte') app().ir('#/entregas/' + U.anoMes(U.somarMeses(E.competencia, q === 'mes-anterior' ? -1 : 1)));
-        return;
-      }
-      const bt = ev.target.closest('[data-ent-marcar]');
-      if (bt) {
-        const [codigo, tipoId, comp] = bt.getAttribute('data-ent-marcar').split('|');
-        await janelaDaEntrega(el, codigo, tipoId, comp, () => desenharPainel(el));
-      }
-    });
-  }
-
   // ------------------------------------------------------------------
-  // A JANELA DE UMA ENTREGA: marcar, desmarcar, dispensar, anotar o protocolo
+  // Cadastro das obrigações
   // ------------------------------------------------------------------
-  async function janelaDaEntrega(el, codigo, tipoId, competencia, aoFechar) {
-    const tipo = (E.tipos || []).find((t) => t.id === tipoId);
-    if (!tipo) return;
-    const empresa = (app().empresas || []).find((e) => String(e.codigo) === String(codigo)) || {};
-    const ano = anoDe(competencia);
-    const marcas = E.marcas[String(codigo)] || (E.marcas[String(codigo)] = await lerMarcas(codigo, ano));
-    const chave = tipoId + '|' + competencia;
-    const marca = marcas[chave] || null;
-    const s = M().situacao(tipo, competencia, marca);
-    const quando = competencia.length === 4 ? 'exercício de ' + competencia : U.nomeCompetencia(competencia);
-    const r = await T.janela({
-      titulo: tipo.nome,
-      corpo: '<p class="suave" style="margin:0 0 12px;line-height:1.55"><b>' + T.esc(empresa.codigo + ' · ' + empresa.nome) + '</b><br>' +
-        T.esc(quando) + ' · vence em <b>' + T.esc(s.vence ? s.vence.texto : '—') + '</b> · ' +
-        '<span class="' + (s.cor === 'vermelho' ? 'falta' : s.cor === 'verde' ? 'ok' : '') + '">' + T.esc(s.rotulo) + '</span></p>' +
-        (tipo.observacao ? '<p class="pequeno suave" style="margin:0 0 12px">' + T.esc(tipo.observacao) + '</p>' : '') +
-        '<div class="grade-form">' +
-        '<div class="campo"><label for="f-data">Entregue em</label><input id="f-data" value="' + T.esc((marca && marca.data) || U.hoje().texto) + '" placeholder="dd/mm/aaaa"></div>' +
-        '<div class="campo"><label for="f-protocolo">Recibo / protocolo</label><input id="f-protocolo" maxlength="60" value="' + T.esc((marca && marca.protocolo) || '') + '"></div>' +
-        '<div class="campo inteiro"><label for="f-obs">Observação</label><input id="f-obs" maxlength="200" value="' + T.esc((marca && marca.observacao) || '') + '"></div>' +
-        '</div><div id="f-erro" style="margin-top:10px"></div>',
-      botoes: [{ texto: 'Fechar', valor: null }]
-        .concat(marca ? [{ texto: '↩ Desmarcar', valor: { acao: 'limpar' } }] : [])
-        .concat([{ texto: '– Dispensar', valor: { acao: 'dispensar' } },
-          { texto: '✓ Marcar como entregue', tipo: 'primario', antes: (j) => {
-            const data = U.lerData(j.querySelector('#f-data').value);
-            if (!data) { j.querySelector('#f-erro').innerHTML = '<div class="aviso vermelho">Data inválida: escreva dd/mm/aaaa.</div>'; return false; }
-            return { acao: 'entregue', data: data.texto, protocolo: j.querySelector('#f-protocolo').value.trim(), observacao: j.querySelector('#f-obs').value.trim() };
-          } }]),
-    });
-    if (!r) return;
-    let nova = null;
-    if (r.acao === 'entregue') nova = { situacao: 'entregue', data: r.data, protocolo: r.protocolo, observacao: r.observacao, por: app().usuario.nome, em: U.agoraISO() };
-    else if (r.acao === 'dispensar') nova = { situacao: 'dispensada', por: app().usuario.nome, em: U.agoraISO() };
-    try {
-      await gravarMarca(codigo, ano, chave, nova);
-      T.avisoRapido(r.acao === 'limpar' ? 'Marcação desfeita.' : r.acao === 'dispensar' ? 'Marcada como dispensada.' : 'Entrega marcada.', 'ok', 3000);
-      if (aoFechar) aoFechar();
-    } catch (e) { T.avisoRapido('Não consegui guardar: ' + T.mensagemDeErro(e), 'erro', 7000); }
-  }
-
-  // ------------------------------------------------------------------
-  // UMA EMPRESA, O ANO INTEIRO
-  // ------------------------------------------------------------------
-  async function mostrarEmpresa(el, codigo, ano, conferir) {
-    T.carregando(el, 'Abrindo as entregas da empresa…');
-    const a = Number(ano) || U.hoje().ano;
-    E.parte = 'empresa'; E.codigo = String(codigo); E.ano = a;
-    E.competencia = a + '-' + String(U.hoje().mes).padStart(2, '0') + '-01';
-    E.tipos = await lerTipos();
-    E.marcas[String(codigo)] = Object.assign({}, await lerMarcas(codigo, a - 1), await lerMarcas(codigo, a));
-    if (conferir && !conferir()) return;
-    desenharEmpresa(el);
-  }
-  function desenharEmpresa(el) {
-    const empresa = (app().empresas || []).find((e) => String(e.codigo) === E.codigo);
-    if (!empresa) { pintar(el, '<div class="aviso ambar"><span class="icone-aviso">⚠️</span><div>Empresa não encontrada. <a href="#/entregas">Voltar</a></div></div>'); return; }
-    const linhas = M().doAno(empresa, E.tipos, E.ano, E.marcas[E.codigo] || {});
-    const valem = new Set(M().tiposDaEmpresa(empresa, E.tipos).map((t) => t.id));
-    const cats = M().CATEGORIAS;
-    const corpo = cats.map((c) => {
-      const dela = linhas.filter((l) => l.tipo.categoria === c.id);
-      if (!dela.length) return '';
-      return '<tr class="ent-grupo"><td colspan="14">' + c.icone + ' <b>' + T.esc(c.nome) + '</b> <span class="suave pequeno">' + T.esc(c.ajuda) + '</span></td></tr>' +
-        dela.map((l) => '<tr><td class="fixa"><b>' + T.esc(l.tipo.nome) + '</b><br><span class="pequeno suave">' + T.esc(M().prazoEmPalavras(l.tipo)) + '</span></td>' +
-          (l.tipo.periodicidade === 'anual'
-            ? '<td class="ent-celula" colspan="12"><button type="button" class="ent-botao" data-ent-marcar="' + T.esc(E.codigo) + '|' + T.esc(l.tipo.id) + '|' + T.esc(l.celulas[0].competencia) + '">' +
-              selo(l.celulas[0]) + ' <span class="pequeno">exercício ' + T.esc(l.celulas[0].competencia) + ' · vence ' + T.esc(l.celulas[0].vence ? l.celulas[0].vence.texto : '—') + '</span></button></td>'
-            : U.MESES.map((nome, i) => {
-              const c2 = l.celulas.find((x) => U.partesCompetencia(x.competencia) && U.partesCompetencia(x.competencia).mes === i + 1);
-              if (!c2) return '<td class="ent-celula ent-fora">·</td>';
-              return '<td class="ent-celula"><button type="button" class="ent-botao" data-ent-marcar="' + T.esc(E.codigo) + '|' + T.esc(l.tipo.id) + '|' + T.esc(c2.competencia) + '">' + selo(c2) + '</button></td>';
-            }).join('')) +
-          '</tr>').join('');
-    }).join('');
-    pintar(el,
-      '<div class="cabecalho"><div class="titulos"><h1>📦 Entregas de ' + T.esc(empresa.nome) + '</h1>' +
-      '<p class="suave">' + T.esc(empresa.codigo) + ' · ' + T.esc(empresa.regime || 'sem regime no cadastro') + ' · ano ' + E.ano + '</p></div>' +
-      '<div class="acoes"><button type="button" class="botao pequeno" data-ent="ano-anterior">◀ ' + (E.ano - 1) + '</button> ' +
-      '<button type="button" class="botao pequeno" data-ent="ano-seguinte">' + (E.ano + 1) + ' ▶</button> ' +
-      '<button type="button" class="botao" data-ent="quais">✎ Quais entregas valem para ela</button></div></div>' +
-      abas('empresa') +
-      '<div class="apres-caixa"><table class="apres ent-tabela"><thead><tr><th class="fixa">Entrega</th>' +
-      U.MESES.map((m) => '<th class="ent-col-mes">' + T.esc(m.slice(0, 3)) + '</th>').join('') + '</tr></thead><tbody>' +
-      (corpo || '<tr><td colspan="13" class="suave">Nenhuma entrega vale para esta empresa. Clique em <b>✎ Quais entregas valem para ela</b>.</td></tr>') +
-      '</tbody></table></div>' +
-      '<p class="apres-nota suave">' + valem.size + ' entrega(s) valem para esta empresa, pelo regime <b>' + T.esc(empresa.regime || '—') + '</b> e pelos ajustes dela.</p>');
-    const raizEl = el.querySelector('#ent-raiz');
-    raizEl.addEventListener('click', async (ev) => {
-      const nav = ev.target.closest('[data-ent]');
-      if (nav) {
-        const q = nav.getAttribute('data-ent');
-        if (q === 'ano-anterior') app().ir('#/entregas/empresa/' + encodeURIComponent(E.codigo) + '/' + (E.ano - 1));
-        else if (q === 'ano-seguinte') app().ir('#/entregas/empresa/' + encodeURIComponent(E.codigo) + '/' + (E.ano + 1));
-        else if (q === 'quais') await janelaQuais(el, empresa);
-        return;
-      }
-      const bt = ev.target.closest('[data-ent-marcar]');
-      if (bt) {
-        const [codigo, tipoId, comp] = bt.getAttribute('data-ent-marcar').split('|');
-        await janelaDaEntrega(el, codigo, tipoId, comp, () => desenharEmpresa(el));
-      }
-    });
-  }
-
-  // Quais entregas valem para esta empresa: o regime sugere, ele liga e desliga.
-  async function janelaQuais(el, empresa) {
-    const tipos = E.tipos || [];
-    const valem = new Set(M().tiposDaEmpresa(empresa, tipos).map((t) => t.id));
-    const escolhas = empresa.entregas || {};
-    const cats = M().CATEGORIAS;
+  async function janelaObrigacao(el, id) {
+    const lista = E.obrigacoes;
+    const atual = id ? (lista.find((o) => o.id === id) || {}) : {};
+    const hoje = U.hoje();
     const salvo = await T.janela({
-      titulo: 'Quais entregas valem para ' + empresa.nome,
+      titulo: id ? 'Editar "' + atual.nome + '"' : 'Nova obrigação',
       larga: true,
-      corpo: '<p class="suave" style="margin:0 0 12px;line-height:1.55">O programa já marcou o que costuma valer para o regime <b>' +
-        T.esc(empresa.regime || 'não informado') + '</b>. Ligue ou desligue o que for diferente — fica guardado só nesta empresa.</p>' +
-        cats.map((c) => '<h3 class="apres-sub">' + c.icone + ' ' + T.esc(c.nome) + '</h3>' +
-          tipos.filter((t) => t.categoria === c.id).map((t) => '<label class="caixa-opcao ent-escolha"><input type="checkbox" data-q="' + T.esc(t.id) + '"' +
-            (valem.has(t.id) ? ' checked' : '') + '> ' + T.esc(t.nome) + ' <span class="suave pequeno">· ' + T.esc(M().prazoEmPalavras(t)) +
-            (escolhas[t.id] !== undefined ? ' · <b>ajustada à mão</b>' : '') + '</span></label>').join('')).join(''),
-      botoes: [{ texto: 'Cancelar', valor: null }, { texto: 'Salvar', tipo: 'primario', antes: (j) => {
-        const novo = {};
-        Array.from(j.querySelectorAll('[data-q]')).forEach((c) => {
-          const id = c.getAttribute('data-q');
-          const padrao = M().tiposDaEmpresa(Object.assign({}, empresa, { entregas: {} }), tipos).some((t) => t.id === id);
-          if (c.checked !== padrao) novo[id] = c.checked;   // só guarda o que foge do regime
-        });
-        return { entregas: novo };
-      } }],
-    });
-    if (!salvo) return;
-    try {
-      await app().armazenamento.salvarEmpresa(Object.assign({}, empresa, { entregas: salvo.entregas }));
-      app().empresas = await app().armazenamento.empresas();
-      T.avisoRapido('Entregas desta empresa salvas.', 'ok', 3000);
-      desenharEmpresa(el);
-    } catch (e) { T.avisoRapido('Não consegui guardar: ' + T.mensagemDeErro(e), 'erro', 7000); }
-  }
-
-  // ------------------------------------------------------------------
-  // O CATÁLOGO DO ESCRITÓRIO
-  // ------------------------------------------------------------------
-  async function mostrarTipos(el, conferir) {
-    T.carregando(el, 'Abrindo as entregas do escritório…');
-    E.parte = 'tipos';
-    E.tipos = await lerTipos();
-    if (conferir && !conferir()) return;
-    desenharTipos(el);
-  }
-  function desenharTipos(el) {
-    const cats = M().CATEGORIAS;
-    const corpo = cats.map((c) => {
-      const dela = (E.tipos || []).filter((t) => t.categoria === c.id);
-      return '<tr class="ent-grupo"><td colspan="6">' + c.icone + ' <b>' + T.esc(c.nome) + '</b> <span class="suave pequeno">' + T.esc(c.ajuda) + '</span></td></tr>' +
-        (dela.map((t) => '<tr' + (t.situacao === 'inativa' ? ' class="erp-inativa"' : '') + '><td class="fixa"><b>' + T.esc(t.nome) + '</b>' +
-          (t.observacao ? '<br><span class="pequeno suave">' + T.esc(t.observacao) + '</span>' : '') + '</td>' +
-          '<td class="pequeno">' + T.esc(M().periodicidade(t.periodicidade).nome) + '</td>' +
-          '<td class="pequeno">' + T.esc(M().prazoEmPalavras(t)) + '</td>' +
-          '<td class="pequeno">' + T.esc((t.regimes && t.regimes.length && t.regimes.length < M().REGIMES.length) ? t.regimes.join(', ') : 'todos os regimes') + '</td>' +
-          '<td class="pequeno">' + (t.situacao === 'inativa' ? '<span class="falta">não usa</span>' : 'em uso') + '</td>' +
-          '<td class="nao-imprimir" style="white-space:nowrap"><button type="button" class="lapis" data-ent-editar="' + T.esc(t.id) + '" title="Editar">✎</button> ' +
-          '<button type="button" class="lapis" data-ent-excluir="' + T.esc(t.id) + '" title="Excluir">🗑</button></td></tr>').join('') ||
-          '<tr><td colspan="6" class="suave">Nenhuma nesta categoria.</td></tr>');
-    }).join('');
-    pintar(el,
-      '<div class="cabecalho"><div class="titulos"><h1>⚙ Entregas do escritório</h1>' +
-      '<p class="suave">A lista que vale para todas as empresas. O regime de cada uma escolhe quais aparecem para ela.</p></div>' +
-      '<div class="acoes"><button type="button" class="botao primario" data-ent="nova">+ Nova entrega</button> ' +
-      '<button type="button" class="botao pequeno" data-ent="restaurar">↺ Voltar à lista sugerida</button></div></div>' +
-      abas('tipos') +
-      '<div class="aviso ambar"><span class="icone-aviso">📅</span><div><b>Confira os prazos.</b> Os que vêm aqui são os usuais, para você não começar do zero — ' +
-      'mas eles mudam por norma, por estado e por regime. Ajuste cada um ao que vale para a sua carteira.</div></div>' +
-      '<div class="apres-caixa" style="margin-top:12px"><table class="apres"><thead><tr><th class="fixa">Entrega</th><th>Periodicidade</th><th>Prazo</th><th>Regimes</th><th>Situação</th><th class="nao-imprimir"></th></tr></thead>' +
-      '<tbody>' + corpo + '</tbody></table></div>');
-    const raizEl = el.querySelector('#ent-raiz');
-    raizEl.addEventListener('click', async (ev) => {
-      const nav = ev.target.closest('[data-ent]');
-      if (nav) {
-        const q = nav.getAttribute('data-ent');
-        if (q === 'nova') await janelaTipo(el, null);
-        else if (q === 'restaurar') {
-          const ok = await T.confirmar({ titulo: 'Voltar à lista sugerida?',
-            texto: 'A lista do escritório volta a ser a que o programa sugere. <b>O que já foi marcado como entregue não se perde</b> — some só o que você mudou nesta lista.',
-            botao: '↺ Voltar à sugerida', perigo: true });
-          if (!ok) return;
-          await gravarTipos(M().CATALOGO.map((t) => Object.assign({}, t)));
-          T.avisoRapido('Lista restaurada.', 'ok', 3000);
-          desenharTipos(el);
-        }
-        return;
-      }
-      const ed = ev.target.closest('[data-ent-editar]');
-      if (ed) { await janelaTipo(el, ed.getAttribute('data-ent-editar')); return; }
-      const ex = ev.target.closest('[data-ent-excluir]');
-      if (ex) {
-        const id = ex.getAttribute('data-ent-excluir');
-        const t = (E.tipos || []).find((x) => x.id === id) || {};
-        const ok = await T.confirmar({ titulo: 'Excluir "' + (t.nome || id) + '"?',
-          texto: 'Ela sai da lista do escritório. O que já foi marcado como entregue continua guardado.', botao: '🗑 Excluir', perigo: true });
-        if (!ok) return;
-        await gravarTipos((E.tipos || []).filter((x) => x.id !== id));
-        desenharTipos(el);
-      }
-    });
-  }
-
-  async function janelaTipo(el, id) {
-    const tipos = E.tipos || [];
-    const atual = id ? (tipos.find((t) => t.id === id) || {}) : { categoria: 'fisco', periodicidade: 'mensal', prazo: { dia: 15, meses: 1 }, regimes: [] };
-    const p = atual.prazo || {};
-    const regimes = M().REGIMES;
-    const salvo = await T.janela({
-      titulo: id ? 'Editar "' + atual.nome + '"' : 'Nova entrega',
-      larga: true,
-      corpo: '<div class="grade-form">' +
-        '<div class="campo inteiro"><label for="f-nome">Nome *</label><input id="f-nome" maxlength="80" autofocus value="' + T.esc(atual.nome || '') + '" placeholder="Ex.: GIA de São Paulo"></div>' +
-        '<div class="campo"><label for="f-cat">O que é *</label><select id="f-cat">' +
-        M().CATEGORIAS.map((c) => '<option value="' + c.id + '"' + (atual.categoria === c.id ? ' selected' : '') + '>' + c.icone + ' ' + T.esc(c.nome) + '</option>').join('') + '</select></div>' +
-        '<div class="campo"><label for="f-per">Periodicidade *</label><select id="f-per">' +
-        M().PERIODICIDADES.map((x) => '<option value="' + x.id + '"' + (atual.periodicidade === x.id ? ' selected' : '') + '>' + T.esc(x.nome) + '</option>').join('') + '</select></div>' +
-        '<div class="campo"><label for="f-dia">Dia do prazo</label><input id="f-dia" type="number" min="1" max="31" value="' + T.esc(String(p.dia || 15)) + '"></div>' +
-        '<div class="campo" id="caixa-meses"><label for="f-meses">Quando</label><select id="f-meses">' +
-        [[0, 'no próprio mês da competência'], [1, 'no mês seguinte'], [2, 'no 2º mês seguinte'], [3, 'no 3º mês seguinte']]
-          .map(([n, txt]) => '<option value="' + n + '"' + ((p.meses === undefined ? 1 : p.meses) === n ? ' selected' : '') + '>' + txt + '</option>').join('') + '</select></div>' +
-        '<div class="campo" id="caixa-mes"><label for="f-mes">Mês do prazo (anual)</label><select id="f-mes">' +
-        U.MESES.map((m, i) => '<option value="' + (i + 1) + '"' + ((Number(p.mes) || 5) === i + 1 ? ' selected' : '') + '>' + T.esc(m) + '</option>').join('') + '</select>' +
-        '<span class="ajuda">Do ano seguinte ao exercício.</span></div>' +
-        '<div class="campo inteiro"><label>Vale para quais regimes <span class="suave pequeno">(nenhum marcado = todos)</span></label>' +
-        '<div>' + regimes.map((r) => '<label class="caixa-opcao"><input type="checkbox" data-reg="' + T.esc(r) + '"' +
-          ((atual.regimes || []).indexOf(r) >= 0 ? ' checked' : '') + '> ' + T.esc(r) + '</label>').join('') + '</div></div>' +
+      corpo: (id ? '' : '<p class="suave" style="margin:0 0 12px;line-height:1.55">Escolha um modelo e o programa já preenche o nome, a competência e o prazo usual — depois é só ajustar.</p>' +
+        '<div class="campo"><label for="f-modelo">Modelo</label><select id="f-modelo" class="apres-campo">' +
+        '<option value="">— começar em branco —</option>' +
+        M().MODELOS.map((m) => '<option value="' + m.id + '">' + T.esc(m.nome) + (m.ajuda ? ' · ' + T.esc(m.ajuda) : '') + '</option>').join('') + '</select></div>' +
+        '<div class="grade-form" style="margin-top:8px"><div class="campo"><label for="f-ano">Ano</label><input id="f-ano" type="number" value="' + hoje.ano + '"></div>' +
+        '<div class="campo"><label for="f-mes">Mês (quando for mensal)</label><select id="f-mes">' +
+        U.MESES.map((m, i) => '<option value="' + (i + 1) + '"' + (hoje.mes === i + 1 ? ' selected' : '') + '>' + T.esc(m) + '</option>').join('') + '</select></div></div><hr style="margin:14px 0;border:0;border-top:1px solid var(--borda)">') +
+      '<div class="grade-form">' +
+        '<div class="campo inteiro"><label for="f-nome">Nome *</label><input id="f-nome" maxlength="80" value="' + T.esc(atual.nome || '') + '" placeholder="Ex.: ECF 2026"></div>' +
+        '<div class="campo"><label for="f-comp">Competência</label><input id="f-comp" maxlength="20" value="' + T.esc(atual.competencia || '') + '" placeholder="2025 ou 08/2026"></div>' +
+        '<div class="campo"><label for="f-venc">Vencimento</label><input id="f-venc" maxlength="10" value="' + T.esc(atual.vencimento || '') + '" placeholder="dd/mm/aaaa"></div>' +
+        '<div class="campo"><label for="f-meta">Meta de entrega</label><input id="f-meta" maxlength="10" value="' + T.esc(atual.meta || '') + '" placeholder="dd/mm/aaaa">' +
+        '<span class="ajuda">A data interna do escritório, antes do prazo legal.</span></div>' +
         '<div class="campo"><label for="f-sit">Situação</label><select id="f-sit">' +
-        '<option value="ativa"' + (atual.situacao !== 'inativa' ? ' selected' : '') + '>Em uso</option>' +
-        '<option value="inativa"' + (atual.situacao === 'inativa' ? ' selected' : '') + '>Não usa</option></select></div>' +
+        '<option value="aberta"' + (atual.situacao !== 'encerrada' ? ' selected' : '') + '>Aberta</option>' +
+        '<option value="encerrada"' + (atual.situacao === 'encerrada' ? ' selected' : '') + '>Encerrada</option></select></div>' +
         '<div class="campo inteiro"><label for="f-obs">Observação</label><input id="f-obs" maxlength="200" value="' + T.esc(atual.observacao || '') + '"></div>' +
         '</div><div id="f-erro" style="margin-top:12px"></div>',
       aoAbrir: (j) => {
-        const per = j.querySelector('#f-per');
-        const mostrar = () => {
-          const v = per.value;
-          j.querySelector('#caixa-meses').style.display = v === 'anual' || v === 'eventual' ? 'none' : '';
-          j.querySelector('#caixa-mes').style.display = v === 'anual' ? '' : 'none';
-          j.querySelector('#f-dia').closest('.campo').style.display = v === 'eventual' ? 'none' : '';
+        const mod = j.querySelector('#f-modelo');
+        if (!mod) return;
+        const preencher = () => {
+          if (!mod.value) return;
+          const s = M().sugerir(mod.value, j.querySelector('#f-ano').value, j.querySelector('#f-mes').value);
+          j.querySelector('#f-nome').value = s.nome;
+          j.querySelector('#f-comp').value = s.competencia;
+          j.querySelector('#f-venc').value = s.vencimento;
+          j.querySelector('#f-meta').value = s.meta;
         };
-        per.addEventListener('change', mostrar);
-        mostrar();
+        mod.addEventListener('change', preencher);
+        j.querySelector('#f-ano').addEventListener('change', preencher);
+        j.querySelector('#f-mes').addEventListener('change', preencher);
       },
-      botoes: [{ texto: 'Cancelar', valor: null }, { texto: id ? 'Salvar' : 'Cadastrar', tipo: 'primario', antes: (j) => {
-        const novo = {
-          id: id || '', nome: j.querySelector('#f-nome').value.trim(), categoria: j.querySelector('#f-cat').value,
-          periodicidade: j.querySelector('#f-per').value,
-          prazo: { dia: Number(j.querySelector('#f-dia').value), meses: Number(j.querySelector('#f-meses').value), mes: Number(j.querySelector('#f-mes').value) },
-          regimes: Array.from(j.querySelectorAll('[data-reg]')).filter((c) => c.checked).map((c) => c.getAttribute('data-reg')),
+      botoes: [{ texto: 'Cancelar', valor: null }, { texto: id ? 'Salvar' : 'Criar', tipo: 'primario', antes: (j) => {
+        const nova = {
+          id: id || '', nome: j.querySelector('#f-nome').value.trim(), competencia: j.querySelector('#f-comp').value.trim(),
+          vencimento: j.querySelector('#f-venc').value.trim(), meta: j.querySelector('#f-meta').value.trim(),
           situacao: j.querySelector('#f-sit').value, observacao: j.querySelector('#f-obs').value.trim(),
+          modelo: j.querySelector('#f-modelo') ? j.querySelector('#f-modelo').value : (atual.modelo || ''),
         };
-        const r = M().conferirTipo(novo, tipos, id);
+        const r = M().conferirObrigacao(nova, lista, id);
         if (!r.ok) { j.querySelector('#f-erro').innerHTML = '<div class="aviso vermelho">' + T.esc(r.erro) + '</div>'; return false; }
-        return r.tipo;
+        return r.obrigacao;
       } }],
     });
     if (!salvo) return;
-    await gravarTipos(tipos.filter((t) => t.id !== id).concat([salvo]));
-    T.avisoRapido(id ? 'Entrega salva.' : 'Entrega cadastrada.', 'ok', 3000);
-    desenharTipos(el);
+    await gravarObrigacoes(lista.filter((o) => o.id !== id).concat([salvo]).sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR')));
+    T.avisoRapido(id ? 'Obrigação salva.' : 'Obrigação "' + salvo.nome + '" criada.', 'ok', 4000);
+    app().ir('#/entregas/' + encodeURIComponent(salvo.id));
+  }
+
+  async function mostrarObrigacoes(el, conferir) {
+    T.carregando(el, 'Abrindo as obrigações…');
+    E.el = el; E.parte = 'obrigacoes';
+    E.obrigacoes = await lerObrigacoes();
+    if (conferir && !conferir()) return;
+    const hoje = U.hoje();
+    pintar(el,
+      '<div class="cabecalho"><div class="titulos"><h1>⚙ Obrigações</h1>' +
+      '<p class="suave">A lista do que o escritório controla: ECD, ECF, IBGE, MIT, fechamento contábil e o que mais você criar.</p></div>' +
+      '<div class="acoes"><button type="button" class="botao primario" data-ent="nova">+ Nova obrigação</button> ' +
+      '<a class="botao pequeno" href="#/entregas">↩ Voltar ao controle</a></div></div>' +
+      '<div class="apres-caixa"><table class="apres"><thead><tr><th>Obrigação</th><th>Competência</th><th>Vencimento</th><th>Meta</th><th>Situação</th><th class="nao-imprimir"></th></tr></thead><tbody>' +
+      (E.obrigacoes.map((o) => {
+        const p = M().prazo(o, hoje);
+        return '<tr' + (o.situacao === 'encerrada' ? ' class="erp-inativa"' : '') + '><td><a href="#/entregas/' + encodeURIComponent(o.id) + '"><b>' + T.esc(o.nome) + '</b></a>' +
+          (o.observacao ? '<br><span class="pequeno suave">' + T.esc(o.observacao) + '</span>' : '') + '</td>' +
+          '<td class="pequeno">' + T.esc(o.competencia || '—') + '</td>' +
+          '<td class="pequeno' + (p.venceu ? ' falta' : '') + '">' + T.esc(o.vencimento || '—') + '</td>' +
+          '<td class="pequeno">' + T.esc(o.meta || '—') + '</td>' +
+          '<td class="pequeno">' + (o.situacao === 'encerrada' ? 'encerrada' : 'aberta') + '</td>' +
+          '<td class="nao-imprimir" style="white-space:nowrap"><button type="button" class="lapis" data-ob-editar="' + T.esc(o.id) + '" title="Editar">✎</button> ' +
+          '<button type="button" class="lapis" data-ob-excluir="' + T.esc(o.id) + '" title="Excluir">🗑</button></td></tr>';
+      }).join('') || '<tr><td colspan="6" class="suave">Nenhuma ainda. Clique em <b>+ Nova obrigação</b>.</td></tr>') +
+      '</tbody></table></div>');
+    const raizEl = el.querySelector('#ent-raiz');
+    raizEl.addEventListener('click', async (ev) => {
+      if (ev.target.closest('[data-ent="nova"]')) { await janelaObrigacao(el, null); return; }
+      const ed = ev.target.closest('[data-ob-editar]');
+      if (ed) { await janelaObrigacao(el, ed.getAttribute('data-ob-editar')); return; }
+      const ex = ev.target.closest('[data-ob-excluir]');
+      if (ex) {
+        const id = ex.getAttribute('data-ob-excluir');
+        const o = E.obrigacoes.find((x) => x.id === id) || {};
+        const ok = await T.confirmar({ titulo: 'Excluir "' + (o.nome || id) + '"?',
+          texto: 'A obrigação sai da lista. <b>O que já foi preenchido nela some junto.</b>', botao: '🗑 Excluir', perigo: true });
+        if (!ok) return;
+        await gravarObrigacoes(E.obrigacoes.filter((x) => x.id !== id));
+        await mostrarObrigacoes(el);
+      }
+    });
   }
 
   // ------------------------------------------------------------------
-  async function mostrar(el, parte, a, b, conferir) {
-    if (parte === 'tipos') return mostrarTipos(el, conferir);
-    if (parte === 'empresa') return mostrarEmpresa(el, a, b, conferir);
-    return mostrarPainel(el, parte, conferir);
+  // Excel (a mesma lista que está na tela, com os filtros aplicados)
+  // ------------------------------------------------------------------
+  const ESTILOS = {
+    tit: { negrito: true, tam: 14, cor: 'FF17324D' },
+    sub: { cor: 'FF5F6B7A', italico: true },
+    cab: { negrito: true, cor: 'FFFFFFFF', fundo: 'FF1F4E78', vert: 'center', quebra: true },
+    verde: { fundo: 'FFE6F4EA' }, ambar: { fundo: 'FFFDF3DA' }, vermelho: { fundo: 'FFFBE4E2' },
+  };
+  function baixarExcel() {
+    if (!E.ob) return;
+    const lista = M().ordenar(M().filtrar(E.linhas, E.filtros), E.ordem.col, E.ordem.desc);
+    const cel = (v, e) => (e ? { v: v, e: e } : v);
+    const linhas = [
+      { celulas: [cel(E.ob.nome, 'tit')], altura: 22 },
+      { celulas: [cel('Competência ' + (E.ob.competencia || '—') + ' · vencimento ' + (E.ob.vencimento || '—') + ' · meta ' + (E.ob.meta || '—'), 'sub')] },
+      null,
+      { celulas: ['BPO', 'Célula', 'Grupo', 'Empresa', 'Código', 'CNPJ', 'Regime', 'Responsável', 'Status', 'Validada', 'Validado por', 'Data validação', 'Observações'].map((x) => cel(x, 'cab')), altura: 26 },
+    ];
+    lista.forEach((l) => {
+      const e = l.atrasada ? 'vermelho' : l.status === 'entregue' ? 'verde' : l.status === 'andamento' ? 'ambar' : null;
+      linhas.push({ celulas: [l.bpo, l.celula, l.grupo, l.nome, l.codigo, l.cnpj ? U.formatarCnpj(l.cnpj) : '', l.regime, l.responsavel,
+        cel(l.statusNome + (l.atrasada ? ' (atrasada)' : ''), e), l.validada ? 'sim' : 'não', l.validadoPor,
+        l.validadoEm ? U.dataHoraLocal(l.validadoEm) : '', l.observacoes] });
+    });
+    const bytes = raiz.ExcelBonito.gerar({ planilhas: [{ nome: 'Controle', colunas: [12, 12, 18, 42, 10, 20, 20, 16, 16, 10, 24, 18, 40], linhas,
+      repetir: ['4', '4'], rodape: E.ob.nome + ' · ' + U.hoje().texto }] , estilos: ESTILOS });
+    T.baixar(bytes, U.nomeSeguro(E.ob.nome, 80) + '.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   }
 
   raiz.TelaEntregas = { mostrar, _teste: { estado: () => E } };

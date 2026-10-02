@@ -9,6 +9,16 @@
   const REGIMES = ['Simples Nacional', 'Lucro Presumido', 'Lucro Real', 'MEI', 'Imune / Isenta', 'Outro'];
 
   function app() { return raiz.App; }
+  // Os valores que já existem na carteira, para o campo sugerir enquanto digita (BPO, célula, grupo):
+  // assim a equipe não cria "Ametista", "ametista" e "AMETISTA" sem perceber.
+  function valoresJaUsados(campo) {
+    const vistos = new Map();
+    (app().empresas || []).forEach((e) => {
+      const v = String(e[campo] || '').trim();
+      if (v && !vistos.has(v.toUpperCase())) vistos.set(v.toUpperCase(), v);
+    });
+    return Array.from(vistos.values()).sort((a, b) => a.localeCompare(b, 'pt-BR'));
+  }
 
   async function mostrar(el, conferir) {
     const arm = app().armazenamento;
@@ -150,6 +160,10 @@
         '<div class="campo"><label for="f-regime">Regime</label><select id="f-regime">' + opcoesRegime + '</select></div>' +
         '<div class="campo"><label for="f-atividade">Atividade</label><input id="f-atividade" maxlength="80" value="' + T.esc(e.atividade || '') + '" placeholder="Ex.: Restaurante"></div>' +
         '<div class="campo inteiro"><label for="f-grupo">Grupo</label><input id="f-grupo" maxlength="80" value="' + T.esc(e.grupo || '') + '" placeholder="Empresas do mesmo grupo econômico (opcional)"></div>' +
+        '<div class="campo"><label for="f-bpo">BPO</label><input id="f-bpo" maxlength="40" list="lista-bpo" value="' + T.esc(e.bpo || '') + '" placeholder="Ex.: Prime"><span class="ajuda">O serviço contratado. Vira coluna e filtro no controle de obrigações.</span></div>' +
+        '<div class="campo"><label for="f-celula">Célula</label><input id="f-celula" maxlength="40" list="lista-celula" value="' + T.esc(e.celula || '') + '" placeholder="Ex.: Ametista"><span class="ajuda">A equipe que cuida desta empresa.</span></div>' +
+        '<datalist id="lista-bpo">' + valoresJaUsados('bpo').map((v) => '<option value="' + T.esc(v) + '">').join('') + '</datalist>' +
+        '<datalist id="lista-celula">' + valoresJaUsados('celula').map((v) => '<option value="' + T.esc(v) + '">').join('') + '</datalist>' +
         '</div><div id="f-erro" style="margin-top:12px"></div>',
       botoes: [{ texto: 'Cancelar', valor: null }, {
         texto: novo ? 'Cadastrar' : 'Salvar', tipo: 'primario',
@@ -159,6 +173,8 @@
             nome: j.querySelector('#f-nome').value.trim(),
             cnpj: j.querySelector('#f-cnpj').value.trim(),
             regime: j.querySelector('#f-regime').value,
+            bpo: j.querySelector('#f-bpo').value.trim(),
+            celula: j.querySelector('#f-celula').value.trim(),
             atividade: j.querySelector('#f-atividade').value.trim(),
             grupo: j.querySelector('#f-grupo').value.trim(),
           };
