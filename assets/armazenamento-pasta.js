@@ -404,6 +404,19 @@
 
     // A consolidação de um grupo: os códigos das empresas somadas e as contas de operações ENTRE elas, que
     // são eliminadas. Só códigos válidos entram; sem empresa nenhuma, o campo some.
+    // Controle de obrigações: as que ESTA empresa entrega (Dony, 02/10/2026: "no cadastro da empresa, quero
+    // poder colocar as obrigações que ela entrega… não entregamos tudo de todas"). Lista de chaves, como
+    // ['ecd', 'ecf', 'mit']. Vazia = a empresa entra em todas, até ele marcar as dela.
+    function limparObrigacoesDaEmpresa(valor) {
+      if (!Array.isArray(valor)) return [];
+      const vistos = new Set();
+      valor.forEach((x) => {
+        const c = String(x === null || x === undefined ? '' : x).trim();
+        if (c && c.length <= 40 && /^[a-z0-9][a-z0-9_-]*$/.test(c)) vistos.add(c);
+      });
+      return Array.from(vistos);
+    }
+
     // Controle de entregas: quais entregas valem para esta empresa, quando ela foge do que o regime manda
     // (Dony, 02/10/2026). { '<id da entrega>': true (vale) | false (não vale) } — o resto sai pelo regime.
     function limparEntregasDaEmpresa(valor) {
@@ -596,6 +609,9 @@
       const cons = limparConsolidacao(empresa.consolidacao !== undefined ? empresa.consolidacao : (anterior && anterior.consolidacao));
       if (cons) { registro.consolidacao = cons; registro.ehGrupo = true; }
       else if (empresa.ehGrupo === true || (empresa.ehGrupo === undefined && anterior && anterior.ehGrupo)) registro.ehGrupo = true;
+      // As obrigações que esta empresa entrega (vazio = entra em todas).
+      const obrigs = limparObrigacoesDaEmpresa(empresa.obrigacoes !== undefined ? empresa.obrigacoes : (anterior && anterior.obrigacoes));
+      if (obrigs.length) registro.obrigacoes = obrigs;
       // Controle de entregas: o ajuste à mão desta empresa (o que o regime dela não acerta sozinho).
       const entregas = limparEntregasDaEmpresa(empresa.entregas !== undefined ? empresa.entregas : (anterior && anterior.entregas));
       if (Object.keys(entregas).length) registro.entregas = entregas;
@@ -1044,7 +1060,7 @@
     // abas escondidas e a nota escrita à mão. Numa importação, isso nunca se perde: se o lado de cá não tem,
     // vem do backup; se os dois têm, fica o do cadastro mais novo.
     const CONFIG_DA_EMPRESA = ['mapaDre', 'mapaBalancete', 'desenhos', 'assinaturas', 'logo', 'corRelatorio', 'conciliacoesLivres',
-      'papeisDeConta', 'contasDoDiario', 'abasOcultas', 'notasExtras', 'consolidacao', 'entregas', 'bpo', 'celula'];
+      'papeisDeConta', 'contasDoDiario', 'abasOcultas', 'notasExtras', 'consolidacao', 'entregas', 'obrigacoes', 'bpo', 'celula'];
     const semConteudo = (x) => x === undefined || x === null || x === '' ||
       (Array.isArray(x) && !x.length) ||
       (typeof x === 'object' && !Array.isArray(x) && !Object.keys(x).length) ||

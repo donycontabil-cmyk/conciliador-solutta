@@ -11,6 +11,20 @@
   function app() { return raiz.App; }
   // Os valores que já existem na carteira, para o campo sugerir enquanto digita (BPO, célula, grupo):
   // assim a equipe não cria "Ametista", "ametista" e "AMETISTA" sem perceber.
+  // A lista de obrigações para marcar no cadastro: os modelos (ECD, ECF, IBGE, MIT…) mais as que ele criou
+  // com nome livre no Controle de obrigações. Fica guardada aqui enquanto a tela está aberta.
+  let obrigacoesConhecidas = null;
+  function obrigacoesParaMarcar() { return obrigacoesConhecidas || (raiz.MotorEntregas ? raiz.MotorEntregas.paraMarcar([]) : []); }
+  async function carregarObrigacoes() {
+    if (!raiz.MotorEntregas) { obrigacoesConhecidas = []; return; }
+    let criadas = [];
+    try {
+      const doc = await app().armazenamento.documentoGeral('entregas-obrigacoes');
+      criadas = (doc && doc.dados && doc.dados.obrigacoes) || [];
+    } catch (e) { criadas = []; }
+    obrigacoesConhecidas = raiz.MotorEntregas.paraMarcar(criadas);
+  }
+
   function valoresJaUsados(campo) {
     const vistos = new Map();
     (app().empresas || []).forEach((e) => {
@@ -150,8 +164,10 @@
   async function formulario(empresa) {
     const e = empresa || {};
     const novo = !empresa;
+    await carregarObrigacoes();
     const opcoesRegime = ['<option value="">—</option>'].concat(REGIMES.map((r) => '<option' + (e.regime === r ? ' selected' : '') + '>' + r + '</option>')).join('');
     const salvo = await T.janela({
+      larga: true,
       titulo: novo ? 'Cadastrar empresa' : 'Editar empresa ' + e.codigo,
       corpo: '<div class="grade-form">' +
         '<div class="campo"><label for="f-codigo">Código *</label><input id="f-codigo" maxlength="20" ' + (novo ? 'autofocus' : 'readonly') + ' value="' + T.esc(e.codigo || '') + '" placeholder="Ex.: 250"><span class="ajuda">O mesmo código do sistema contábil.</span></div>' +
@@ -164,6 +180,12 @@
         '<div class="campo"><label for="f-celula">Célula</label><input id="f-celula" maxlength="40" list="lista-celula" value="' + T.esc(e.celula || '') + '" placeholder="Ex.: Ametista"><span class="ajuda">A equipe que cuida desta empresa.</span></div>' +
         '<datalist id="lista-bpo">' + valoresJaUsados('bpo').map((v) => '<option value="' + T.esc(v) + '">').join('') + '</datalist>' +
         '<datalist id="lista-celula">' + valoresJaUsados('celula').map((v) => '<option value="' + T.esc(v) + '">').join('') + '</datalist>' +
+        // Quais obrigações ESTA empresa entrega (Dony, 02/10/2026: "não entregamos tudo de todas"): só as
+        // marcadas aparecem no Controle de obrigações. Nenhuma marcada = ela entra em todas.
+        '<div class="campo inteiro"><label>Obrigações que esta empresa entrega</label>' +
+        '<div class="emp-obrigacoes">' + obrigacoesParaMarcar().map((o) => '<label class="caixa-opcao"><input type="checkbox" data-ob="' + T.esc(o.chave) + '"' +
+          ((e.obrigacoes || []).indexOf(o.chave) >= 0 ? ' checked' : '') + '> ' + T.esc(o.nome) + '</label>').join('') + '</div>' +
+        '<span class="ajuda">Só as marcadas entram no <b>Controle de obrigações</b>. Sem marcar nenhuma, ela aparece em todas.</span></div>' +
         '</div><div id="f-erro" style="margin-top:12px"></div>',
       botoes: [{ texto: 'Cancelar', valor: null }, {
         texto: novo ? 'Cadastrar' : 'Salvar', tipo: 'primario',
@@ -175,6 +197,7 @@
             regime: j.querySelector('#f-regime').value,
             bpo: j.querySelector('#f-bpo').value.trim(),
             celula: j.querySelector('#f-celula').value.trim(),
+            obrigacoes: Array.from(j.querySelectorAll('[data-ob]')).filter((c) => c.checked).map((c) => c.getAttribute('data-ob')),
             atividade: j.querySelector('#f-atividade').value.trim(),
             grupo: j.querySelector('#f-grupo').value.trim(),
           };

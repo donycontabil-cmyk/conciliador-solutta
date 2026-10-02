@@ -1160,3 +1160,17 @@ select.ent-status.ent-ambar { background: var(--ambar-fundo); color: #6d4700; }
 select.ent-status.ent-vermelho { background: var(--vermelho-fundo); color: #8c1d17; }
 select.ent-status.ent-cinza { background: var(--fundo-suave); color: var(--texto); }
 @media print { .ent-caixa { max-height: none; overflow: visible; } }
+
+/* ---------- O menu da esquerda precisa ser LEGÍVEL ----------
+   Dony, 02/10/2026: "a barra de menu, não dá para ver nada" / "está em tom branco, deixa em preto".
+   O texto era cinza-claro sobre branco; agora é preto, com os títulos de grupo escuros e o menu mais
+   compacto, para caber tudo sem rolar. */
+.menu a { color: #0f1620; font-weight: 500; padding: 7px 10px; }
+.menu a .sub { color: #46525f; }
+.menu .grupo { color: #0f1620; font-weight: 700; font-size: 11.5px; margin: 11px 10px 4px; }
+.menu .rodape-menu { color: #46525f; }
+.menu a.menu-n2 { color: #0f1620; }
+.menu .grupo.menu-n2 { color: #2b3642; }
+/* As obrigações que a empresa entrega, no cadastro e na janela "quem entrega esta". */
+.emp-obrigacoes { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 2px 10px; margin-top: 4px; }
+.emp-obrigacoes label.caixa-opcao { display: block; margin: 0; padding: 3px 0; }

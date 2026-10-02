@@ -82,6 +82,7 @@
       '<div class="cabecalho"><div class="titulos"><h1>Controle de Obrigações</h1>' +
       '<p class="suave">Selecione uma obrigação para carregar as empresas.</p></div>' +
       '<div class="acoes"><button type="button" class="botao primario" data-ent="nova">+ Nova obrigação</button> ' +
+      (ob ? '<button type="button" class="botao" data-ent="quem">👥 Quem entrega esta</button> ' : '') +
       '<a class="botao pequeno" href="#/entregas/obrigacoes">⚙ Obrigações</a></div></div>' +
       // Escolha da obrigação + competência (o quadro de cima do print)
       '<div class="cartao corpo ent-escolha-caixa"><div class="grade-form">' +
@@ -92,8 +93,73 @@
         ? '<div class="cartao corpo ent-vazio"><p class="suave">' + (E.obrigacoes.length
           ? 'Selecione uma obrigação acima para começar.'
           : 'Nenhuma obrigação cadastrada ainda. Clique em <b>+ Nova obrigação</b> — ECD, ECF, IBGE, MIT, Fechamento Contábil e outras já vêm com o prazo sugerido.') + '</p></div>'
-        : cartoesDaObrigacao(ob, res) + barra(todas, lista, res) + tabela(lista, ob)));
+        : cartoesDaObrigacao(ob, res) + avisoDeQuemEntrega() + barra(todas, lista, res) + tabela(lista, ob)));
     ligar(el);
+  }
+
+  // Quem ainda não tem as obrigações marcadas no cadastro entra em TODAS — e aparece aqui, para ele saber
+  // que a lista está maior do que deveria (Dony, 02/10/2026: "não entregamos tudo de todas").
+  function avisoDeQuemEntrega() {
+    const faltam = M().semMarcar(app().empresas || []);
+    if (!faltam) return '';
+    return '<div class="aviso ambar nao-imprimir" style="margin:0 0 12px"><span class="icone-aviso">👥</span><div>' +
+      '<b>' + faltam + ' empresa(s) ainda estão sem as obrigações marcadas no cadastro</b> e, por isso, aparecem em todas. ' +
+      'Clique em <b>👥 Quem entrega esta</b> aqui em cima — ou marque no cadastro de cada uma.</div></div>';
+  }
+
+  // Marcar de uma vez quem entrega esta obrigação. Grava no cadastro de cada empresa, que é onde essa
+  // informação mora: assim vale para a ECF 2027, para a de 2028 e para todas as outras do mesmo tipo.
+  async function janelaQuemEntrega(el) {
+    const ob = E.ob;
+    if (!ob) return;
+    const empresas = (app().empresas || []).filter((e) => !e.ehGrupo).slice()
+      .sort((a, b) => String(a.nome).localeCompare(String(b.nome), 'pt-BR'));
+    const chave = M().chaveDe(ob);
+    const salvo = await T.janela({
+      titulo: 'Quem entrega "' + ob.nome + '"?',
+      larga: true,
+      corpo: '<p class="suave" style="margin:0 0 12px;line-height:1.55">Marque as empresas que entregam <b>' + T.esc(ob.nome) + '</b>. ' +
+        'Fica guardado no cadastro de cada uma — vale também para as próximas ' + T.esc(M().modelo(ob.modelo) ? M().modelo(ob.modelo).nome : ob.nome) + ' dos outros anos.</p>' +
+        '<div class="md-barra" style="margin-bottom:8px"><button type="button" class="botao pequeno" data-todos="1">Marcar todas</button>' +
+        '<button type="button" class="botao pequeno" data-todos="0">Desmarcar todas</button>' +
+        '<input class="apres-campo pequeno" id="q-busca" placeholder="procurar empresa…" style="flex:1;min-width:180px"></div>' +
+        '<div class="emp-obrigacoes" id="q-lista" style="max-height:48vh;overflow:auto">' +
+        empresas.map((e) => '<label class="caixa-opcao ent-escolha" data-nome="' + T.esc(U.semAcento(e.codigo + ' ' + e.nome).toUpperCase()) + '">' +
+          '<input type="checkbox" data-emp="' + T.esc(e.codigo) + '"' + (M().entrega(e, ob) ? ' checked' : '') + '> ' +
+          T.esc(e.codigo + ' · ' + e.nome) + ' <span class="suave pequeno">' + T.esc([e.bpo, e.celula, e.regime].filter(Boolean).join(' · ')) + '</span></label>').join('') +
+        '</div>',
+      aoAbrir: (j) => {
+        j.querySelectorAll('[data-todos]').forEach((b) => b.addEventListener('click', () => {
+          const v = b.getAttribute('data-todos') === '1';
+          j.querySelectorAll('#q-lista label:not([hidden]) [data-emp]').forEach((c) => { c.checked = v; });
+        }));
+        const busca = j.querySelector('#q-busca');
+        busca.addEventListener('input', () => {
+          const q = U.semAcento(busca.value).toUpperCase().trim();
+          j.querySelectorAll('#q-lista label').forEach((l) => { l.hidden = !!q && l.getAttribute('data-nome').indexOf(q) < 0; });
+        });
+      },
+      botoes: [{ texto: 'Cancelar', valor: null }, { texto: 'Salvar', tipo: 'primario', antes: (j) =>
+        Array.from(j.querySelectorAll('[data-emp]')).map((c) => ({ codigo: c.getAttribute('data-emp'), marcada: c.checked })) }],
+    });
+    if (!salvo) return;
+    const todasAsChaves = M().paraMarcar(E.obrigacoes).map((x) => x.chave);
+    let mexidas = 0;
+    for (const { codigo, marcada } of salvo) {
+      const emp = (app().empresas || []).find((e) => String(e.codigo) === String(codigo));
+      if (!emp) continue;
+      const tinha = Array.isArray(emp.obrigacoes) ? emp.obrigacoes.slice() : [];
+      let nova = tinha.slice();
+      if (marcada && nova.indexOf(chave) < 0) nova.push(chave);
+      // Desmarcar quem está com a lista vazia (= "entrega todas") vira "entrega todas, menos esta":
+      // senão ela continuaria aparecendo, e ele acharia que o programa não obedeceu.
+      if (!marcada) nova = (tinha.length ? tinha : todasAsChaves).filter((c) => c !== chave);
+      if (JSON.stringify(nova) === JSON.stringify(tinha)) continue;
+      try { await app().armazenamento.salvarEmpresa(Object.assign({}, emp, { obrigacoes: nova })); mexidas++; } catch (e) { /* segue para as outras */ }
+    }
+    app().empresas = await app().armazenamento.empresas();
+    T.avisoRapido(mexidas ? mexidas + ' empresa(s) ajustada(s).' : 'Nada mudou.', 'ok', 4000);
+    desenhar(el);
   }
 
   function cartoesDaObrigacao(ob, res) {
@@ -204,6 +270,7 @@
       if (!b) return;
       const q = b.getAttribute('data-ent');
       if (q === 'nova') await janelaObrigacao(el, null);
+      else if (q === 'quem') await janelaQuemEntrega(el);
       else if (q === 'limpar') { E.filtros = {}; desenhar(el); }
       else if (q === 'so-atrasadas') { E.filtros.so = E.filtros.so === 'atrasadas' ? '' : 'atrasadas'; desenhar(el); }
       else if (q === 'excel') baixarExcel();

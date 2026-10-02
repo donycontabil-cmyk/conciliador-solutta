@@ -111,11 +111,26 @@
   // dados: { '<código da empresa>': { status, responsavel, regime, validada, validadoPor, validadoEm,
   //                                   observacoes, entregueEm, arquivos } }
   // ------------------------------------------------------------------
+  // QUAIS EMPRESAS ENTREGAM ESTA OBRIGAÇÃO (Dony, 02/10/2026: "no cadastro da empresa, quero poder colocar
+  // as obrigações que ela entrega, para aí sim ela entrar no relatório de entregas — não entregamos tudo de
+  // todas"). A empresa guarda as CHAVES que entrega; a chave da obrigação é o modelo dela (ECD, ECF, MIT…)
+  // ou, quando foi criada com nome livre, o id dela.
+  // Empresa que ainda não tem nada marcado entra em todas: assim nada some de quem ainda não ajustou — e a
+  // tela conta quantas estão nessa situação, para ele ir acertando.
+  const chaveDe = (obrigacao) => texto(obrigacao && (obrigacao.modelo || obrigacao.id));
+  function entrega(empresa, obrigacao) {
+    const lista = (empresa && Array.isArray(empresa.obrigacoes)) ? empresa.obrigacoes.map(texto).filter(Boolean) : [];
+    if (!lista.length) return true;
+    const c = chaveDe(obrigacao);
+    return lista.indexOf(c) >= 0 || lista.indexOf(texto(obrigacao && obrigacao.id)) >= 0;
+  }
+  const semMarcar = (empresas) => (empresas || []).filter((e) => !e.ehGrupo && !(Array.isArray(e.obrigacoes) && e.obrigacoes.length)).length;
+
   function linhas(empresas, obrigacao, dados, op) {
     const d = dados || {};
     const hoje = (op && op.hoje) || Util.hoje();
     const p = prazo(obrigacao, hoje);
-    return (empresas || []).filter((e) => !e.ehGrupo).map((e) => {
+    return (empresas || []).filter((e) => !e.ehGrupo && entrega(e, obrigacao)).map((e) => {
       const linha = d[String(e.codigo)] || {};
       const st = status(linha.status);
       // Sem entregar e o prazo já passou: é atraso — é a coluna que ele olha primeiro.
@@ -213,5 +228,18 @@
     return nova;
   }
 
-  return { STATUS, status, MODELOS, modelo, sugerir, conferirObrigacao, prazo, linhas, resumo, filtrar, ordenar, ORDENAVEIS, valoresDe, mudarLinha };
+  // As obrigações que uma empresa PODE entregar: os modelos (ECD, ECF, IBGE, MIT…) mais as obrigações que
+  // ele criou com nome livre. É esta lista que aparece no cadastro da empresa, para marcar.
+  function paraMarcar(obrigacoes) {
+    const lista = MODELOS.filter((m) => m.id !== 'outra').map((m) => ({ chave: m.id, nome: m.nome, ajuda: m.ajuda }));
+    (obrigacoes || []).forEach((o) => {
+      const c = chaveDe(o);
+      if (!c || lista.some((x) => x.chave === c)) return;
+      lista.push({ chave: c, nome: o.nome, ajuda: 'criada por você' });
+    });
+    return lista;
+  }
+
+  return { STATUS, status, MODELOS, modelo, sugerir, conferirObrigacao, prazo, linhas, resumo, filtrar, ordenar, ORDENAVEIS, valoresDe, mudarLinha,
+    chaveDe, entrega, semMarcar, paraMarcar };
 });
