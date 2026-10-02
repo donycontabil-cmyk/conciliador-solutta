@@ -139,13 +139,15 @@
     partes.push('<a href="#/sobre" class="' + (r.nome === 'sobre' ? 'ativo' : '') + '">ℹ️ Onde ficam os dados<span class="sub">hoje e no servidor da Solutta</span></a>');
     // ERP SOLUTTA (Dony, 01/10/2026: "quero que você crie um menu ERP Solutta… bem aqui"). Começa dentro do
     // Conciliador e vai crescendo: por enquanto, as tabelas básicas do sistema contábil.
-    // SECRETO ENQUANTO TRANCADO ("ele é secreto dentro dele"): sem a senha, nada disto aparece. Quem sabe
-    // que existe entra pelo atalho do teclado ou digitando #/erp.
-    if (!raiz.ErpAcesso.liberado()) { montarRodapeDoMenu(partes, T); menu.innerHTML = partes.join(''); return; }
+    // O ERP APARECE, MAS TRANCADO (Dony, 02/10/2026: "eu quero que ele apareça, mas para abrir os menus
+    // dele, eu tenho que digitar a senha"). Sem a senha, fica só a porta com o cadeado: os menus de dentro
+    // (Configurações, Contabilidade, as tabelas) só surgem depois que ele entra.
+    const comSenha = raiz.ErpAcesso.liberado();
     partes.push('<div class="grupo">ERP Solutta</div>');
-    partes.push('<a href="#/erp" class="' + (r.nome === 'erp' && !r.parte ? 'ativo' : '') + '">🧮 Sistema contábil<span class="sub">as tabelas e, aos poucos, a escrituração</span></a>');
+    partes.push('<a href="#/erp" class="' + (r.nome === 'erp' && !r.parte ? 'ativo' : '') + '">🧮 Sistema contábil' +
+      (comSenha ? '' : ' 🔒') + '<span class="sub">' + (comSenha ? 'as tabelas e, aos poucos, a escrituração' : 'precisa de senha') + '</span></a>');
     // Dentro do ERP o menu abre em três degraus (Dony, 01/10/2026): Configurações › Contabilidade › tabelas.
-    if (r.nome === 'erp') {
+    if (comSenha && r.nome === 'erp') {
       const cod = r.codigo || (raiz.TelaErp && raiz.TelaErp.empresaLembrada()) || '';
       const item = raiz.TelaErp.itemDe(r.parte);
       partes.push('<a href="#/erp/config' + (cod ? '/' + encodeURIComponent(cod) : '') + '" class="menu-n1 ' + (r.parte === 'config' ? 'ativo' : '') + '">⚙️ Configurações<span class="sub">as tabelas do sistema</span></a>');

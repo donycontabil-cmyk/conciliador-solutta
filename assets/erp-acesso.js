@@ -1,8 +1,9 @@
 /*
  * ERP Solutta — erp-acesso.js
- * A TRANCA do ERP. Dony, 01/10/2026: "para acessar esse menu, digite uma senha… ele é secreto dentro dele".
- * Enquanto não destravar, o menu ERP NÃO APARECE no menu da esquerda — quem não sabe que ele existe não vê
- * nada. Quem sabe entra por um destes dois caminhos: o atalho do teclado ou o endereço #/erp direto.
+ * A TRANCA do ERP. Dony, 02/10/2026: "eu quero que ele apareça, mas para abrir os menus dele, eu tenho que
+ * digitar a senha". O item ERP Solutta fica no menu da esquerda com um cadeado; clicando nele (ou pelo atalho
+ * do teclado, ou pelo endereço #/erp) vem a tela da senha. Os menus de dentro — Configurações, Contabilidade,
+ * as tabelas — só aparecem depois que ele entra.
  *
  * O QUE ISTO É, COM TODAS AS LETRAS: é uma TRANCA DE PORTA, não um cofre. O programa inteiro roda no
  * navegador de quem usa, então quem entende de código consegue passar por ela, e ela NÃO protege a pasta de
