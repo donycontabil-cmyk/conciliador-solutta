@@ -11,8 +11,8 @@
   // Aqui se confere: faltando algum, a tela diz qual.
   const MODULOS = ['CONFIG', 'XLSX', 'Util', 'LerPlanilha', 'LerRazao', 'LerFinanceiro', 'LerBalancete', 'LerDiario', 'Familias', 'Leitor', 'MotorNomes',
     'MotorReclass', 'MotorFechamento', 'MotorTerceiro', 'MotorApresentacao', 'MotorDiario', 'MotorResultado', 'ExcelBonito', 'Backup', 'RelatorioCliente', 'LayoutAjustes', 'Demonstracao', 'Diagnostico', 'Armazenamento', 'ArmazenamentoPasta', 'ArmazenamentoMemoria',
-    'ErpCadastros', 'ErpDados', 'ErpAcesso',
-    'Tela', 'TelaPasta', 'TelaCarteira', 'TelaEmpresa', 'TelaFamilia', 'TelaSubir', 'TelaPasso1', 'TelaPasso13', 'TelaPasso4', 'TelaPasso3', 'TelaRelatorio3', 'TelaApresentacao', 'TelaDiario', 'TelaLivre', 'TelaBackup', 'TelaResultado', 'TelaSuporte', 'TelaErp'];
+    'ErpCadastros', 'ErpDados', 'ErpAcesso', 'MotorEntregas',
+    'Tela', 'TelaPasta', 'TelaCarteira', 'TelaEmpresa', 'TelaFamilia', 'TelaSubir', 'TelaPasso1', 'TelaPasso13', 'TelaPasso4', 'TelaPasso3', 'TelaRelatorio3', 'TelaApresentacao', 'TelaDiario', 'TelaLivre', 'TelaBackup', 'TelaResultado', 'TelaSuporte', 'TelaErp', 'TelaEntregas'];
 
   const CHAVE_USUARIO = 'conciliador-solutta.usuario';
   // Menu da esquerda fixo ou flutuante (Dony, 18/09/2026: "uma setinha que eu possa fixar quando eu quiser;
@@ -134,6 +134,11 @@
       partes.push('<a href="#/empresa/' + encodeURIComponent(r.codigo) + '/backup" class="' +
         (r.nome === 'backup' ? 'ativo' : '') + '">💾 Backup<span class="sub">levar esta empresa para outra máquina</span></a>');
     }
+    // CONTROLE DE ENTREGAS (Dony, 02/10/2026): no menu principal, à vista, sem senha — é controle de
+    // equipe. Fica logo abaixo da carteira, porque é dali que se olha a carteira inteira todo dia.
+    partes.push('<div class="grupo">Controle de entregas</div>');
+    partes.push('<a href="#/entregas" class="' + (r.nome === 'entregas' && !r.parte ? 'ativo' : (r.nome === 'entregas' && r.parte !== 'tipos' ? 'ativo' : '')) + '">📦 Painel do mês<span class="sub">o que falta, o que atrasou, por empresa</span></a>');
+    partes.push('<a href="#/entregas/tipos" class="' + (r.nome === 'entregas' && r.parte === 'tipos' ? 'ativo' : '') + '">⚙ Entregas do escritório<span class="sub">a lista, os prazos e os regimes</span></a>');
     partes.push('<div class="grupo">Programa</div>');
     partes.push('<a href="#/suporte" class="' + (r.nome === 'suporte' ? 'ativo' : '') + '">🔎 Ver o desenho de um arquivo<span class="sub">para adaptar a um sistema novo</span></a>');
     partes.push('<a href="#/sobre" class="' + (r.nome === 'sobre' ? 'ativo' : '') + '">ℹ️ Onde ficam os dados<span class="sub">hoje e no servidor da Solutta</span></a>');
@@ -184,6 +189,8 @@
     if (p[0] === 'suporte') return { nome: 'suporte' };
     // ERP Solutta: #/erp (início) e #/erp/<parte>/<código da empresa>
     if (p[0] === 'erp') return { nome: 'erp', parte: p[1] || '', codigo: p[2] || '' };
+    // Controle de entregas: #/entregas[/AAAA-MM], #/entregas/empresa/<código>/<ano>, #/entregas/tipos
+    if (p[0] === 'entregas') return { nome: 'entregas', parte: p[1] || '', a: p[2] || '', b: p[3] || '' };
     if (p[0] === 'empresa' && p[1]) {
       // Relatório de apresentação: #/empresa/<código>/apresentacao[/<ano>]
       if (p[2] === 'apresentacao') return { codigo: p[1], nome: 'apresentacao', ano: /^\d{4}$/.test(p[3] || '') ? Number(p[3]) : null };
@@ -234,6 +241,7 @@
       const conferir = () => minhaRodada === rodada;
       if (r.nome === 'carteira') await raiz.TelaCarteira.mostrar(conteudo, conferir);
       else if (r.nome === 'erp') await raiz.TelaErp.mostrar(conteudo, r.parte, r.codigo, conferir);
+      else if (r.nome === 'entregas') await raiz.TelaEntregas.mostrar(conteudo, r.parte, r.a, r.b, conferir);
       else if (r.nome === 'sobre') mostrarSobre(conteudo);
       else if (r.nome === 'empresa') await raiz.TelaEmpresa.mostrar(conteudo, r.codigo, conferir);
       else if (r.nome === 'apresentacao') await raiz.TelaApresentacao.mostrar(conteudo, r.codigo, r.ano, conferir);

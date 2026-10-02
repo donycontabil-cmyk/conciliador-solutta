@@ -1134,3 +1134,23 @@ table.md-tabela tr.erp-inativa td .cod { text-decoration: line-through; }
 .erp-tranca { max-width: 420px; margin: 8vh auto 0; }
 .erp-tranca .cartao { padding: 22px 24px; }
 .erp-tranca input { width: 100%; font-size: 18px; letter-spacing: 3px; text-align: center; }
+
+/* ---------- Controle de entregas (Dony, 02/10/2026) ----------
+   A grade é larga: uma coluna por entrega. O nome da coluna fica deitado para caber a carteira inteira. */
+table.ent-tabela th.ent-col { height: 118px; vertical-align: bottom; padding: 4px 2px; width: 30px; min-width: 30px; }
+table.ent-tabela th.ent-col span { display: block; writing-mode: vertical-rl; transform: rotate(180deg); white-space: nowrap;
+  font-size: 11.5px; font-weight: 600; max-height: 110px; overflow: hidden; }
+table.ent-tabela th.ent-col-mes { width: 34px; min-width: 34px; text-align: center; font-size: 11.5px; }
+table.ent-tabela td.ent-celula { text-align: center; padding: 2px; }
+table.ent-tabela td.ent-fora { color: var(--borda-forte); }
+table.ent-tabela tr.ent-grupo td { background: var(--fundo-suave); padding: 6px 8px; }
+.ent-botao { border: 0; background: none; padding: 2px; cursor: pointer; border-radius: 6px; }
+.ent-botao:hover { background: var(--fundo-suave); }
+.ent-selo { display: inline-block; min-width: 22px; height: 22px; line-height: 22px; border-radius: 6px; font-size: 12px; font-weight: 700; text-align: center; }
+.ent-verde { background: var(--verde-fundo); color: #175f3b; }
+.ent-ambar { background: var(--ambar-fundo); color: #6d4700; }
+.ent-vermelho { background: var(--vermelho-fundo); color: #8c1d17; }
+.ent-cinza { background: var(--fundo-suave); color: var(--suave); }
+.ent-legenda { font-weight: 400; }
+.ent-legenda .ent-selo { margin: 0 2px 0 8px; }
+label.caixa-opcao.ent-escolha { display: block; margin: 2px 0; }

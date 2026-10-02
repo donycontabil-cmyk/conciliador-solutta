@@ -11,6 +11,7 @@
  *   exportarEmpresa(codigo) -> pacote de backup de uma empresa; importarTudo(pacote, { substituir })
  *   congelar(codigo, meta, conteudo), congelado(id)
  *   documento(codigo, chave), salvarDocumento(codigo, chave, dados), documentos(codigo)  — tabelas do ERP
+ *   documentoGeral(chave), salvarDocumentoGeral(chave, dados), documentosGerais()  — do escritório
  *   registrarNoLog(acao)
  *   exportarTudo(), importarTudo(pacote)
  *
@@ -34,6 +35,8 @@
     'congelar', 'congelado',
     // Tabelas do ERP Solutta: um JSON por tabela, na pasta erp/ da empresa (ver erp-dados.js).
     'documento', 'salvarDocumento', 'documentos',
+    // Documentos do ESCRITÓRIO (valem para a carteira toda): o catálogo do Controle de entregas.
+    'documentoGeral', 'salvarDocumentoGeral', 'documentosGerais',
     'registrarNoLog',
     'exportarTudo', 'exportarEmpresa', 'importarTudo',
   ];

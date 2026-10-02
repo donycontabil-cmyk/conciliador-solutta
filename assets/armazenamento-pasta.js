@@ -404,6 +404,19 @@
 
     // A consolidação de um grupo: os códigos das empresas somadas e as contas de operações ENTRE elas, que
     // são eliminadas. Só códigos válidos entram; sem empresa nenhuma, o campo some.
+    // Controle de entregas: quais entregas valem para esta empresa, quando ela foge do que o regime manda
+    // (Dony, 02/10/2026). { '<id da entrega>': true (vale) | false (não vale) } — o resto sai pelo regime.
+    function limparEntregasDaEmpresa(valor) {
+      if (!valor || typeof valor !== 'object' || Array.isArray(valor)) return {};
+      const limpo = {};
+      Object.keys(valor).forEach((k) => {
+        const id = String(k || '').trim();
+        if (!id || id.length > 40 || !/^[a-z0-9][a-z0-9_-]*$/.test(id)) return;
+        if (valor[k] === true || valor[k] === false) limpo[id] = valor[k];
+      });
+      return limpo;
+    }
+
     function limparConsolidacao(valor) {
       if (!valor || typeof valor !== 'object') return null;
       const empresas = Array.from(new Set((Array.isArray(valor.empresas) ? valor.empresas : [])
@@ -579,6 +592,9 @@
       const cons = limparConsolidacao(empresa.consolidacao !== undefined ? empresa.consolidacao : (anterior && anterior.consolidacao));
       if (cons) { registro.consolidacao = cons; registro.ehGrupo = true; }
       else if (empresa.ehGrupo === true || (empresa.ehGrupo === undefined && anterior && anterior.ehGrupo)) registro.ehGrupo = true;
+      // Controle de entregas: o ajuste à mão desta empresa (o que o regime dela não acerta sozinho).
+      const entregas = limparEntregasDaEmpresa(empresa.entregas !== undefined ? empresa.entregas : (anterior && anterior.entregas));
+      if (Object.keys(entregas).length) registro.entregas = entregas;
       // Linhas da DRE conferidas por quem usa (Dony, 18/09/2026: cada empresa com o seu plano de contas).
       const mapaDre = limparMapaDre(empresa.mapaDre !== undefined ? empresa.mapaDre : (anterior && anterior.mapaDre));
       if (mapaDre) registro.mapaDre = mapaDre;
@@ -930,6 +946,35 @@
       return r;
     }
 
+    // DOCUMENTOS DO ESCRITÓRIO (não de uma empresa): o catálogo do Controle de entregas, por exemplo.
+    // Ficam em geral/<chave>.json, na raiz da pasta de dados — valem para a carteira inteira.
+    async function documentoGeral(chave) {
+      exigirConexao();
+      const c = validarChave(chave);
+      const dir = await pasta(raiz, ['geral'], false);
+      return dir ? ((await lerJson(dir, c + '.json')) || null) : null;
+    }
+    async function salvarDocumentoGeral(chave, dados) {
+      exigirConexao();
+      const c = validarChave(chave);
+      const dir = await pasta(raiz, ['geral'], true);
+      const doc = Object.assign({}, dados, { chave: c, atualizadoEm: Util.agoraISO(), atualizadoPor: quem() });
+      await gravar(dir, c + '.json', JSON.stringify(doc));
+      return doc;
+    }
+    async function documentosGerais() {
+      exigirConexao();
+      const dir = await pasta(raiz, ['geral'], false);
+      if (!dir) return [];
+      const r = [];
+      for (const item of await listar(dir)) {
+        if (item.tipo !== 'file' || !item.nome.endsWith('.json')) continue;
+        const d = await lerJson(dir, item.nome);
+        if (d) r.push(d);
+      }
+      return r;
+    }
+
     // ------------------------------------------------------------------
     // Rastro
     // ------------------------------------------------------------------
@@ -963,7 +1008,7 @@
       const lista = codigoSo ? todas.filter((e) => String(e.codigo) === String(codigoSo)) : todas;
       if (codigoSo && !lista.length) throw erro('Validacao', 'A empresa ' + codigoSo + ' não está nesta pasta de dados.');
       const pacote = { programa: PROGRAMA, formato: FORMATO, exportadoEm: Util.agoraISO(), exportadoPor: quem(),
-        so: codigoSo ? String(codigoSo) : null, empresas: lista, arquivos: [], conciliacoes: [], congelados: [], documentos: [], log: [] };
+        so: codigoSo ? String(codigoSo) : null, empresas: lista, arquivos: [], conciliacoes: [], congelados: [], documentos: [], gerais: await documentosGerais(), log: [] };
       for (const emp of lista) {
         for (const meta of await arquivos(emp.codigo)) {
           const conteudo = await conteudoDoArquivo(meta.id);
@@ -995,7 +1040,7 @@
     // abas escondidas e a nota escrita à mão. Numa importação, isso nunca se perde: se o lado de cá não tem,
     // vem do backup; se os dois têm, fica o do cadastro mais novo.
     const CONFIG_DA_EMPRESA = ['mapaDre', 'mapaBalancete', 'desenhos', 'assinaturas', 'logo', 'corRelatorio', 'conciliacoesLivres',
-      'papeisDeConta', 'contasDoDiario', 'abasOcultas', 'notasExtras', 'consolidacao'];
+      'papeisDeConta', 'contasDoDiario', 'abasOcultas', 'notasExtras', 'consolidacao', 'entregas'];
     const semConteudo = (x) => x === undefined || x === null || x === '' ||
       (Array.isArray(x) && !x.length) ||
       (typeof x === 'object' && !Array.isArray(x) && !Object.keys(x).length) ||
@@ -1063,6 +1108,14 @@
         await gravar(dirErp, validarChave(d.chave) + '.json', JSON.stringify(d));
         r.documentos++;
       }
+      for (const g of pacote.gerais || []) {
+        if (!g || !g.chave) continue;
+        const atual = await documentoGeral(g.chave);
+        if (atual && !substituir) { r.jaTinha.gerais = (r.jaTinha.gerais || 0) + 1; continue; }
+        const dir = await pasta(raiz, ['geral'], true);
+        await gravar(dir, validarChave(g.chave) + '.json', JSON.stringify(g));
+        r.gerais = (r.gerais || 0) + 1;
+      }
       for (const c of pacote.congelados || []) {
         if (!c || !c.id) continue;
         const p = partesDoId(c.id);
@@ -1096,7 +1149,7 @@
       arquivos, conteudoDoArquivo, guardarArquivo, apagarArquivo, arquivoApagado,
       conciliacoes, salvarConciliacao, apagarConciliacao, versoes,
       congelar, congelado,
-      documento, salvarDocumento, documentos,
+      documento, salvarDocumento, documentos, documentoGeral, salvarDocumentoGeral, documentosGerais,
       registrarNoLog,
       exportarTudo, importarTudo,
       // extras desta casa
