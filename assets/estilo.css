@@ -1145,9 +1145,13 @@ table.md-tabela tr.erp-inativa td .cod { text-decoration: line-through; }
 .ent-barra select.pequeno { max-width: 170px; font-size: 12.5px; padding: 4px 6px; }
 .ent-caixa { overflow: auto; max-height: 68vh; }
 table.ent-obrig { font-size: 12.5px; }
-table.ent-obrig th { position: sticky; top: 0; z-index: 2; background: var(--fundo-suave); white-space: nowrap; }
+/* O cabeçalho usa o azul escuro das outras tabelas do programa. Eu tinha trocado o fundo por um claro e
+   esquecido a cor do texto, que é branca: deu cabeçalho invisível (Dony, 02/10/2026: "continuo não vendo
+   nada" / "só quando passa o mouse, e mesmo assim bem ruim"). */
+table.ent-obrig th { position: sticky; top: 0; z-index: 2; white-space: nowrap; font-size: 12px; }
 table.ent-obrig th.ent-ordena { cursor: pointer; user-select: none; }
-table.ent-obrig th.ent-ordena:hover { background: var(--borda); }
+table.ent-obrig th.ent-ordena:hover { background: #2d6190; }
+table.ent-obrig th .seta { opacity: .55; font-weight: 400; }
 table.ent-obrig td { vertical-align: middle; padding: 3px 6px; }
 table.ent-obrig td.ent-empresa { min-width: 240px; }
 table.ent-obrig td.ent-celula { text-align: center; }

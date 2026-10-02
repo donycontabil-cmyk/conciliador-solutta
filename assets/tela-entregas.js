@@ -210,7 +210,7 @@
     { id: 'observacoes', titulo: 'Observações' },
   ];
   function tabela(lista, ob) {
-    const seta = (c) => (E.ordem.col === c ? (E.ordem.desc ? ' ▼' : ' ▲') : ' <span class="suave">⇅</span>');
+    const seta = (c) => (E.ordem.col === c ? ' ' + (E.ordem.desc ? '▼' : '▲') : ' <span class="seta">⇅</span>');
     const pessoas = M().valoresDe(E.linhas, 'responsavel');
     const regimes = ['Lucro Real', 'Lucro Real Trimestral', 'Lucro Presumido', 'Simples Nacional', 'MEI', 'Imune / Isenta', 'Outro'];
     return '<div class="apres-caixa ent-caixa"><table class="apres ent-obrig"><thead><tr>' +
