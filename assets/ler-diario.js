@@ -104,8 +104,11 @@
     const debito = achar(NOMES_PERNA.debito), credito = achar(NOMES_PERNA.credito);
     const historico = achar(NOMES_PERNA.historico);
     const contra = achar(NOMES_BLOCO.contrapartida);
-    // A conta não vem em coluna nenhuma: ela é o bloco "Conta: …". Havendo coluna de conta, é o desenho por perna.
-    if (debito < 0 || credito < 0 || historico < 0 || contra < 0) return null;
+    // A conta não vem em coluna nenhuma: ela é o bloco. Havendo coluna de conta, é o desenho por perna.
+    // A contrapartida é OPCIONAL: há relatório que traz só "Histórico | Documento | Chave | Débito | Crédito"
+    // e junta as duas pernas pela CHAVE (Dony, 02/10/2026, o diário da UDLOG, que a colaboradora não conseguiu
+    // ler). Sem contrapartida, quem confirma o desenho são as linhas de conta no corpo (ver reconhecerPorBloco).
+    if (debito < 0 || credito < 0 || historico < 0) return null;
     if (achar(NOMES_PERNA.conta) >= 0) return null;
     const c = { porBloco: true, conta: -1, contrapartida: contra, debito, credito, historico,
       lote: achar(NOMES_PERNA.lote), documento: achar(NOMES_PERNA.documento), reduzidoContra: achar(NOMES_BLOCO.reduzidoContra) };
@@ -117,12 +120,22 @@
   }
   // A linha "Conta: ASSOC BRASILEIRA…  2.01.05.05.05.0152  F00152" (às vezes partida em várias células).
   const LINHA_DE_CONTA = /^\s*conta\s*:?\s*(.+)$/i;
+  // Sem a palavra "Conta:", a linha do bloco é "237 - 1.3.4.01.006 - Softwares" ou "1.3.4.01.006 - Softwares":
+  // reduzido (opcional), CLASSIFICAÇÃO com pelo menos três pedaços, e o nome (Dony, 02/10/2026, a UDLOG).
+  // O padrão é fechado de propósito: a continuação de um histórico (" FRANCO 37368676893 - Matriz") não casa.
+  const CONTA_SOLTA = /^\s*(?:(\d{1,8})\s*[-–]\s*)?(\d+(?:\.\d+){2,})\s*[-–]\s*(\S.*)$/;
   function contaDoBloco(linha) {
     const cheias = (linha || []).filter((x) => !(x === null || x === undefined || String(x).trim() === ''));
     if (!cheias.length) return null;
     const todo = cheias.map((x) => String(x).trim()).join(' ').replace(/\s+/g, ' ');
     const m = todo.match(LINHA_DE_CONTA);
-    if (!m) return null;
+    if (!m) {
+      // A linha tem que ser SÓ a conta: com valor ou documento ao lado, é lançamento, não cabeçalho de bloco.
+      if (cheias.length !== 1) return null;
+      const s = todo.match(CONTA_SOLTA);
+      if (!s) return null;
+      return { conta: s[2], nome: s[3].trim(), reduzido: s[1] || '' };
+    }
     const resto = m[1];
     const achados = resto.match(/\d+(?:\.\d+){2,}/g);   // a classificação tem pelo menos três pedaços
     if (!achados || !achados.length) return null;
@@ -139,12 +152,72 @@
   // (A coluna de contrapartida é o que identifica o desenho e completa a perna que ficou sozinha.)
   function lerBloco(l, c, bloco) {
     if (!bloco) return { debito: '', credito: '', valor: null };
-    const vd = valorDe(l[c.debito]);
-    const vc = valorDe(l[c.credito]);
-    const contra = c.contrapartida >= 0 ? contaDe(l[c.contrapartida]) : '';
-    if (vd) return { debito: bloco.conta, credito: '', contrapartida: contra, valor: vd };
-    if (vc) return { debito: '', credito: bloco.conta, contrapartida: contra, valor: vc };
-    return { debito: '', credito: '', valor: null };
+    // COM contrapartida (a Omega), as colunas do cabeçalho valem e a contrapartida confirma o desenho.
+    // SEM ela (a UDLOG), as colunas escorregam de linha para linha: confiar no cabeçalho faria o programa
+    // somar o número da CHAVE como se fosse dinheiro. Por isso, aí embaixo, o valor é achado pelo que ele é.
+    if (c.contrapartida >= 0) {
+      const vd = valorDe(l[c.debito]);
+      const vc = valorDe(l[c.credito]);
+      const contra = contaDe(l[c.contrapartida]);
+      if (vd) return { debito: bloco.conta, credito: '', contrapartida: contra, valor: vd, coluna: c.debito };
+      if (vc) return { debito: '', credito: bloco.conta, contrapartida: contra, valor: vc, coluna: c.credito };
+      return { debito: '', credito: '', valor: null };
+    }
+    if (c.lote < 0) return { debito: '', credito: '', valor: null };
+    // Nessas linhas tudo pode ter escorregado de coluna — inclusive a chave e o documento, que também são
+    // números. Então o programa acha primeiro O DINHEIRO (a célula com centavos; não havendo, a última
+    // numérica da linha) e, a partir dele, a CHAVE (o último inteiro antes do valor). O valor logo depois da
+    // chave é débito; mais adiante, crédito. Sem isso o programa chegou a somar o número da chave como se
+    // fosse dinheiro (Dony, 02/10/2026, o diário da UDLOG).
+    const celula = (k) => (l[k] === null || l[k] === undefined ? '' : String(l[k])).trim();
+    let kValor = -1;
+    for (let k = c.lote; k < l.length; k++) {
+      if (celula(k).indexOf(',') >= 0 && valorDe(l[k]) !== null) { kValor = k; break; }
+    }
+    if (kValor < 0) for (let k = l.length - 1; k > c.lote; k--) { if (valorDe(l[k]) !== null) { kValor = k; break; } }
+    if (kValor < 0) return { debito: '', credito: '', valor: null };
+    let kChave = -1;
+    for (let k = kValor - 1; k >= 0; k--) { if (/^[0-9]{3,10}$/.test(celula(k))) { kChave = k; break; } }
+    const v = valorDe(l[kValor]);
+    if (v === null) return { debito: '', credito: '', valor: null };
+    // Quando as duas pernas do mesmo lançamento caem em colunas vizinhas, o lado é confirmado depois, pelo par.
+    return kChave >= 0 && kValor === kChave + 1
+      ? { debito: bloco.conta, credito: '', valor: v, coluna: kValor }
+      : { debito: '', credito: bloco.conta, valor: v, coluna: kValor };
+  }
+
+  // AS COLUNAS DE VALOR CONFERIDAS NOS DADOS. O cabeçalho pode estar deslocado em relação ao corpo: no
+  // diário da UDLOG ele traz uma coluna vazia a mais ("Histórico | Documento | Chave | | Débito | Crédito")
+  // e os valores caem uma casa antes. Lendo pelo cabeçalho, o crédito entrava como débito e o diário não
+  // fechava (Dony, 02/10/2026: "uma colaboradora não conseguiu ler esse diário"). Aqui o programa olha ONDE
+  // OS VALORES ESTÃO e, se o par de colunas vizinhas for outro, usa o que os dados mostram.
+  function calibrarPorBloco(linhas, r, c) {
+    if (c.contrapartida >= 0) return c;   // com contrapartida, o cabeçalho já se prova sozinho (a Omega)
+    const onde = new Map();
+    let olhadas = 0;
+    for (let i = r + 1; i < linhas.length && olhadas < 500; i++) {
+      const l = linhas[i];
+      if (!l || contaDoBloco(l) || dataDoDia(l)) continue;
+      const primeira = l.find((x) => !(x === null || x === undefined || String(x).trim() === ''));
+      if (primeira === undefined || LINHA_DE_TOTAL.test(String(primeira))) continue;
+      let achou = false;
+      for (let k = 1; k < l.length; k++) {
+        if (k === c.lote || k === c.documento) continue;
+        if (valorDe(l[k]) === null) continue;
+        onde.set(k, (onde.get(k) || 0) + 1);
+        achou = true;
+      }
+      if (achou) olhadas++;
+    }
+    if (olhadas < 10) return c;
+    const ordem = Array.from(onde.entries()).sort((a, b) => b[1] - a[1]);
+    const melhor = ordem.slice(0, 2).map(([k]) => k).sort((a, b) => a - b);
+    if (melhor.length !== 2 || melhor[1] - melhor[0] !== 1) return c;
+    const noCabecalho = (onde.get(c.debito) || 0) + (onde.get(c.credito) || 0);
+    const nosDados = (onde.get(melhor[0]) || 0) + (onde.get(melhor[1]) || 0);
+    if (melhor[0] === c.debito && melhor[1] === c.credito) return c;
+    if (nosDados <= noCabecalho) return c;
+    return Object.assign({}, c, { debito: melhor[0], credito: melhor[1], calibrada: true });
   }
 
   // Linha que só traz a DATA DO DIA ("18/05/2026" e o resto vazio): dali para a frente, os lançamentos são
@@ -153,9 +226,11 @@
     const cheias = (linha || []).map((x, i) => [i, x]).filter(([, x]) => !(x === null || x === undefined || String(x).trim() === ''));
     if (cheias.length !== 1) return null;
     const bruto = String(cheias[0][1]).trim();
-    // Só a data ("18/05/2026") ou a data enfeitada pelo relatório ("**** DATA: 01/01/2026 ****", a Omega):
-    // o que vem em volta não pode ter outro número.
-    const m = bruto.match(/^[^\d]*(\d{1,2}[\/.-]\d{1,2}[\/.-]\d{2,4})[^\d]*$/);
+    // Só a data ("18/05/2026") ou a data enfeitada pelo relatório ("**** DATA: 01/01/2026 ****", a Omega).
+    // Em volta só cabem símbolos e a palavra "data"/"dia": FRASE com data no fim é histórico, não é o dia.
+    // (Dony, 02/10/2026, a UDLOG: a continuação " E SHIPPING SERVICES LTDA Ref. 16/12/2024" virava a data
+    // do dia e levava os lançamentos seguintes para o mês errado.)
+    const m = bruto.match(/^[\s*·•.\-=_]*(?:(?:data|dia)\s*:?\s*)?(\d{1,2}[\/.-]\d{1,2}[\/.-]\d{2,4})[\s*·•.\-=_]*$/i);
     if (!m) return null;
     const d = Util.lerData(m[1]);
     return d && d.valida !== false ? d : null;
@@ -234,8 +309,9 @@
   // O reconhecimento do desenho "por conta, com contrapartida", numa função só: ele é usado na ordem normal
   // e também na frente, quando a empresa já tem esse padrão guardado.
   function reconhecerPorBloco(linhas, rb, opc, tituloNoNome) {
-    const cb = cabecalhoPorBloco(linhas[rb]);
+    let cb = cabecalhoPorBloco(linhas[rb]);
     if (!cb) return null;
+    cb = calibrarPorBloco(linhas, rb, cb);
     let blocos = 0, comValor = 0, comContra = 0, bloco = null;
     for (const l of linhas.slice(rb + 1, rb + 200)) {
       if (!l) continue;
@@ -248,11 +324,17 @@
       comValor++;
       if (p.contrapartida) comContra++;   // a contrapartida escrita na linha é a cara deste desenho
     }
-    if (!(blocos >= 2 && comValor >= 3 && comContra >= comValor * 0.5)) return null;
+    // Com coluna de contrapartida, ela tem que aparecer de verdade nas linhas. Sem ela, o que prova o desenho
+    // são os BLOCOS DE CONTA: várias contas, cada uma com as suas linhas de valor (a UDLOG).
+    const temColunaContra = cb.contrapartida >= 0;
+    if (temColunaContra) { if (!(blocos >= 2 && comValor >= 3 && comContra >= comValor * 0.5)) return null; }
+    else if (!(blocos >= 3 && comValor >= 3 && comValor >= blocos * 0.8)) return null;
     const tituloB = tituloNoNome || linhas.slice(0, rb).some((l) => l && l.some((x) => /\bdiario\b/i.test(Util.semAcento(String(x === null || x === undefined ? '' : x)))));
     if (tituloB || opc.semTitulo) {
       return { tipo: 'diario', porBloco: true,
-        motivo: 'Livro diário por conta: cada dia tem blocos "Conta: …" e cada linha traz a contrapartida e o valor em Débito ou em Crédito.' };
+        motivo: temColunaContra
+          ? 'Livro diário por conta: cada dia tem blocos "Conta: …" e cada linha traz a contrapartida e o valor em Débito ou em Crédito.'
+          : 'Livro diário por conta: cada dia tem blocos de conta e, dentro deles, uma linha por perna, com a chave juntando as duas.' };
     }
     return { tipo: null, semTitulo: true, motivo: 'Tem blocos de conta com contrapartida, débitos e créditos, mas não o título de livro diário.' };
   }
@@ -359,6 +441,7 @@
             continue;
           }
           c = cab;
+          if (c.porBloco) c = calibrarPorBloco(linhas, r, c);
           desenhoUsado = c.porBloco ? 'porBloco' : c.porPerna ? 'porPerna' : 'linha';
           continue;
         }
@@ -406,6 +489,7 @@
         if ((c.porPerna || c.porBloco) && (c.identificacao || []).length) {
           ultima.lote = c.identificacao.map((i) => (l[i] === null || l[i] === undefined ? '' : String(l[i]))).join(' ').replace(/s+/g, ' ').trim();
         }
+        if (c.porBloco && c.contrapartida < 0 && partida.coluna !== undefined) ultima.coluna = partida.coluna;
         if (c.porPerna && c.nomeDaConta >= 0 && c.nomeDaConta !== c.historico) ultima.nomeDaConta = limparHistorico(l[c.nomeDaConta]);
         if (c.porBloco && bloco && bloco.nome) ultima.nomeDaConta = bloco.nome;
         lancamentos.push(ultima);
@@ -413,6 +497,31 @@
     }
     // Os lançamentos: a linha com os dois lados é um lançamento; as linhas seguidas de um lado só formam um lançamento
     // quando a soma (débitos − créditos) volta a zero.
+    // O LADO PELO PAR (diário por bloco sem contrapartida). O relatório da UDLOG mistura duas larguras: na
+    // maioria das linhas o valor cai na coluna do débito e, em algumas, uma casa adiante — e aí um débito
+    // tem a mesma cara de um crédito. Como as duas pernas do lançamento trazem a mesma chave e o mesmo
+    // valor, elas resolvem a dúvida sozinhas: das duas colunas vizinhas em que os valores caíram, a da
+    // ESQUERDA é o débito e a da DIREITA é o crédito (Dony, 02/10/2026).
+    const temColuna = lancamentos.some((x) => x.coluna !== undefined);
+    if (temColuna) {
+      const porChave = new Map();
+      lancamentos.forEach((x) => {
+        if (x.coluna === undefined || !x.lote) return;
+        const k = x.data + '|' + x.lote;
+        if (!porChave.has(k)) porChave.set(k, []);
+        porChave.get(k).push(x);
+      });
+      let arrumadas = 0;
+      porChave.forEach((pernas) => {
+        if (pernas.length !== 2) return;
+        const [a, b] = pernas.slice().sort((p, q) => p.coluna - q.coluna);
+        if (a.coluna === b.coluna || b.coluna - a.coluna !== 1 || a.valor !== b.valor) return;
+        const conta = (x) => x.debito || x.credito;
+        if (!a.debito) { a.debito = conta(a); a.credito = ''; arrumadas++; }
+        if (!b.credito) { b.credito = conta(b); b.debito = ''; arrumadas++; }
+      });
+      if (arrumadas) avisos.push(arrumadas + ' linha(s) vinham com as colunas deslocadas: o lado foi conferido pela outra perna do mesmo lançamento.');
+    }
     let grupos = 0, aberto = null, abertosNoFim = 0;
     const porLote = new Map();
     for (const x of lancamentos) {
