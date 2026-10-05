@@ -106,13 +106,18 @@
     (p.linhas || []).forEach((l, r) => {
       if (!l) return;
       const celulas = (l.celulas || []).map((c, k) => {
-        if (!c) return '';
+        // A célula pode vir como objeto { v, e } (com estilo) ou como VALOR CRU — um texto, um número.
+        // Sem esta linha, a célula sem estilo saía EM BRANCO: na planilha das contas de resultado só a
+        // coluna do valor aparecia, porque era a única com estilo (Dony, 05/10/2026: "não vem um monte de
+        // informações"). O zero também passa a ser escrito, em vez de sumir.
+        const cc = (c !== null && c !== undefined && typeof c === 'object') ? c : { v: c };
+        if (cc.v === null || cc.v === undefined) return '';
         maxCol = Math.max(maxCol, k);
         const ref = coluna(k) + (r + 1);
-        const s = c.e !== undefined && indice.has(c.e) ? ' s="' + indice.get(c.e) + '"' : '';
-        if (c.v === null || c.v === undefined || c.v === '') return '<c r="' + ref + '"' + s + '/>';
-        if (typeof c.v === 'number') return isFinite(c.v) ? '<c r="' + ref + '"' + s + '><v>' + c.v + '</v></c>' : '<c r="' + ref + '"' + s + '/>';
-        return '<c r="' + ref + '"' + s + ' t="inlineStr"><is><t xml:space="preserve">' + esc(limpo(c.v)) + '</t></is></c>';
+        const s = cc.e !== undefined && indice.has(cc.e) ? ' s="' + indice.get(cc.e) + '"' : '';
+        if (cc.v === '') return '<c r="' + ref + '"' + s + '/>';
+        if (typeof cc.v === 'number') return isFinite(cc.v) ? '<c r="' + ref + '"' + s + '><v>' + cc.v + '</v></c>' : '<c r="' + ref + '"' + s + '/>';
+        return '<c r="' + ref + '"' + s + ' t="inlineStr"><is><t xml:space="preserve">' + esc(limpo(cc.v)) + '</t></is></c>';
       }).join('');
       const nivel = Math.max(0, Math.min(7, l.nivel || 0));
       maxNivel = Math.max(maxNivel, nivel);
