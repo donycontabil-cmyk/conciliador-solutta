@@ -971,6 +971,7 @@
       : mostrar === 'proximo' ? M.ehPorProximo(grupoDe(x))
       : mostrar === 'valor' ? M.ehPorValor(grupoDe(x))
       : mostrar === 'margem' ? M.ehComMargem(grupoDe(x))
+      : mostrar === 'mao' ? M.ehAMao(grupoDe(x))
       : mostrar === 'faltando' ? !!grupoDe(x) && E.comFalta.has(grupoDe(x).id)
       : mostrar === 'atualizacao' ? daAtualizacao.itens.has(x.id) || (!!grupoDe(x) && daAtualizacao.grupos.has(grupoDe(x).id))
       : !grupoDe(x)) && b.item(x);
@@ -988,9 +989,13 @@
     E.listaA = listaA; E.listaB = listaB;
     E.fixos = new Set(fixosA.concat(fixosB).map((x) => x.id));
 
+    const aMao = grupos.filter((g) => M.ehAMao(g)).length;
     const opcoes = [['', 'Em aberto'], ['conciliados', 'Conciliados'],
       ['documento', '⚡ Conciliados por documento e ' + pessoa()], ['fornecedor', '👤 Conciliados por ' + pessoa() + ' e valor'],
       ['proximo', '👥 Conciliados por ' + pessoa() + ' próximo e valor'], ['valor', '≈ Conciliados só pelo valor'], ['margem', '± Conciliados com margem']]
+      // As feitas À MÃO em separado: são decisão de gente, e é o que mais se quer reconferir depois.
+      // Fica na lista mesmo quando ainda não há nenhuma, como as outras — senão parece que falta.
+      .concat([['mao', '✋ Conciliados à mão' + (aMao ? ' (' + aMao + ')' : '')]])
       .concat(E.comFalta.size ? [['faltando', '⚠ Conciliados com item faltando (' + E.comFalta.size + ')']] : [])
       .concat(ultima ? [['atualizacao', 'Da última atualização de arquivo']] : [])
       .concat([['todos', 'Todos']]);
@@ -1002,7 +1007,7 @@
 
     const ROTULOS = { todos: 'item(ns)', conciliados: 'conciliado(s)', documento: 'conciliado(s) pelo documento', fornecedor: 'conciliado(s) por ' + pessoa() + ' e valor',
       proximo: 'conciliado(s) por ' + pessoa() + ' próximo e valor',
-      valor: 'conciliado(s) só pelo valor', margem: 'conciliado(s) com margem',
+      valor: 'conciliado(s) só pelo valor', margem: 'conciliado(s) com margem', mao: 'conciliado(s) à mão',
       faltando: 'nas conciliações com item faltando', atualizacao: 'da última atualização de arquivo' };
     const rot = ROTULOS[mostrar] || 'em aberto';
     E.daAtualizacao = ultima && !ultima.visto ? daAtualizacao : null; // selos "novo", "trocado" e "mudou" nas partes

@@ -354,7 +354,9 @@
   function desenharFiltros() {
     const opcoes = [['', 'Em aberto'], ['conciliados', 'Conciliados'], ['documento', '⚡ Conciliados pelo documento'],
       ['fornecedor', '👤 Conciliados por nome e valor'], ['proximo', '👥 Conciliados por nome próximo'],
-      ['valor', '≈ Conciliados só pelo valor'], ['margem', '± Conciliados com margem'], ['todos', 'Todos']];
+      ['valor', '≈ Conciliados só pelo valor'], ['margem', '± Conciliados com margem'],
+      // As feitas à mão em separado (Dony, 05/10/2026): é o que mais se quer reconferir depois.
+      ['mao', '✋ Conciliados à mão'], ['todos', 'Todos']];
     E.el.querySelector('#lv-filtros').innerHTML =
       '<input type="search" class="busca" data-filtro="busca" placeholder="Busca nos dois lados: documento, nome, valor, data ou #ID" value="' + T.esc(filtro('busca')) + '">' +
       '<select class="filtro" data-filtro="mostrar">' + opcoes.map((o) => '<option value="' + o[0] + '"' + (filtro('mostrar') === o[0] ? ' selected' : '') + '>' + o[1] + '</option>').join('') + '</select>';
@@ -380,6 +382,7 @@
       if (mostrar === 'proximo') return M().ehPorProximo(g);
       if (mostrar === 'valor') return M().ehPorValor(g);
       if (mostrar === 'margem') return M().ehComMargem(g);
+      if (mostrar === 'mao') return M().ehAMao(g);
       return !g;
     };
     return E.itens[lado].filter((x) => daRegra(x) && casa(x)).sort((a, b) => a.ordem - b.ordem || (a.doc < b.doc ? -1 : 1));

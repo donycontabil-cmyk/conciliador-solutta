@@ -139,6 +139,9 @@
   function ehPorFornecedor(g) { return !!g && (g.regra === 'fornecedor-valor' || g.regra === 'fornecedor-valor-par'); }
   function ehPorProximo(g) { return !!g && (g.regra === 'proximo-valor' || g.regra === 'proximo-valor-par'); }
   function ehComMargem(g) { return !!g && /^margem-/.test(String(g.regra || '')); }
+  // Conciliação feita À MÃO (Dony, 05/10/2026: "dentro de conciliados, falta conciliados manualmente").
+  // É a que mais importa conferir depois: foi decisão de gente, não regra do programa.
+  function ehAMao(g) { return !!g && String(g.regra || '') === 'manual'; }
   // Rótulo curto de cada regra na tela e no relatório.
   const COMO_AB = {
     'doc-fornecedor-par': 'doc + fornecedor · par', 'doc-fornecedor': 'doc + fornecedor', 'doc-fornecedor-valor': 'doc + fornecedor · valor',
@@ -1104,6 +1107,6 @@
     normalizarDocumento, documentoDaLinha, itensAB, conciliarAutomatico, emAbertoAB, tipoAB, proximoIdAB, REGRAS_AB,
     compararPorDocumento, arrumarGruposAB, relatorioAB, pendenciasAB, saldoInicialAB, idsDeTitulos, COMO_AB, nomeComparavel, ladosDoRazao,
     conciliarPorValor, valorRedondo, ehPorValor, ladoDC,
-    ehComMargem, ehPorFornecedor, ehPorProximo, conciliarPorFornecedor, MARGEM_AB, atualizarAB, faltandoNoGrupo, resumoDoItem, compararVersoes, resumoDaComparacao,
+    ehComMargem, ehAMao, ehPorFornecedor, ehPorProximo, conciliarPorFornecedor, MARGEM_AB, atualizarAB, faltandoNoGrupo, resumoDoItem, compararVersoes, resumoDaComparacao,
   };
 });
