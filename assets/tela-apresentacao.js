@@ -59,7 +59,10 @@
     { id: 'rel', abas: GRUPO_RELATORIOS, rotulo: '📄 Relatórios', dica: 'Relatório do cliente, balanço, DRE, fluxo de caixa, mutações do patrimônio líquido e notas explicativas', ultima: 'ultimoRelatorio' },
   ];
   const grupoDaAba = (id) => GRUPOS_DE_ABAS.find((g) => g.abas.indexOf(id) >= 0) || null;
-  const REGRAS = { movimento: 'Movimento do mês (conta de resultado)', 'aumento-credor': 'Aumento do saldo credor (conta patrimonial)' };
+  // Como sai o valor do ajuste em cada mês. 'parcial' é o valor que ELE digita (Dony, 07/10/2026: "dentro de
+  // aluguel de veículos, nem tudo é adição; eu quero poder selecionar a conta e colocar o valor").
+  const REGRAS = { movimento: 'Movimento do mês (conta de resultado)', 'aumento-credor': 'Aumento do saldo credor (conta patrimonial)',
+    parcial: 'Valor parcial (eu digito mês a mês)' };
   const CHAVE_PREF = 'conciliador-solutta.apresentacao';
 
   // Estado da tela (continua entre redesenhos).
@@ -1051,11 +1054,13 @@
   }
 
   // ---------- LALUR
-  function tabelaSimples(fixas, colunas, linhas) {
+  // celula(linha, valor, k, coluna) troca o que vai na célula do período (usado para digitar o valor parcial).
+  function tabelaSimples(fixas, colunas, linhas, celula) {
     return '<div class="apres-caixa"><table class="apres simples"><thead><tr>' + fixas.map((f, i) => '<th class="' + (i === 0 ? 'fixa' : '') + '">' + f + '</th>').join('') +
       colunas.map((c) => '<th class="num per' + (c.cls ? ' ' + c.cls : '') + (c.falta ? ' falta' : '') + '">' + T.esc(c.rotulo) + '</th>').join('') + '</tr></thead><tbody>' +
       linhas.map((l) => '<tr class="' + (l.cls || '') + '">' + l.cab.map((x, i) => '<td class="' + (i === 0 ? 'fixa' : 'txt') + '">' + x + '</td>').join('') +
-        l.valores.map((v, k) => '<td class="num' + (colunas[k].cls ? ' ' + colunas[k].cls : '') + '">' + dinheiro(v) + '</td>').join('') + '</tr>').join('') +
+        l.valores.map((v, k) => '<td class="num' + (colunas[k].cls ? ' ' + colunas[k].cls : '') + '">' +
+          (celula ? celula(l, v, k, colunas[k]) : dinheiro(v)) + '</td>').join('') + '</tr>').join('') +
       '</tbody></table></div>';
   }
 
@@ -1173,14 +1178,32 @@
       tabelaSimples(['Descrição', 'Conta', 'Tipo'], colAj, L.ajustes.linhas.map((a) => ({
         cab: [T.esc(a.titulo || '') + (a.noBalancete ? '' : ' <span class="rel-aviso">(não está nos balancetes)</span>') +
           (a.regra === 'aumento-credor' ? ' <small class="suave">· aumento do saldo credor</small>' : '') +
+          (a.parcial ? ' <small class="lalur-parcial-selo" title="Só o pedaço que você digitou entra no LALUR; o resto da conta fica de fora">✎ valor parcial</small>' : '') +
           (a.contraMarca.length ? ' <small class="lalur-contra nao-imprimir" title="Regra dinâmica da planilha: o movimento do trimestre foi do lado contrário ao marcado">⚠ no ' +
             T.esc(a.contraMarca.join(', ')) + ' entrou como ' + (a.tipo === 'Exclusão' ? 'adição' : 'exclusão') + '</small>' : ''),
         '<span class="cod">' + T.esc(a.conta) + '</span>',
-        a.tipo + (editavel ? ' <button type="button" class="lalur-tirar nao-imprimir" data-lalur-tirar="' + T.esc(a.conta) + '" title="Tirar esta conta do LALUR">✕</button>' : '')], valores: a.valores,
+        a.tipo + (editavel ? ' <button type="button" class="lalur-bt nao-imprimir' + (a.parcial ? ' ligado-parcial' : '') + '" data-lalur-parcial="' + T.esc(a.conta) + '" title="' +
+          (a.parcial ? 'Voltar a pegar o movimento inteiro da conta' : 'Só uma parte desta conta é ajuste: digitar o valor mês a mês') + '">' +
+          (a.parcial ? '↺ valor cheio' : '✎ valor parcial') + '</button>' +
+          ' <button type="button" class="lalur-tirar nao-imprimir" data-lalur-tirar="' + T.esc(a.conta) + '" title="Tirar esta conta do LALUR">✕</button>' : '')],
+        valores: a.valores, conta: a.conta, parcial: a.parcial, cheio: a.cheioPorMes,
       })).concat([
-      { cls: 'total', cab: ['Total das Adições', '', ''], valores: L.ajustes.adicoes },
-      { cls: 'total', cab: ['Total das Exclusões', '', ''], valores: L.ajustes.exclusoes },
-    ]));
+        { cls: 'total', cab: ['Total das Adições', '', ''], valores: L.ajustes.adicoes },
+        { cls: 'total', cab: ['Total das Exclusões', '', ''], valores: L.ajustes.exclusoes },
+      ]), (l, v, k, col) => {
+        // Na conta de valor parcial, o mês vira campo: ele digita o pedaço, e o movimento inteiro fica de dica.
+        // A coluna do mês vem com `id` = competência e `trimestre: false`; a do trimestre continua só somando.
+        if (!editavel || !l.parcial || col.trimestre || col.falta) return dinheiro(v);
+        const cheio = l.cheio ? l.cheio.get(col.id) : null;
+        return '<input class="apres-campo valor" inputmode="decimal" data-ajuste-valor="' + T.esc(l.conta + '|' + col.id) + '"' +
+          ' value="' + (v ? T.esc(U.formatarCentavos(Math.abs(Math.round(v)))) : '') + '" placeholder="0,00"' +
+          ' title="Movimento inteiro da conta em ' + T.esc(col.rotulo) + ': ' + T.esc(U.formatarCentavos(Math.abs(Math.round(cheio || 0)))) + '">';
+      }) +
+      (editavel && L.ajustes.linhas.some((a) => a.parcial)
+        ? '<div class="linha-flex nao-imprimir" style="margin-top:8px"><button type="button" class="botao primario pequeno" data-opcao="guardar-valores-ajuste">💾 Guardar os valores digitados</button>' +
+          '<span class="suave pequeno">Nas contas de <b>valor parcial</b> entra só o que você digitar — mês vazio não entra. Passe o mouse no campo para ver o movimento inteiro da conta naquele mês. ' +
+          'O lado (adição ou exclusão) é o que está na coluna Tipo: aqui a regra dinâmica não manda, porque quem diz o quanto entra é você.</span></div>'
+        : '');
     const colPat = L.pat.colunas.map((c) => Object.assign({}, c, { cls: c.lalur ? 'acum' : '' }));
     const pat = tabelaSimples(['Descrição', 'Linha'], colPat, L.pat.linhas.map((l) => ({ cab: [T.esc(l.rotulo), l.letra], valores: l.valores })));
     const parteB = '<div class="apres-caixa"><table class="apres simples parte-b"><thead><tr><th class="fixa">Controle</th>' +
@@ -1289,6 +1312,8 @@
       if (lb) { marcarConta(el, lb.getAttribute('data-conta'), lb.getAttribute('data-lalur')); return; }
       const lt = ev.target.closest('button[data-lalur-tirar]');
       if (lt) { marcarConta(el, lt.getAttribute('data-lalur-tirar'), null); return; }
+      const lp = ev.target.closest('button[data-lalur-parcial]');
+      if (lp) { alternarParcial(el, lp.getAttribute('data-lalur-parcial')); return; }
       const mover = ev.target.closest('button[data-mover-conta]');
       if (mover) { await escolherLinhaDaConta(el, mover.getAttribute('data-mover-conta'), mover.getAttribute('data-de')); return; }
       const ajEditar = ev.target.closest('button[data-sim-aj-editar]');
@@ -1327,6 +1352,7 @@
       if (qual === 'abrir-tudo') { motor().MODELO_DRE.filter((g) => g.prefixos).forEach((g) => E.abertos.add(g.id)); redesenharFolha(el); }
       else if (qual === 'fechar-tudo') { E.abertos.clear(); redesenharFolha(el); }
       else if (qual === 'guardar-parte-b') await guardarParteB(el);
+      else if (qual === 'guardar-valores-ajuste') await guardarValoresAjuste(el);
       else if (qual === 'editar-ajustes') await editarAjustes();
       else if (qual === 'linhas-dre') { iniciarEdicaoDre(); redesenharConteudo(el); }
       else if (qual === 'ir-linhas-dre') irParaAba(el, /^dre-/.test(E.aba) ? E.aba : 'dre-mensal');
@@ -1533,6 +1559,52 @@
       .then(() => guardarConfig(config, 'apresentacao-ajustes', texto))
       .then(() => T.avisoRapido(texto + ' · LALUR recalculado.', 'ok', 2500))
       .catch((e) => { T.avisoRapido('Não foi possível guardar a marcação: ' + T.mensagemDeErro(e), 'erro'); app().mostrarRota(); });
+  }
+
+  // Liga e desliga o VALOR PARCIAL de uma conta (Dony, 07/10/2026: "dentro de aluguel de veículos, nem tudo é
+  // adição... um botãozinho do lado, valor parcial, exige digitação"). Ligado, o programa para de pegar o
+  // movimento da conta e passa a usar só o que ele digitar em cada mês.
+  function alternarParcial(el, conta) {
+    const atual = ajustesAtuais().find((a) => a.conta === conta);
+    if (!atual) return;
+    const linha = E.rel.contas.find((c) => c.conta === conta);
+    const virandoParcial = atual.regra !== 'parcial';
+    const ajustes = ajustesAtuais().map((a) => (a.conta !== conta ? a
+      : Object.assign({}, a, { regra: virandoParcial ? 'parcial' : (linha && linha.patrimonial ? 'aumento-credor' : 'movimento') })));
+    E.config = Object.assign({}, E.config, { ajustes });
+    E.rel = montarRel();
+    redesenharConteudo(el);
+    const config = E.config;
+    const texto = conta + (virandoParcial ? ' passou a valor parcial (digitado)' : ' voltou ao movimento inteiro da conta');
+    E.fila = (E.fila || Promise.resolve())
+      .then(() => guardarConfig(config, 'apresentacao-ajustes', texto))
+      .then(() => T.avisoRapido(virandoParcial ? texto + ' · digite o valor de cada mês e clique em Guardar os valores digitados.' : texto + ' · LALUR recalculado.', 'ok', 5000))
+      .catch((e) => { T.avisoRapido('Não foi possível guardar: ' + T.mensagemDeErro(e), 'erro'); app().mostrarRota(); });
+  }
+
+  // Guarda o que ele digitou nas contas de valor parcial (um valor por mês, sem sinal: o lado vem do Tipo).
+  async function guardarValoresAjuste(el) {
+    const porConta = new Map();
+    let invalido = null;
+    el.querySelectorAll('input[data-ajuste-valor]').forEach((inp) => {
+      const [conta, comp] = inp.getAttribute('data-ajuste-valor').split('|');
+      const txt = String(inp.value || '').trim();
+      const n = txt ? U.paraNumero(txt) : 0;
+      if (n === null) { invalido = inp; return; }
+      if (!porConta.has(conta)) porConta.set(conta, {});
+      if (n) porConta.get(conta)[comp] = Math.abs(U.centavos(n));
+    });
+    if (invalido) { invalido.focus(); T.avisoRapido('Valor que não é número: "' + invalido.value + '".', 'erro'); return; }
+    const ajustes = ajustesAtuais().map((a) => (a.regra !== 'parcial' || !porConta.has(a.conta) ? a
+      : Object.assign({}, a, { valores: porConta.get(a.conta) })));
+    E.config = Object.assign({}, E.config, { ajustes });
+    E.rel = montarRel();
+    redesenharConteudo(el);
+    const quantos = Array.from(porConta.values()).reduce((s, v) => s + Object.keys(v).length, 0);
+    try {
+      await guardarConfig(E.config, 'apresentacao-ajustes', quantos + ' valor(es) digitado(s) no LALUR ' + E.ano);
+      T.avisoRapido('Valores guardados: o LALUR foi recalculado.', 'ok', 5000);
+    } catch (e) { T.avisoRapido('Não foi possível guardar: ' + T.mensagemDeErro(e), 'erro'); app().mostrarRota(); }
   }
 
   // Campo que acha a conta digitando o NÚMERO ou o NOME (Dony, 07/10/2026: "eu quero escrever 'duvido' e ele
@@ -2786,7 +2858,8 @@
     const corpo = '<p class="suave pequeno" style="margin:0 0 8px;line-height:1.5">As contas que entram nas adições e exclusões do LALUR. ' +
       'Nos campos de conta, <b>digite o número ou um pedaço do nome</b> (ex.: <b>duvido</b>) e escolha na lista que aparece. ' +
       '<b>Movimento do mês</b>: débitos − créditos da conta ' +
-      '(positivo = adição, negativo = exclusão — a regra dinâmica da planilha). <b>Aumento do saldo credor</b>: exclusão do quanto o saldo credor da conta aumentou no mês (ex.: pagamento de aluguel no IFRS 16).</p>' +
+      '(positivo = adição, negativo = exclusão — a regra dinâmica da planilha). <b>Aumento do saldo credor</b>: exclusão do quanto o saldo credor da conta aumentou no mês (ex.: pagamento de aluguel no IFRS 16). ' +
+      '<b>Valor parcial</b>: quando só um pedaço da conta é ajuste (ex.: aluguel de veículos) — aí você digita o valor de cada mês na própria tabela de ajustes, na aba LALUR.</p>' +
       '<div class="tabela-caixa"><table class="tabela"><thead><tr><th>Conta</th><th>Título no balancete</th><th>Tipo</th><th>Regra</th><th></th></tr></thead><tbody id="apres-aj-linhas">' +
       atuais.map(linha).join('') + '</tbody></table></div>' +
       '<div class="linha-flex" style="margin-top:8px"><button type="button" class="botao pequeno" data-aj="mais">＋ Adicionar conta</button></div>' +
@@ -2811,9 +2884,15 @@
         });
       },
       botoes: [{ texto: 'Cancelar', valor: null }, { texto: 'Guardar', tipo: 'primario', antes: (j) => {
-        const ajustes = Array.from(j.querySelectorAll('#apres-aj-linhas tr')).map((tr) => ({
-          conta: tr.querySelector('[data-aj="conta"]').value.trim(), tipo: tr.querySelector('[data-aj="tipo"]').value, regra: tr.querySelector('[data-aj="regra"]').value,
-        })).filter((a) => a.conta);
+        const ajustes = Array.from(j.querySelectorAll('#apres-aj-linhas tr')).map((tr) => {
+          const conta = tr.querySelector('[data-aj="conta"]').value.trim();
+          const regra = tr.querySelector('[data-aj="regra"]').value;
+          const a = { conta, tipo: tr.querySelector('[data-aj="tipo"]').value, regra };
+          // Os valores digitados no valor parcial não aparecem nesta janela: têm que sobreviver a ela.
+          const velho = atuais.find((x) => x.conta === conta);
+          if (regra === 'parcial' && velho && velho.valores) a.valores = velho.valores;
+          return a;
+        }).filter((a) => a.conta);
         return { ajustes, contaPAT: j.querySelector('#apres-conta-pat').value.trim() };
       } }],
     });
@@ -3295,7 +3374,7 @@
     f.titulo('LALUR: ajustes mensais e trimestrais', 'Valor positivo = adição · valor negativo = exclusão · ' + valoresEm());
     r1 = f.add([{ v: 'Descrição', e: 'cabEsq' }, { v: 'Conta', e: 'cab' }, { v: 'Tipo', e: 'cab' }].concat(L.ajustes.colunas.map((c) => ({ v: c.rotulo, e: c.trimestre ? 'cabTri' : 'cab' }))), { altura: 20 });
     if (!L.ajustes.linhas.length) f.add([{ v: 'Nenhuma conta marcada como adição ou exclusão.', e: 'ana.txt' }]);
-    L.ajustes.linhas.forEach((a) => f.add([{ v: a.titulo || a.conta, e: 'ana.rot0' }, { v: a.conta, e: 'ana.cod' }, { v: a.tipo, e: 'ana.txt' }]
+    L.ajustes.linhas.forEach((a) => f.add([{ v: a.titulo || a.conta, e: 'ana.rot0' }, { v: a.conta, e: 'ana.cod' }, { v: a.tipo + (a.parcial ? ' (valor parcial)' : ''), e: 'ana.txt' }]
       .concat(a.valores.map((v, k) => ({ v: R(v), e: 'ana.val' + (L.ajustes.colunas[k].trimestre ? '.acum' : '') })))));
     [['Total das Adições', L.ajustes.adicoes], ['Total das Exclusões', L.ajustes.exclusoes]].forEach(([t, vals]) =>
       f.add([{ v: t, e: 'tot.rot0' }, { v: '', e: 'tot.cod' }, { v: '', e: 'tot.txt' }].concat(vals.map((v, k) => ({ v: R(v), e: 'tot.val' + (L.ajustes.colunas[k].trimestre ? '.acum' : '') })))));

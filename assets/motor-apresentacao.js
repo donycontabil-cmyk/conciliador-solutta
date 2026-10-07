@@ -751,6 +751,13 @@
     // Valor do ajuste de uma conta num mês (positivo = adição, negativo = exclusão).
     const ajusteNoMes = (a, m) => {
       if (!m.tem) return null;
+      // Valor PARCIAL, digitado por ele (Dony, 07/10/2026: "dentro de aluguel de veículos, nem tudo é adição;
+      // eu quero poder selecionar essa conta e colocar o valor"). Aqui a regra dinâmica não vale: quem diz
+      // quanto entra, e de que lado, é ele.
+      if (a.regra === 'parcial') {
+        const v = Math.abs(Number((a.valores || {})[m.comp]) || 0);
+        return a.tipo === 'exclusao' ? -v : v;
+      }
       if (a.regra === 'aumento-credor') {
         const l = linhaDoMes(a.conta, m);
         if (!l) return 0;
@@ -770,13 +777,18 @@
       const c = indice.get(a.conta);
       const porMes = new Map(meses.map((m) => [m.comp, ajusteNoMes(a, m)]));
       const valores = colunasAjustes.map((col) => (col.mes ? porMes.get(col.mes.comp) : somaDe(col.trimestre.meses.map((m) => porMes.get(m.comp)))));
+      // O movimento INTEIRO da conta no mês: na conta de valor parcial, é de onde ele tira o pedaço (a tela
+      // mostra "de 10.000,00" ao lado do campo). Nas outras, é o próprio valor do ajuste.
+      const regraCheia = c && c.patrimonial ? 'aumento-credor' : 'movimento';
+      const cheioPorMes = new Map(meses.map((m) => [m.comp, ajusteNoMes({ conta: a.conta, regra: regraCheia, tipo: a.tipo }, m)]));
       // Trimestres em que a conta entrou do lado contrário ao marcado (regra dinâmica: adição com movimento
-      // credor no trimestre vira exclusão, e o contrário) — a tela avisa.
-      const contraMarca = trimestres.filter((t) => {
+      // credor no trimestre vira exclusão, e o contrário) — a tela avisa. No valor parcial isso não existe.
+      const contraMarca = a.regra === 'parcial' ? [] : trimestres.filter((t) => {
         const s = somaDe(t.meses.map((m) => porMes.get(m.comp))) || 0;
         return a.tipo === 'exclusao' ? s > 0 : s < 0;
       }).map((t) => t.rotulo);
-      return { conta: a.conta, tipo: a.tipo === 'exclusao' ? 'Exclusão' : 'Adição', regra: a.regra, titulo: c ? c.titulo : (a.descricao || ''), noBalancete: !!c, valores, porMes, contraMarca };
+      return { conta: a.conta, tipo: a.tipo === 'exclusao' ? 'Exclusão' : 'Adição', regra: a.regra, titulo: c ? c.titulo : (a.descricao || ''),
+        noBalancete: !!c, valores, porMes, cheioPorMes, contraMarca, parcial: a.regra === 'parcial' };
     });
     const totalPositivo = (k) => ajustes.reduce((s, a) => s + Math.max(0, a.valores[k] || 0), 0);
     const totalNegativo = (k) => ajustes.reduce((s, a) => s + Math.max(0, -(a.valores[k] || 0)), 0);
