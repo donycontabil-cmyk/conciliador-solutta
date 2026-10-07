@@ -1535,6 +1535,69 @@
       .catch((e) => { T.avisoRapido('Não foi possível guardar a marcação: ' + T.mensagemDeErro(e), 'erro'); app().mostrarRota(); });
   }
 
+  // Campo que acha a conta digitando o NÚMERO ou o NOME (Dony, 07/10/2026: "eu quero escrever 'duvido' e ele
+  // já entender e já trazer a conta"). O <datalist> do navegador, que estava aqui antes, só casa pelo código:
+  // digitar "duvidosa" não achava nada. Esta lista é nossa, casa por código, reduzido e nome sem acento, e é
+  // 'fixed' para a rolagem da janela não cortar ela.
+  function ligarAchaConta(j, contas) {
+    const analiticas = contas.filter((c) => c.analitica);
+    const chave = new Map(analiticas.map((c) => [c.conta, U.normalizarNome(c.conta + ' ' + (c.reduzido || '') + ' ' + (c.titulo || ''))]));
+    const doc = j.ownerDocument || raiz.document;
+    let caixa = null, alvo = null;
+    const fechar = () => { if (caixa) { caixa.remove(); caixa = null; alvo = null; } };
+    const itens = () => (caixa ? Array.from(caixa.querySelectorAll('button[data-acha]')) : []);
+    const abrir = (inp) => {
+      const q = U.normalizarNome(inp.value.trim());
+      const achados = (q ? analiticas.filter((c) => chave.get(c.conta).indexOf(q) >= 0) : analiticas).slice(0, 40);
+      if (!caixa) {
+        caixa = doc.createElement('div');
+        caixa.className = 'acha-lista';
+        caixa.addEventListener('mousedown', (ev) => ev.preventDefault()); // não tira o foco do campo
+        caixa.addEventListener('click', (ev) => {
+          const b = ev.target.closest('button[data-acha]');
+          if (!b || !alvo) return;
+          alvo.value = b.getAttribute('data-acha');
+          alvo.dispatchEvent(new raiz.Event('input', { bubbles: true })); // o título ao lado se atualiza
+          fechar();
+        });
+        doc.body.appendChild(caixa);
+      }
+      alvo = inp;
+      caixa.innerHTML = achados.length
+        ? achados.map((c, i) => '<button type="button" data-acha="' + T.esc(c.conta) + '"' + (i === 0 ? ' class="sel"' : '') + '>' +
+          '<span class="cod">' + T.esc(c.conta) + '</span> ' + T.esc(c.titulo || '') + '</button>').join('')
+        : '<div class="acha-vazio">Nenhuma conta com isso. Procure por um pedaço do nome (ex.: <b>duvido</b>) ou pelo número.</div>';
+      const r = inp.getBoundingClientRect();
+      const larg = Math.max(380, Math.round(r.width));
+      caixa.style.minWidth = larg + 'px';
+      caixa.style.left = Math.round(Math.min(r.left, (raiz.innerWidth || 1200) - larg - 12)) + 'px';
+      caixa.style.top = Math.round(r.bottom + 2) + 'px';
+      caixa.style.maxHeight = Math.max(120, Math.round((raiz.innerHeight || 800) - r.bottom - 16)) + 'px';
+    };
+    const campo = (x) => (x && x.closest ? x.closest('input[data-acha-conta]') : null);
+    j.addEventListener('input', (ev) => { const inp = campo(ev.target); if (inp) abrir(inp); });
+    j.addEventListener('focusin', (ev) => { const inp = campo(ev.target); if (inp) abrir(inp); else fechar(); });
+    j.addEventListener('keydown', (ev) => {
+      const inp = campo(ev.target);
+      if (!inp) return;
+      if (ev.key === 'Escape') { fechar(); return; }
+      const lista = itens();
+      if (!lista.length) return;
+      const i = lista.findIndex((b) => b.classList.contains('sel'));
+      if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') {
+        ev.preventDefault();
+        const n = Math.max(0, Math.min(lista.length - 1, (i < 0 ? 0 : i) + (ev.key === 'ArrowDown' ? 1 : -1)));
+        lista.forEach((b, k) => b.classList.toggle('sel', k === n));
+        lista[n].scrollIntoView({ block: 'nearest' });
+      } else if (ev.key === 'Enter') {
+        ev.preventDefault();
+        (lista[i < 0 ? 0 : i]).click();
+      }
+    });
+    j.addEventListener('scroll', fechar, true);
+    return fechar;
+  }
+
   // Procurar a conta pelo NÚMERO ou pelo NOME e marcar ali mesmo (Dony, 07/10/2026: "de repente, dentro de mil
   // contas, eu tenho só uma conta que é adição. Eu não quero ter que procurar a conta, eu quero poder digitar
   // o nome, o número dela"). Marca várias de uma vez e só grava no fim.
@@ -2713,25 +2776,27 @@
     const L = E.rel.lalur;
     const atuais = ajustesAtuais();
     const contas = E.rel.contas;
+    let fecharAcha = null; // a lista que acha a conta vive fora da janela: fechar junto com ela
     const titulo = (c) => { const x = contas.find((k) => k.conta === c); return x ? x.titulo : ''; };
-    const linha = (a) => '<tr><td><input class="apres-campo" list="apres-contas" data-aj="conta" value="' + T.esc(a.conta || '') + '" placeholder="conta" style="width:150px"></td>' +
+    const linha = (a) => '<tr><td><input class="apres-campo" data-acha-conta data-aj="conta" autocomplete="off" value="' + T.esc(a.conta || '') + '" placeholder="número ou nome" style="width:190px"></td>' +
       '<td class="pequeno suave" data-aj="titulo">' + T.esc(titulo(a.conta) || (a.conta ? 'não está nos balancetes' : '')) + '</td>' +
       '<td><select class="apres-campo" data-aj="tipo"><option value="adicao"' + (a.tipo !== 'exclusao' ? ' selected' : '') + '>Adição</option><option value="exclusao"' + (a.tipo === 'exclusao' ? ' selected' : '') + '>Exclusão</option></select></td>' +
       '<td><select class="apres-campo" data-aj="regra">' + Object.keys(REGRAS).map((k) => '<option value="' + k + '"' + ((a.regra || 'movimento') === k ? ' selected' : '') + '>' + REGRAS[k] + '</option>').join('') + '</select></td>' +
       '<td><button type="button" class="botao pequeno perigo" data-aj="tirar" title="Tirar da lista">✕</button></td></tr>';
-    const corpo = '<p class="suave pequeno" style="margin:0 0 8px;line-height:1.5">As contas que entram nas adições e exclusões do LALUR (dá para marcar direto na DRE ou no balancete, ' +
-      'no botão <b>✎ Marcar adições e exclusões do LALUR</b>). <b>Movimento do mês</b>: débitos − créditos da conta ' +
+    const corpo = '<p class="suave pequeno" style="margin:0 0 8px;line-height:1.5">As contas que entram nas adições e exclusões do LALUR. ' +
+      'Nos campos de conta, <b>digite o número ou um pedaço do nome</b> (ex.: <b>duvido</b>) e escolha na lista que aparece. ' +
+      '<b>Movimento do mês</b>: débitos − créditos da conta ' +
       '(positivo = adição, negativo = exclusão — a regra dinâmica da planilha). <b>Aumento do saldo credor</b>: exclusão do quanto o saldo credor da conta aumentou no mês (ex.: pagamento de aluguel no IFRS 16).</p>' +
-      '<datalist id="apres-contas">' + contas.filter((c) => c.analitica).map((c) => '<option value="' + T.esc(c.conta) + '">' + T.esc(c.titulo) + '</option>').join('') + '</datalist>' +
       '<div class="tabela-caixa"><table class="tabela"><thead><tr><th>Conta</th><th>Título no balancete</th><th>Tipo</th><th>Regra</th><th></th></tr></thead><tbody id="apres-aj-linhas">' +
       atuais.map(linha).join('') + '</tbody></table></div>' +
       '<div class="linha-flex" style="margin-top:8px"><button type="button" class="botao pequeno" data-aj="mais">＋ Adicionar conta</button></div>' +
       '<div style="margin-top:14px"><label class="pequeno"><b>Conta do PAT</b> (despesa elegível ao incentivo)<br>' +
-      '<input class="apres-campo" list="apres-contas" id="apres-conta-pat" value="' + T.esc(L.contaPAT || '') + '" style="width:190px"> <span class="suave" id="apres-titulo-pat">' + T.esc(titulo(L.contaPAT)) + '</span></label></div>';
+      '<input class="apres-campo" data-acha-conta id="apres-conta-pat" autocomplete="off" placeholder="número ou nome" value="' + T.esc(L.contaPAT || '') + '" style="width:230px"> <span class="suave" id="apres-titulo-pat">' + T.esc(titulo(L.contaPAT)) + '</span></label></div>';
     const res = await T.janela({
       titulo: 'LALUR · lista de ajustes e conta do PAT · ' + E.ano, larga: true, corpo,
       aoAbrir: (j) => {
         const tb = j.querySelector('#apres-aj-linhas');
+        fecharAcha = ligarAchaConta(j, contas);
         j.addEventListener('click', (ev) => {
           const b = ev.target.closest('[data-aj]');
           if (!b || b.tagName !== 'BUTTON') return;
@@ -2752,6 +2817,7 @@
         return { ajustes, contaPAT: j.querySelector('#apres-conta-pat').value.trim() };
       } }],
     });
+    if (fecharAcha) fecharAcha();
     if (!res) return;
     try {
       await guardarConfig(Object.assign({}, E.config, res), 'apresentacao-ajustes', res.ajustes.length + ' conta(s) de ajuste · PAT ' + (res.contaPAT || '—'));
