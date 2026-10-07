@@ -1180,6 +1180,8 @@
           (a.parcial ? '↺ valor cheio' : '✎ valor parcial') + '</button>' +
           ' <button type="button" class="lalur-tirar nao-imprimir" data-lalur-tirar="' + T.esc(a.conta) + '" title="Tirar esta conta do LALUR">✕</button>' : '')],
         valores: a.valores, conta: a.conta, parcial: a.parcial, cheio: a.cheioPorMes,
+        // O que ele digitou, com o sinal: é isso que volta no campo (o valor da tabela já vem virado pelo Tipo).
+        digitado: ((ajustesAtuais().find((x) => x.conta === a.conta) || {}).valores) || {},
       })).concat([
         { cls: 'total', cab: ['Total das Adições', '', ''], valores: L.ajustes.adicoes },
         { cls: 'total', cab: ['Total das Exclusões', '', ''], valores: L.ajustes.exclusoes },
@@ -1188,14 +1190,17 @@
         // A coluna do mês vem com `id` = competência e `trimestre: false`; a do trimestre continua só somando.
         if (!editavel || !l.parcial || col.trimestre || col.falta) return dinheiro(v);
         const cheio = l.cheio ? l.cheio.get(col.id) : null;
-        return '<input class="apres-campo valor" inputmode="decimal" data-ajuste-valor="' + T.esc(l.conta + '|' + col.id) + '"' +
-          ' value="' + (v ? T.esc(U.formatarCentavos(Math.abs(Math.round(v)))) : '') + '" placeholder="0,00"' +
-          ' title="Movimento inteiro da conta em ' + T.esc(col.rotulo) + ': ' + T.esc(U.formatarCentavos(Math.abs(Math.round(cheio || 0)))) + '">';
+        const digitado = Number((l.digitado || {})[col.id]) || 0;
+        return '<input class="apres-campo valor' + (digitado < 0 ? ' estorno' : '') + '" inputmode="decimal" data-ajuste-valor="' + T.esc(l.conta + '|' + col.id) + '"' +
+          ' value="' + (digitado ? T.esc(U.formatarCentavos(Math.round(digitado))) : '') + '" placeholder="0,00"' +
+          ' title="Movimento inteiro da conta em ' + T.esc(col.rotulo) + ': ' + T.esc(U.formatarCentavos(Math.abs(Math.round(cheio || 0)))) +
+          '. Valor negativo estorna: entra do lado contrário ao Tipo neste mês.">';
       }) +
       (editavel && L.ajustes.linhas.some((a) => a.parcial)
         ? '<div class="linha-flex nao-imprimir" style="margin-top:8px"><button type="button" class="botao primario pequeno" data-opcao="guardar-valores-ajuste">💾 Guardar os valores digitados</button>' +
           '<span class="suave pequeno">Nas contas de <b>valor parcial</b> entra só o que você digitar — mês vazio não entra. Passe o mouse no campo para ver o movimento inteiro da conta naquele mês. ' +
-          'O lado (adição ou exclusão) é o que está na coluna Tipo: aqui a regra dinâmica não manda, porque quem diz o quanto entra é você.</span></div>'
+          'O lado é o da coluna <b>Tipo</b>; para <b>estornar</b> num mês, digite o valor com o <b>sinal de menos</b> (numa conta de Adição, <b>−500,00</b> entra como exclusão naquele mês). ' +
+          'Aqui a regra dinâmica não manda: quem diz o quanto e de que lado entra é você.</span></div>'
         : '');
     const colPat = L.pat.colunas.map((c) => Object.assign({}, c, { cls: c.lalur ? 'acum' : '' }));
     const pat = tabelaSimples(['Descrição', 'Linha'], colPat, L.pat.linhas.map((l) => ({ cab: [T.esc(l.rotulo), l.letra], valores: l.valores })));
@@ -1576,7 +1581,8 @@
       const n = txt ? U.paraNumero(txt) : 0;
       if (n === null) { invalido = inp; return; }
       if (!porConta.has(conta)) porConta.set(conta, {});
-      if (n) porConta.get(conta)[comp] = Math.abs(U.centavos(n));
+      // O sinal é dele: negativo estorna (entra do lado contrário ao Tipo naquele mês).
+      if (n) porConta.get(conta)[comp] = U.centavos(n);
     });
     if (invalido) { invalido.focus(); T.avisoRapido('Valor que não é número: "' + invalido.value + '".', 'erro'); return; }
     const ajustes = ajustesAtuais().map((a) => (a.regra !== 'parcial' || !porConta.has(a.conta) ? a

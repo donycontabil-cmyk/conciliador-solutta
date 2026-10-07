@@ -739,6 +739,8 @@ table.apres.marcando td.fixa { max-width: 600px; }
 .lalur-bt.ligado-parcial { background: var(--ambar-fundo); border-color: #e2bf62; color: #6d4700; }
 .lalur-parcial-selo { font-size: 10.5px; font-weight: 700; color: #6d4700; background: var(--ambar-fundo); border-radius: 9px; padding: 1px 6px; margin-left: 4px; }
 .apres.simples input.apres-campo.valor { width: 100%; min-width: 86px; text-align: right; padding: 2px 4px; font-size: 12.5px; }
+/* Valor digitado com o sinal de menos = estorno (entra do lado contrário ao Tipo naquele mês). */
+.apres.simples input.apres-campo.valor.estorno { color: #a4480f; font-weight: 600; }
 .lalur-selo { display: inline-block; font-size: 10px; font-weight: 700; line-height: 1; padding: 2px 6px; border-radius: 9px; margin-right: 6px; vertical-align: 1px; }
 .lalur-selo.adicao { background: var(--verde-fundo); color: var(--verde); }
 .lalur-selo.exclusao { background: #fbe9df; color: #a4480f; }

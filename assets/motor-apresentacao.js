@@ -755,7 +755,10 @@
       // eu quero poder selecionar essa conta e colocar o valor"). Aqui a regra dinâmica não vale: quem diz
       // quanto entra, e de que lado, é ele.
       if (a.regra === 'parcial') {
-        const v = Math.abs(Number((a.valores || {})[m.comp]) || 0);
+        // O valor digitado pode ser NEGATIVO: é o estorno no mês seguinte (Dony, 07/10/2026: "ele pode ser
+        // adição de um mês e estorno no outro; eu quero poder lançar um valor negativo"). O sinal inverte o
+        // lado: numa conta de Adição, o negativo vira exclusão naquele mês (e o contrário).
+        const v = Number((a.valores || {})[m.comp]) || 0;
         return a.tipo === 'exclusao' ? -v : v;
       }
       if (a.regra === 'aumento-credor') {
