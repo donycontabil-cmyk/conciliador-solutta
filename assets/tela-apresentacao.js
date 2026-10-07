@@ -508,10 +508,14 @@
         (E.marcarLalur ? ajudaMarcar : '<span class="suave pequeno">' + (E.aba === 'balancete-mensal' ? 'Contas 1 e 2: saldo final do mês; 3, 4 e 5: movimento do mês.' : 'Contas 1 e 2: saldo no fim do trimestre; 3, 4 e 5: soma dos meses.') + ' AV % sobre a conta-mãe.</span>');
     }
     if (E.aba === 'lalur' || E.aba === 'lalur-anual') {
-      return '<button type="button" class="botao pequeno" data-opcao="editar-ajustes">✎ Lista de ajustes e conta do PAT</button>' +
+      // O botão de marcar as contas mora na DRE e no balancete; quem está no LALUR procura por ele AQUI
+      // (Dony, 07/10/2026: "cadê o botão para eu poder colocar as contas de adição e exclusão?").
+      return '<button type="button" class="botao pequeno primario" data-opcao="ir-marcar-lalur" title="Abre a DRE (ou o balancete) com os botões + Adição e − Exclusão em cada conta">' +
+        '✎ Marcar adições e exclusões nas contas</button>' +
+        '<button type="button" class="botao pequeno" data-opcao="editar-ajustes">📋 Lista de ajustes e conta do PAT</button>' +
         '<span class="suave pequeno">' + (E.aba === 'lalur-anual'
-          ? 'Apuração ANUAL do lucro real: o ano inteiro como um período só, ao lado da soma dos trimestres.'
-          : 'Apuração trimestral do lucro real.') +
+          ? 'Apuração ANUAL do lucro real: um mês por coluna e o ano inteiro como um período só.'
+          : 'Apuração TRIMESTRAL do lucro real: 1T, 2T, 3T, 4T e o acumulado do ano.') +
         ' As adições e exclusões são as contas que você marca na DRE ou no balancete. Os campos em azul da Parte B são preenchidos por você.</span>';
     }
     if (E.aba === 'indicadores') {
@@ -1136,7 +1140,11 @@
       ' · a Parte B (prejuízo fiscal, base negativa e IR retido) é a mesma da aba LALUR.';
     return tituloSecao('LALUR simulação · IRPJ e CSLL projetados', sub) +
       (L.confere ? '' : '<div class="aviso vermelho" style="margin:0 0 10px"><span class="icone-aviso">⚠️</span><div>O lucro do LALUR simulado não bate com a DRE simulada: avise o suporte.</div></div>') +
-      '<div class="apres-fichas">' + fichas + '</div>' + parteA + blocoLalurAnual(L, true) +
+      '<div class="apres-fichas">' + fichas + '</div>' +
+      // Aqui as duas apurações ficam juntas de propósito (Dony, 07/10/2026: "o LALUR DRE simulação, com anual
+      // e trimestral"): é a simulação que serve para comparar os dois regimes.
+      '<h3 class="apres-sub">LALUR trimestral na simulação <small>1T, 2T, 3T, 4T e o acumulado do ano · trimestre com mês simulado em lilás</small></h3>' + parteA +
+      blocoLalurAnual(L, true) +
       '<h3 class="apres-sub">Adições e exclusões na simulação <small>as contas marcadas no LALUR · nos meses simulados, o valor de ' + T.esc(daBase) + ' ' + T.esc(sinalPercentual(s.percentual)) + '</small></h3>' + ajustes +
       (pat ? '<h3 class="apres-sub">Incentivo fiscal PAT na simulação <small>conta ' + T.esc(L.contaPAT || '—') + '</small></h3>' + pat : '') +
       (editavel ? '<p class="apres-nota nao-imprimir">Mexeu no percentual ou nos ajustes da DRE simulação aí em cima? Este LALUR muda junto.</p>' : '');
@@ -1150,8 +1158,12 @@
     const parteA = tabelaSimples(['Linha', 'Bloco'], colA, L.parteA.linhas.map((l) => ({ cls: l.destaque ? 'total' : '', cab: [T.esc(l.rotulo), '<span class="suave">' + T.esc(l.bloco) + '</span>'], valores: l.valores })));
     const colAj = L.ajustes.colunas.map((c) => Object.assign({}, c, { cls: c.trimestre ? 'tri' : '' }));
     const editavel = !(op && op.impressao);
-    const ajustes = (L.ajustes.linhas.length ? '' : '<p class="apres-nota nao-imprimir">Nenhuma conta marcada ainda. Vá na <b>DRE</b> ou no <b>balancete</b>, ligue ' +
-      '<b>✎ Marcar adições e exclusões do LALUR</b> e clique em <b>+ Adição</b> ou <b>− Exclusão</b> nas contas.</p>') +
+    // O botão fica AQUI também: quem está no LALUR é quem quer pôr ou tirar conta (antes só aparecia o recado
+    // "vá na DRE", e só enquanto a lista estava vazia).
+    const ajustes = (editavel ? '<p class="apres-nota nao-imprimir">' +
+      (L.ajustes.linhas.length ? L.ajustes.linhas.length + ' conta(s) marcada(s). Para marcar outras: ' : 'Nenhuma conta marcada ainda. Para marcar: ') +
+      '<button type="button" class="botao pequeno primario" data-opcao="ir-marcar-lalur">✎ Marcar adições e exclusões nas contas</button> — abre ' +
+      (dreFechada() ? 'o <b>balancete</b>' : 'a <b>DRE</b>') + ' com <b>+ Adição</b> e <b>− Exclusão</b> em cada conta (clicando de novo, tira). Aqui no ✕ você também tira.</p>' : '') +
       tabelaSimples(['Descrição', 'Conta', 'Tipo'], colAj, L.ajustes.linhas.map((a) => ({
         cab: [T.esc(a.titulo || '') + (a.noBalancete ? '' : ' <span class="rel-aviso">(não está nos balancetes)</span>') +
           (a.regra === 'aumento-credor' ? ' <small class="suave">· aumento do saldo credor</small>' : '') +
@@ -1176,14 +1188,16 @@
         '<span class="suave pequeno">Os valores entram na Parte A na hora (compensação limitada a 30% e IR retido abatido do IRPJ).</span></div>' : '');
     const premissas = '<div class="apres-caixa"><table class="apres simples premissas"><thead><tr><th class="fixa">Tema</th><th>Premissa usada</th><th>Fonte / Base</th><th>Status</th><th>Comentário</th></tr></thead><tbody>' +
       L.premissas.map((p) => '<tr><td class="fixa">' + T.esc(p[0]) + '</td>' + p.slice(1).map((x) => '<td class="txt">' + T.esc(x) + '</td>').join('') + '</tr>').join('') + '</tbody></table></div>';
-    const anualHtml = blocoLalurAnual(L);
-    const trimestralHtml = anual
-      ? '<h3 class="apres-sub">LALUR trimestral <small>de onde vem a coluna "soma dos trimestres"</small></h3>' + parteA
-      : parteA;
-    return tituloSecao(anual ? 'LALUR anual: apuração do lucro real e da CSLL no ano' : 'LALUR Parte A: apuração do lucro real e da CSLL',
-      anual ? 'O ano inteiro como um período só, ao lado da soma dos trimestres — o imposto não é o mesmo nos dois jeitos.'
-        : 'Apuração trimestral a partir da DRE; adições e exclusões pela lista de ajustes; incentivo PAT e Parte B.') +
-      (anual ? anualHtml + trimestralHtml : parteA + anualHtml) +
+    // UMA apuração por aba (Dony, 07/10/2026: "tem que ter LALUR trimestral, só com o trimestral, LALUR anual,
+    // só com o anual, e o LALUR DRE simulação, com anual e trimestral. Tá tudo confuso ali, separa isso aí").
+    // As duas juntas só na DRE simulação, onde a comparação entre os regimes é o ponto.
+    const outraAba = editavel ? '<p class="apres-nota nao-imprimir">' + (anual
+      ? 'A apuração <b>trimestral</b> fica na aba ao lado. <button type="button" class="botao pequeno" data-aba="lalur">→ Ver o LALUR trimestral</button>'
+      : 'A apuração <b>anual</b> (mês a mês e o ano inteiro) fica na aba ao lado. <button type="button" class="botao pequeno" data-aba="lalur-anual">→ Ver o LALUR anual</button>') + '</p>' : '';
+    return tituloSecao(anual ? 'LALUR anual: apuração do lucro real e da CSLL no ano' : 'LALUR trimestral: apuração do lucro real e da CSLL',
+      anual ? 'Um mês por coluna e o ano inteiro como um período só, ao lado da soma dos trimestres — o imposto não é o mesmo nos dois jeitos.'
+        : '1T, 2T, 3T, 4T e o acumulado do ano, a partir da DRE; adições e exclusões pela lista de ajustes; incentivo PAT e Parte B.') +
+      (anual ? blocoLalurAnual(L) : parteA) + outraAba +
       '<h3 class="apres-sub">Ajustes mensais e trimestrais <small>as contas marcadas na DRE ou no balancete · valor positivo = adição · valor negativo = exclusão</small></h3>' + ajustes +
       '<h3 class="apres-sub">Incentivo fiscal PAT <small>conta ' + T.esc(L.contaPAT || '—') + (L.pat.titulo ? ' · ' + T.esc(L.pat.titulo) : '') + ' · menor entre o incentivo potencial e 3,6% do IRPJ principal (15%)</small></h3>' + pat +
       '<h3 class="apres-sub">LALUR Parte B: controles fiscais <small>saldos de prejuízo fiscal e base negativa (zerados até você informar) e IR retido</small></h3>' + parteB +
@@ -1310,6 +1324,9 @@
       else if (qual === 'editar-ajustes') await editarAjustes();
       else if (qual === 'linhas-dre') { iniciarEdicaoDre(); redesenharConteudo(el); }
       else if (qual === 'ir-linhas-dre') irParaAba(el, /^dre-/.test(E.aba) ? E.aba : 'dre-mensal');
+      // Do LALUR direto para as contas, com a marcação já ligada. Com a DRE fechada (linhas ainda não
+      // conferidas) o lugar de marcar é o balancete, que mostra todas as contas.
+      else if (qual === 'ir-marcar-lalur') { E.marcarLalur = true; irParaAba(el, dreFechada() ? 'balancete-mensal' : 'dre-mensal'); }
       else if (qual === 'sim-aplicar') { const campo = el.querySelector('#sim-percentual'); if (campo) aplicarPercentual(el, campo.value); }
       else if (qual === 'sim-ajuste') await abrirAjuste(el, null);
     });
@@ -3085,7 +3102,7 @@
     // Parte A
     let larg = larguraValor(L.parteA.linhas.map((l) => l.valores), 17);
     let f = novaFolha('LALUR Parte A', [44, 16].concat(L.parteA.colunas.map(() => larg)));
-    f.titulo('LALUR Parte A: apuração do lucro real e da CSLL', 'Apuração trimestral a partir da DRE; adições e exclusões pela lista de ajustes; incentivo PAT e Parte B · ' + valoresEm());
+    f.titulo('LALUR trimestral (Parte A): apuração do lucro real e da CSLL', '1T, 2T, 3T, 4T e o acumulado do ano, a partir da DRE; adições e exclusões pela lista de ajustes; incentivo PAT e Parte B · ' + valoresEm());
     let r1 = f.add([{ v: 'Linha', e: 'cabEsq' }, { v: 'Bloco', e: 'cabEsq' }].concat(L.parteA.colunas.map((c) => ({ v: c.rotulo, e: c.soma ? 'cabAcum' : 'cab' }))), { altura: 30 });
     L.parteA.linhas.forEach((l) => {
       const t = l.destaque ? 'tot' : 'ana';
@@ -3094,6 +3111,23 @@
     f.congelar = { linhas: r1, colunas: 1 };
     f.repetir = [r1, r1];
     folhas.push(f);
+    // Anual numa aba só dela (na tela são abas separadas desde 07/10/2026)
+    if (L.anual) {
+      larg = larguraValor(L.anual.linhas.map((l) => l.valores), 17);
+      f = novaFolha('LALUR anual', [44, 16].concat(L.anual.colunas.map(() => larg)));
+      f.titulo('LALUR anual: apuração do lucro real e da CSLL no ano',
+        (L.anual.acumulado ? 'Cada coluna acumula de janeiro até o mês' : 'Um mês por coluna, sem acumular') +
+        ' · no fim, o ano inteiro como um período só e a soma dos trimestres · ' + valoresEm());
+      r1 = f.add([{ v: 'Linha', e: 'cabEsq' }, { v: 'Bloco', e: 'cabEsq' }].concat(L.anual.colunas.map((c) => ({ v: c.rotulo, e: c.anual || c.soma ? 'cabAcum' : 'cab' }))), { altura: 30 });
+      L.anual.linhas.forEach((l) => {
+        const t = l.destaque ? 'tot' : 'ana';
+        f.add([{ v: l.rotulo, e: t + '.rot0' }, { v: l.bloco, e: t + '.cod' }]
+          .concat(l.valores.map((v, k) => ({ v: R(v), e: t + '.val' + (L.anual.colunas[k].anual || L.anual.colunas[k].soma ? '.acum' : '') }))));
+      });
+      f.congelar = { linhas: r1, colunas: 1 };
+      f.repetir = [r1, r1];
+      folhas.push(f);
+    }
     // Ajustes
     larg = larguraValor(L.ajustes.linhas.map((a) => a.valores).concat([L.ajustes.adicoes, L.ajustes.exclusoes]), 14);
     f = novaFolha('LALUR Ajustes', [46, 18, 10].concat(L.ajustes.colunas.map(() => larg)));
