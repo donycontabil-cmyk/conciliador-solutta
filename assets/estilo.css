@@ -31,6 +31,10 @@
 }
 
 * { box-sizing: border-box; }
+/* Esconder tem que esconder (Dony, 07/10/2026: "tô tentando utilizar a ferramenta de busca e não tá
+   funcionando"). Qualquer regra nossa com `display` vence o [hidden] que o navegador aplica sozinho — e aí
+   filtrar uma lista não escondia nada. Esta linha vale para o programa inteiro. */
+[hidden] { display: none !important; }
 html, body { height: 100%; }
 body {
   margin: 0;
