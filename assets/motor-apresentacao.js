@@ -846,18 +846,16 @@
     const CAMPOS = ['lucroContabil', 'adicoes', 'exclusoes', 'lrAntes', 'compPrejuizo', 'lrIrpj', 'irpj15', 'adicional', 'irpjTotal', 'irRetido', 'compBaseNegativa',
       'baseCsll', 'csll', 'estimado', 'patDespesa', 'patPotencial', 'patLimite', 'patAproveitavel', 'irpjLiquido', 'total'];
     const somar = (lista) => { const r = {}; CAMPOS.forEach((c) => { r[c] = lista.reduce((s, x) => s + x[c], 0); }); return r; };
-    // Colunas da Parte A: cada trimestre; depois do 2º (e do 4º) FECHADO, o semestre; no fim, o acumulado
-    // (se não for igual ao semestre que acabou de sair).
-    const colunasParteA = [];
-    porTrimestre.forEach((q) => {
-      colunasParteA.push(Object.assign({ id: q.t.id, rotulo: q.t.emAndamento ? q.t.rotulo + ' · ' + q.t.meses.filter((m) => m.tem).map((m) => m.rotulo).join(', ') : q.t.rotulo, trimestre: q.t }, q));
-      if ((q.t.n === 2 || q.t.n === 4) && !q.t.emAndamento) {
-        const doSemestre = porTrimestre.filter((y) => (q.t.n === 2 ? y.t.n <= 2 : y.t.n >= 3 && y.t.n <= 4));
-        if (doSemestre.length > 1) colunasParteA.push(Object.assign({ id: 'S' + (q.t.n / 2), rotulo: q.t.n === 2 ? 'Jan–Jun' : 'Jul–Dez', soma: true, cobre: doSemestre.length }, somar(doSemestre)));
-      }
-    });
-    const ultima = colunasParteA[colunasParteA.length - 1];
-    if (porTrimestre.length > 1 && !(ultima && ultima.soma && ultima.cobre === porTrimestre.length)) {
+    // Colunas da Parte A: UM TRIMESTRE POR COLUNA e, no fim, UM acumulado do ano. Nada de meio-termo.
+    // Dony, 07/10/2026: "no LALUR trimestral eu quero primeiro, segundo, terceiro, quarto trimestre e aí um
+    // acumulado. Eu não quero um acumulado de primeiro e segundo, um acumulado de primeiro, segundo e
+    // terceiro. Eu quero cada trimestre e um acumulado do ano." (Antes saíam também Jan–Jun e Jul–Dez.)
+    const colunasParteA = porTrimestre.map((q) => Object.assign({
+      id: q.t.id,
+      rotulo: q.t.emAndamento ? q.t.rotulo + ' · ' + q.t.meses.filter((m) => m.tem).map((m) => m.rotulo).join(', ') : q.t.rotulo,
+      trimestre: q.t,
+    }, q));
+    if (porTrimestre.length > 1) {
       colunasParteA.push(Object.assign({ id: 'acumulado', rotulo: rotuloAcumulado(meses), soma: true, acumulado: true }, somar(porTrimestre)));
     }
     const LINHAS_A = [
@@ -904,14 +902,48 @@
       };
       const doAno = apurar(null, mesesComDado, bAnual, mesesComDado.length);
       const soma = somar(porTrimestre);
-      const colunasAnual = [
-        Object.assign({ id: 'anual', rotulo: 'Apuração anual · ' + rotuloAcumulado(meses), anual: true }, doAno),
+      // MÊS A MÊS (Dony, 07/10/2026: "no LALUR anual eu quero ter mês a mês e não acumulado… e aí sim uma
+      // opção de clicar e ele fazer o acumulado"). É assim que se acompanha o lucro real anual: cada mês com
+      // a sua apuração e, quando se quer, o acumulado de janeiro até o mês — o balancete de suspensão ou
+      // redução. Duas coisas mudam entre um jeito e o outro, e é por isso que não dá para somar colunas:
+      //  - o adicional de 10% é sobre o que passa de R$ 20.000 POR MÊS do período;
+      //  - a compensação de prejuízo é 30% do lucro real DO PERÍODO, e o saldo é um só.
+      // No mês a mês o saldo de prejuízo vai sendo consumido mês a mês (senão o mesmo prejuízo seria
+      // compensado doze vezes), e o IR retido — que é informado por trimestre — entra no último mês com
+      // movimento daquele trimestre, para a soma dos meses bater com o ano.
+      const acumulado = !!cfg.lalurAnualAcumulado;
+      const irRetidoDoMes = new Map();
+      trimestres.forEach((t) => {
+        const comDado = t.meses.filter((m) => m.tem);
+        if (comDado.length) irRetidoDoMes.set(comDado[comDado.length - 1].comp, Number((parteB[t.id] || {}).irRetido) || 0);
+      });
+      let saldoPrejuizo = Number(bAnual.prejuizoFiscal) || 0;
+      let saldoBaseNeg = Number(bAnual.baseNegativa) || 0;
+      const colunasMes = mesesComDado.map((m, i) => {
+        const lista = acumulado ? mesesComDado.slice(0, i + 1) : [m];
+        const retido = acumulado
+          ? lista.reduce((s, x) => s + (irRetidoDoMes.get(x.comp) || 0), 0)
+          : (irRetidoDoMes.get(m.comp) || 0);
+        const b = acumulado
+          ? { prejuizoFiscal: bAnual.prejuizoFiscal, baseNegativa: bAnual.baseNegativa, irRetido: retido }
+          : { prejuizoFiscal: saldoPrejuizo, baseNegativa: saldoBaseNeg, irRetido: retido };
+        const r = apurar(null, lista, b, lista.length);
+        if (!acumulado) {
+          saldoPrejuizo = Math.max(0, saldoPrejuizo - r.compPrejuizo);
+          saldoBaseNeg = Math.max(0, saldoBaseNeg - r.compBaseNegativa);
+        }
+        return Object.assign({ id: 'M' + m.comp, mes: m,
+          rotulo: acumulado ? (i === 0 ? m.rotulo : mesesComDado[0].rotulo + '–' + m.rotulo) : m.rotulo }, r);
+      });
+      const colunasAnual = colunasMes.concat([
+        Object.assign({ id: 'anual', rotulo: 'Ano · ' + rotuloAcumulado(meses), anual: true }, doAno),
         Object.assign({ id: 'soma-trimestres', rotulo: 'Soma dos trimestres', soma: true }, soma),
-      ];
+      ]);
       anual = {
         completo: mesesComDado.length === 12,
         meses: mesesComDado.length,
-        colunas: colunasAnual.map((c) => ({ id: c.id, rotulo: c.rotulo, soma: !!c.soma, anual: !!c.anual })),
+        acumulado,
+        colunas: colunasAnual.map((c) => ({ id: c.id, rotulo: c.rotulo, soma: !!c.soma, anual: !!c.anual, mes: !!c.mes })),
         linhas: LINHAS_A.map(([bloco, rotulo, campo, destaque]) => ({ bloco, rotulo, campo, destaque: !!destaque, valores: colunasAnual.map((c) => c[campo]) })),
         diferenca: doAno.total - soma.total,
         irRetido: bAnual.irRetido, prejuizoFiscal: Number(bAnual.prejuizoFiscal) || 0, baseNegativa: Number(bAnual.baseNegativa) || 0,
