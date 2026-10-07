@@ -716,6 +716,15 @@ table.apres.marcando td.fixa { max-width: 600px; }
 .lalur-bt:hover { border-color: var(--primaria); color: var(--primaria); }
 .lalur-bt.adicao.ligado { background: var(--verde); border-color: var(--verde); color: #fff; }
 .lalur-bt.exclusao.ligado { background: #a4480f; border-color: #a4480f; color: #fff; }
+/* Procurar a conta pelo número ou pelo nome, sem rolar o plano inteiro (Dony, 07/10/2026). */
+.lalur-achados { max-height: 46vh; overflow: auto; border: 1px solid var(--borda); border-radius: 6px; }
+.lalur-acha { display: flex; align-items: center; gap: 10px; padding: 5px 8px; border-bottom: 1px solid var(--borda); }
+.lalur-acha:last-child { border-bottom: 0; }
+.lalur-acha:hover { background: var(--primaria-clara); }
+.lalur-acha.marcada { background: var(--ambar-fundo); }
+.lalur-acha-nome { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lalur-acha-valor { flex: 0 0 auto; font-size: 12px; color: var(--texto-suave); font-variant-numeric: tabular-nums; }
+.lalur-acha .lalur-bts { flex: 0 0 auto; margin-right: 0; }
 .lalur-selo { display: inline-block; font-size: 10px; font-weight: 700; line-height: 1; padding: 2px 6px; border-radius: 9px; margin-right: 6px; vertical-align: 1px; }
 .lalur-selo.adicao { background: var(--verde-fundo); color: var(--verde); }
 .lalur-selo.exclusao { background: #fbe9df; color: #a4480f; }

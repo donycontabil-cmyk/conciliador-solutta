@@ -491,7 +491,8 @@
     const avah = '<label class="caixa-opcao"><input type="checkbox" data-opcao="avah"' + (E.avah ? ' checked' : '') + '> AV % e AH %</label>';
     const marcar = '<label class="caixa-opcao lalur-opcao' + (E.marcarLalur ? ' ligada' : '') + '" title="Mostra, em cada conta, os botões para marcar adição ou exclusão do LALUR">' +
       '<input type="checkbox" data-opcao="marcar-lalur"' + (E.marcarLalur ? ' checked' : '') + '> ✎ Marcar adições e exclusões do LALUR</label>';
-    const ajudaMarcar = '<span class="suave pequeno"><b>Marcando o LALUR:</b> clique em <b>+ Adição</b> ou <b>− Exclusão</b> na conta; clique de novo para tirar. ' +
+    const ajudaMarcar = '<button type="button" class="botao pequeno" data-opcao="achar-conta-lalur" title="Procurar a conta pelo número ou pelo nome, sem rolar a tela">🔍 Procurar conta</button>' +
+      '<span class="suave pequeno"><b>Marcando o LALUR:</b> clique em <b>+ Adição</b> ou <b>− Exclusão</b> na conta; clique de novo para tirar. ' +
       'Conta de ativo ou passivo só tem exclusão, pelo aumento do saldo credor (a regra da planilha). ' + ajustesAtuais().length + ' conta(s) marcada(s).</span>';
     if ((E.aba === 'dre-mensal' || E.aba === 'dre-trimestral') && (dreFechada() || E.dreEdicao)) {
       return '<span class="suave pequeno">Conferindo as <b>linhas da DRE</b> da empresa: escolha a linha de cada grupo de contas; a prévia da DRE ao lado muda na hora.</span>';
@@ -510,8 +511,10 @@
     if (E.aba === 'lalur' || E.aba === 'lalur-anual') {
       // O botão de marcar as contas mora na DRE e no balancete; quem está no LALUR procura por ele AQUI
       // (Dony, 07/10/2026: "cadê o botão para eu poder colocar as contas de adição e exclusão?").
-      return '<button type="button" class="botao pequeno primario" data-opcao="ir-marcar-lalur" title="Abre a DRE (ou o balancete) com os botões + Adição e − Exclusão em cada conta">' +
-        '✎ Marcar adições e exclusões nas contas</button>' +
+      return '<button type="button" class="botao pequeno primario" data-opcao="achar-conta-lalur" title="Procurar a conta pelo número ou pelo nome e marcar ali mesmo">' +
+        '🔍 Procurar conta</button>' +
+        '<button type="button" class="botao pequeno" data-opcao="ir-marcar-lalur" title="Abre a DRE (ou o balancete) com os botões + Adição e − Exclusão em cada conta">' +
+        '✎ Marcar nas contas</button>' +
         '<button type="button" class="botao pequeno" data-opcao="editar-ajustes">📋 Lista de ajustes e conta do PAT</button>' +
         '<span class="suave pequeno">' + (E.aba === 'lalur-anual'
           ? 'Apuração ANUAL do lucro real: um mês por coluna e o ano inteiro como um período só.'
@@ -1162,8 +1165,11 @@
     // "vá na DRE", e só enquanto a lista estava vazia).
     const ajustes = (editavel ? '<p class="apres-nota nao-imprimir">' +
       (L.ajustes.linhas.length ? L.ajustes.linhas.length + ' conta(s) marcada(s). Para marcar outras: ' : 'Nenhuma conta marcada ainda. Para marcar: ') +
-      '<button type="button" class="botao pequeno primario" data-opcao="ir-marcar-lalur">✎ Marcar adições e exclusões nas contas</button> — abre ' +
-      (dreFechada() ? 'o <b>balancete</b>' : 'a <b>DRE</b>') + ' com <b>+ Adição</b> e <b>− Exclusão</b> em cada conta (clicando de novo, tira). Aqui no ✕ você também tira.</p>' : '') +
+      '<button type="button" class="botao pequeno primario" data-opcao="achar-conta-lalur">🔍 Procurar conta pelo número ou pelo nome</button> ' +
+      '<button type="button" class="botao pequeno" data-opcao="ir-marcar-lalur">✎ Marcar olhando ' + (dreFechada() ? 'o balancete' : 'a DRE') + '</button><br>' +
+      '<b>O lado é decidido mês a mês pelo movimento da conta:</b> movimento <b>devedor</b> entra como <b>adição</b>, movimento <b>credor</b> entra como <b>exclusão</b> — ' +
+      'a mesma conta pode ser adição num mês e exclusão no outro, e é por isso que ela aparece com valor positivo e negativo na tabela. ' +
+      'O que você escolhe ao marcar é só como ela fica na coluna <b>Tipo</b>. Conta de ativo ou passivo entra pelo <b>aumento do saldo credor</b>. No ✕ você tira a conta do LALUR.</p>' : '') +
       tabelaSimples(['Descrição', 'Conta', 'Tipo'], colAj, L.ajustes.linhas.map((a) => ({
         cab: [T.esc(a.titulo || '') + (a.noBalancete ? '' : ' <span class="rel-aviso">(não está nos balancetes)</span>') +
           (a.regra === 'aumento-credor' ? ' <small class="suave">· aumento do saldo credor</small>' : '') +
@@ -1327,6 +1333,7 @@
       // Do LALUR direto para as contas, com a marcação já ligada. Com a DRE fechada (linhas ainda não
       // conferidas) o lugar de marcar é o balancete, que mostra todas as contas.
       else if (qual === 'ir-marcar-lalur') { E.marcarLalur = true; irParaAba(el, dreFechada() ? 'balancete-mensal' : 'dre-mensal'); }
+      else if (qual === 'achar-conta-lalur') await procurarContaLalur(el);
       else if (qual === 'sim-aplicar') { const campo = el.querySelector('#sim-percentual'); if (campo) aplicarPercentual(el, campo.value); }
       else if (qual === 'sim-ajuste') await abrirAjuste(el, null);
     });
@@ -1522,6 +1529,94 @@
     E.rel = montarRel();
     redesenharConteudo(el);
     const config = E.config;
+    E.fila = (E.fila || Promise.resolve())
+      .then(() => guardarConfig(config, 'apresentacao-ajustes', texto))
+      .then(() => T.avisoRapido(texto + ' · LALUR recalculado.', 'ok', 2500))
+      .catch((e) => { T.avisoRapido('Não foi possível guardar a marcação: ' + T.mensagemDeErro(e), 'erro'); app().mostrarRota(); });
+  }
+
+  // Procurar a conta pelo NÚMERO ou pelo NOME e marcar ali mesmo (Dony, 07/10/2026: "de repente, dentro de mil
+  // contas, eu tenho só uma conta que é adição. Eu não quero ter que procurar a conta, eu quero poder digitar
+  // o nome, o número dela"). Marca várias de uma vez e só grava no fim.
+  async function procurarContaLalur(el) {
+    const tipoDe = (a) => (a && a.tipo === 'exclusao' ? 'exclusao' : 'adicao');
+    const antes = new Map(ajustesAtuais().map((a) => [a.conta, tipoDe(a)]));
+    const escolhido = new Map(antes);
+    const porConta = new Map(((E.rel.mensal && E.rel.mensal.linhas) || []).map((l) => [l.conta, l]));
+    // Valor que ajuda a reconhecer a conta: movimento do ano nas de resultado, saldo do último mês nas patrimoniais.
+    const valorNoAno = (c) => {
+      const l = porConta.get(c.conta);
+      if (!l) return null;
+      const vs = l.valores.filter((v) => v !== null && v !== undefined);
+      if (!vs.length) return null;
+      return c.patrimonial ? vs[vs.length - 1] : vs.reduce((s, v) => s + v, 0);
+    };
+    const contas = E.rel.contas.filter((c) => c.analitica);
+    const bt = (c, tipo, texto, titulo) => '<button type="button" class="lalur-bt ' + tipo + (escolhido.get(c.conta) === tipo ? ' ligado' : '') +
+      '" data-marca="' + tipo + '" title="' + titulo + '">' + texto + '</button>';
+    const item = (c) => '<div class="lalur-acha' + (escolhido.has(c.conta) ? ' marcada' : '') + '" data-conta="' + T.esc(c.conta) + '" data-busca="' +
+      T.esc(U.normalizarNome(c.conta + ' ' + (c.reduzido || '') + ' ' + (c.titulo || ''))) + '">' +
+      '<span class="lalur-acha-nome"><span class="cod">' + T.esc(c.conta) + '</span> ' + T.esc(c.titulo || '') + '</span>' +
+      '<span class="lalur-acha-valor">' + dinheiro(valorNoAno(c)) + '</span>' +
+      '<span class="lalur-bts">' + (c.patrimonial ? '' : bt(c, 'adicao', '+ Adição', 'Marcar como adição no LALUR')) +
+      bt(c, 'exclusao', '− Exclusão', c.patrimonial ? 'Exclusão pelo aumento do saldo credor no mês (a regra da planilha)' : 'Marcar como exclusão no LALUR') + '</span></div>';
+    const escolha = await T.janela({
+      titulo: 'Procurar conta para o LALUR',
+      larga: true,
+      corpo: '<p class="suave pequeno" style="margin:0 0 8px;line-height:1.5">Digite o <b>número</b> ou o <b>nome</b> da conta e clique em <b>+ Adição</b> ou <b>− Exclusão</b>. ' +
+        'Clicando de novo no mesmo botão, a conta sai do LALUR. Conta de ativo ou passivo só tem exclusão, pelo aumento do saldo credor (a regra da planilha).<br>' +
+        '<b>O lado muda sozinho mês a mês:</b> movimento devedor entra como adição, movimento credor entra como exclusão — a mesma conta pode ser adição num mês e exclusão no outro. ' +
+        'O que você escolhe aqui é só como ela aparece na coluna <b>Tipo</b>.<br>' +
+        'O valor ao lado é o <b>movimento do ano</b> nas contas de resultado e o <b>saldo do último mês</b> nas patrimoniais — serve para você reconhecer a conta certa.</p>' +
+        '<input type="search" class="busca" id="lb-busca" placeholder="Ex.: 5.1.9, multa, brinde, provisão, 00399" style="margin-bottom:8px;width:100%">' +
+        '<div class="lista-escolha lalur-achados" id="lb-lista">' + contas.map(item).join('') + '</div>' +
+        '<p class="suave pequeno" id="lb-recado" style="margin:8px 0 0"></p>',
+      botoes: [{ texto: 'Cancelar', valor: null }, { texto: 'Guardar as marcações', tipo: 'primario', antes: () => ({ marcas: Array.from(escolhido.entries()) }) }],
+      aoAbrir: (j) => {
+        const campo = j.querySelector('#lb-busca'), lista = j.querySelector('#lb-lista'), recado = j.querySelector('#lb-recado');
+        let aparecendo = contas.length;
+        const contar = () => {
+          recado.textContent = escolhido.size + ' conta(s) marcada(s) · mostrando ' + aparecendo + ' de ' + contas.length + ' conta(s) analítica(s).';
+        };
+        contar();
+        // A janela põe o foco nela depois do aoAbrir; o campo pede o foco logo em seguida, para ele já digitar.
+        setTimeout(() => { try { campo.focus(); } catch (e) { /* sem foco */ } }, 60);
+        campo.addEventListener('input', () => {
+          const q = U.normalizarNome(campo.value);
+          aparecendo = 0;
+          // A conta já marcada continua aparecendo, para ele poder tirar sem procurar de novo.
+          lista.querySelectorAll('.lalur-acha').forEach((l) => {
+            const fica = !q || l.getAttribute('data-busca').indexOf(q) >= 0 || escolhido.has(l.getAttribute('data-conta'));
+            l.hidden = !fica;
+            if (fica) aparecendo++;
+          });
+          contar();
+        });
+        lista.addEventListener('click', (ev) => {
+          const b = ev.target.closest('button[data-marca]');
+          if (!b) return;
+          const linha = b.closest('.lalur-acha'), conta = linha.getAttribute('data-conta'), tipo = b.getAttribute('data-marca');
+          if (escolhido.get(conta) === tipo) escolhido.delete(conta); else escolhido.set(conta, tipo);
+          linha.querySelectorAll('button[data-marca]').forEach((x) => x.classList.toggle('ligado', escolhido.get(conta) === x.getAttribute('data-marca')));
+          linha.classList.toggle('marcada', escolhido.has(conta));
+          contar();
+        });
+      },
+    });
+    if (!escolha) return;
+    const velhos = ajustesAtuais();
+    const ajustes = escolha.marcas.map(([conta, tipo]) => {
+      const velho = velhos.find((a) => a.conta === conta);
+      if (velho && tipoDe(velho) === tipo) return velho;
+      const linha = E.rel.contas.find((c) => c.conta === conta);
+      return { conta, tipo, regra: linha && linha.patrimonial ? 'aumento-credor' : 'movimento' };
+    }).sort((a, b) => motor().compararContas(a.conta, b.conta));
+    const mudou = ajustes.length !== antes.size || ajustes.some((a) => antes.get(a.conta) !== tipoDe(a));
+    if (!mudou) { T.avisoRapido('Nada mudou no LALUR.', 'ok', 2000); return; }
+    E.config = Object.assign({}, E.config, { ajustes });
+    E.rel = montarRel();
+    redesenharConteudo(el);
+    const config = E.config, texto = ajustes.length + ' conta(s) de adição ou exclusão no LALUR';
     E.fila = (E.fila || Promise.resolve())
       .then(() => guardarConfig(config, 'apresentacao-ajustes', texto))
       .then(() => T.avisoRapido(texto + ' · LALUR recalculado.', 'ok', 2500))
