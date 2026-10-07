@@ -923,48 +923,34 @@
       // No mês a mês o saldo de prejuízo vai sendo consumido mês a mês (senão o mesmo prejuízo seria
       // compensado doze vezes), e o IR retido — que é informado por trimestre — entra no último mês com
       // movimento daquele trimestre, para a soma dos meses bater com o ano.
-      // Como ele pediu em 07/10/2026: "janeiro, fevereiro, aí tem acumulado janeiro e fevereiro; aí vem março,
-      // aí vem acumulado janeiro, fevereiro e março". Ou seja, o mês e o ACUMULADO de janeiro até ele, um ao
-      // lado do outro — e o acumulado do último mês é a apuração do período (o balancete de suspensão ou
-      // redução). Janeiro não tem acumulado próprio: ele sozinho já é o acumulado.
+      // UMA COLUNA POR MÊS, e o valor dela já é o ACUMULADO de janeiro até ele (Dony, 07/10/2026: "janeiro, só
+      // janeiro; fevereiro, já o acumulado janeiro, fevereiro; março, já o acumulado janeiro, fevereiro,
+      // março… não quero uma telinha de acumulado"). É o balancete de suspensão ou redução: em cada mês se
+      // apura o ano até ali. Janeiro sozinho já é o acumulado dele, e a coluna do ÚLTIMO mês é a apuração do
+      // período inteiro — por isso não existe mais uma coluna "Ano" separada.
       const irRetidoDoMes = new Map();
       trimestres.forEach((t) => {
         const comDado = t.meses.filter((m) => m.tem);
         if (comDado.length) irRetidoDoMes.set(comDado[comDado.length - 1].comp, Number((parteB[t.id] || {}).irRetido) || 0);
       });
-      // No mês sozinho o saldo de prejuízo vai sendo consumido de um mês para o outro (senão o mesmo prejuízo
-      // seria compensado doze vezes). No acumulado, o saldo é sempre o do começo do ano.
-      let saldoPrejuizo = Number(bAnual.prejuizoFiscal) || 0;
-      let saldoBaseNeg = Number(bAnual.baseNegativa) || 0;
-      const colunasAnual = [];
-      mesesComDado.forEach((m, i) => {
+      const colunasAnual = mesesComDado.map((m, i) => {
         const ultimo = i === mesesComDado.length - 1;
-        const rMes = apurar(null, [m], { prejuizoFiscal: saldoPrejuizo, baseNegativa: saldoBaseNeg, irRetido: irRetidoDoMes.get(m.comp) || 0 }, 1);
-        saldoPrejuizo = Math.max(0, saldoPrejuizo - rMes.compPrejuizo);
-        saldoBaseNeg = Math.max(0, saldoBaseNeg - rMes.compBaseNegativa);
-        colunasAnual.push(Object.assign({ id: 'M' + m.comp, rotulo: m.rotulo, mes: true, anual: i === 0 && ultimo }, rMes));
-        if (i === 0) return; // janeiro sozinho já é o acumulado dele
         const lista = mesesComDado.slice(0, i + 1);
-        // O acumulado do último mês é exatamente a apuração do ano inteiro: usa o mesmo cálculo, para não
-        // haver dois números com o mesmo significado.
+        // O acumulado do último mês é exatamente a apuração do ano: mesmo cálculo, para não haver dois
+        // números com o mesmo significado.
         const r = ultimo ? doAno : apurar(null, lista, {
           prejuizoFiscal: bAnual.prejuizoFiscal, baseNegativa: bAnual.baseNegativa,
           irRetido: lista.reduce((s, x) => s + (irRetidoDoMes.get(x.comp) || 0), 0),
         }, lista.length);
-        // "Acum. Jan–Fev/26": o ano aparece uma vez só, porque são muitas colunas na tela.
-        colunasAnual.push(Object.assign({ id: 'A' + m.comp, rotulo: 'Acum. ' + String(mesesComDado[0].rotulo).split('/')[0] + '–' + m.rotulo,
-          acumulado: true, anual: ultimo, mesesNoPeriodo: lista.length }, r));
+        // "Fev/26 (Jan–Fev)": o mês manda no rótulo, e o período fica entre parênteses para não restar dúvida.
+        const periodo = String(mesesComDado[0].rotulo).split('/')[0] + '–' + String(m.rotulo).split('/')[0];
+        return Object.assign({ id: 'M' + m.comp, rotulo: i === 0 ? m.rotulo : m.rotulo + ' (' + periodo + ')',
+          mes: true, acumulado: i > 0, anual: ultimo, mesesNoPeriodo: lista.length }, r);
       });
-      // Ele pode esconder os acumulados do meio e ficar só com o do último mês ("eu quero poder ocultar o
-      // acumulado de fevereiro e ficar só com o acumulado de março").
-      const intermediarios = cfg.lalurAcumIntermediarios !== false;
-      const visiveis = colunasAnual.filter((c) => intermediarios || !c.acumulado || c.anual)
-        .concat([Object.assign({ id: 'soma-trimestres', rotulo: 'Soma dos trimestres', soma: true }, soma)]);
+      const visiveis = colunasAnual.concat([Object.assign({ id: 'soma-trimestres', rotulo: 'Soma dos trimestres', soma: true }, soma)]);
       anual = {
         completo: mesesComDado.length === 12,
         meses: mesesComDado.length,
-        intermediarios,
-        temIntermediarios: colunasAnual.some((c) => c.acumulado && !c.anual),
         colunas: visiveis.map((c) => ({ id: c.id, rotulo: c.rotulo, soma: !!c.soma, anual: !!c.anual, mes: !!c.mes, acumulado: !!c.acumulado })),
         linhas: LINHAS_A.map(([bloco, rotulo, campo, destaque]) => ({ bloco, rotulo, campo, destaque: !!destaque, valores: visiveis.map((c) => c[campo]) })),
         diferenca: doAno.total - soma.total,

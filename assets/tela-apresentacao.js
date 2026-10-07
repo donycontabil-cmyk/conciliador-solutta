@@ -68,7 +68,7 @@
   // Estado da tela (continua entre redesenhos).
   const E = { codigo: null, ano: null, emp: null, rel: null, registro: null, config: {}, lugares: [], metas: [],
     aba: 'dre-mensal', avah: true, nivel: 5, semZeradas: false, abertos: new Set(), selecao: null, marcarLalur: false, balancetes: [], fila: null, clienteMes: null, cacheCliente: null, ultimoCliente: null, casas: 2, milhar: false,
-    dreEdicao: null, balancetesAnt: [], relAnt: null, ultimaDre: 'dre-mensal', ultimoRelatorio: 'cliente', ultimoLalur: 'lalur', lalurAcumInter: true,
+    dreEdicao: null, balancetesAnt: [], relAnt: null, ultimaDre: 'dre-mensal', ultimoRelatorio: 'cliente', ultimoLalur: 'lalur',
     assinaturaMes: null, assinaturaSoMes: false, assinaturaComparar: false, assinaturaNivel: 3, nivelDre: 2, dfcDetalhe: false, balancoLado: false, balancoPaisagem: false, dmplPaisagem: true };
   (function lerPreferencias() {
     try {
@@ -78,7 +78,6 @@
       if (GRUPO_LALUR.indexOf(p.ultimoLalur) >= 0) E.ultimoLalur = p.ultimoLalur;
       if (GRUPO_RELATORIOS.indexOf(p.ultimoRelatorio) >= 0) E.ultimoRelatorio = p.ultimoRelatorio;
       if (typeof p.avah === 'boolean') E.avah = p.avah;
-      if (typeof p.lalurAcumInter === 'boolean') E.lalurAcumInter = p.lalurAcumInter;
       if (p.nivel >= 1 && p.nivel <= 9) E.nivel = p.nivel;
       if (p.nivelBalanco >= 1 && p.nivelBalanco <= 9) E.assinaturaNivel = p.nivelBalanco;
       if (p.nivelDre >= 1 && p.nivelDre <= 9) E.nivelDre = p.nivelDre;
@@ -91,7 +90,7 @@
     } catch (e) { /* sem preferências guardadas */ }
   })();
   function guardarPreferencias() {
-    try { raiz.localStorage.setItem(CHAVE_PREF, JSON.stringify({ aba: E.aba, ultimaDre: E.ultimaDre, ultimoRelatorio: E.ultimoRelatorio, ultimoLalur: E.ultimoLalur, lalurAcumInter: E.lalurAcumInter, avah: E.avah, nivel: E.nivel, semZeradas: E.semZeradas, casas: E.casas, milhar: E.milhar,
+    try { raiz.localStorage.setItem(CHAVE_PREF, JSON.stringify({ aba: E.aba, ultimaDre: E.ultimaDre, ultimoRelatorio: E.ultimoRelatorio, ultimoLalur: E.ultimoLalur, avah: E.avah, nivel: E.nivel, semZeradas: E.semZeradas, casas: E.casas, milhar: E.milhar,
       nivelBalanco: E.assinaturaNivel, nivelDre: E.nivelDre, balancoLado: E.balancoLado, balancoPaisagem: E.balancoPaisagem, dmplPaisagem: E.dmplPaisagem })); } catch (e) { /* navegador sem armazenamento */ }
   }
 
@@ -185,10 +184,7 @@
   // As linhas da DRE guardadas na empresa (valem para todos os anos) e o relatório montado com elas.
   function mapaDaEmpresa() { const m = E.emp && E.emp.mapaDre; return m && m.contas && Object.keys(m.contas).length ? m : null; }
   function montarRel(balancetes, dreModo) {
-    // O "acumulado" do LALUR anual é escolha da tela (não fica guardado no registro da empresa), mas muda a
-    // apuração de cada coluna — então entra na configuração que o motor recebe.
-    const config = Object.assign({}, E.config, { lalurAcumIntermediarios: E.lalurAcumInter !== false });
-    return motor().montar({ ano: E.ano, balancetes: balancetes || E.balancetes, config, mapaDre: mapaDaEmpresa(), dreModo });
+    return motor().montar({ ano: E.ano, balancetes: balancetes || E.balancetes, config: E.config, mapaDre: mapaDaEmpresa(), dreModo });
   }
   // Plano de contas diferente do modelo e linhas ainda não conferidas: a DRE e o que sai dela ficam fechados.
   const dreFechada = () => !!E.rel && E.rel.dre.situacao === 'sugestao';
@@ -1075,29 +1071,21 @@
   function blocoLalurAnual(L, simulado) {
     const A = L && L.anual;
     if (!A) return '';
-    // Mês normal, acumulado do meio em azul (como o trimestre) e o acumulado do último mês — que é a
-    // apuração do período — em destaque, junto com a soma dos trimestres.
-    const colAn = A.colunas.map((c) => Object.assign({}, c, { cls: c.anual || c.soma ? 'acum' : c.acumulado ? 'tri' : '' }));
+    // O último mês (a apuração do período) e a soma dos trimestres em destaque; os outros meses normais.
+    const colAn = A.colunas.map((c) => Object.assign({}, c, { cls: c.anual || c.soma ? 'acum' : '' }));
     const tab = tabelaSimples(['Linha', 'Bloco'], colAn, A.linhas.map((l) => ({ cls: l.destaque ? 'total' : '',
       cab: [T.esc(l.rotulo), '<span class="suave">' + T.esc(l.bloco) + '</span>'], valores: l.valores })));
     const dif = A.diferenca;
     const conta = Math.abs(dif) < 1 ? 'Nos dois jeitos o IRPJ + CSLL dá o mesmo valor.'
       : dif < 0 ? 'Pela apuração <b>anual</b> o IRPJ + CSLL fica <b>' + 'R$ ' + U.formatarCentavos(Math.abs(dif)) + ' menor</b> do que somando os trimestres.'
         : 'Pela apuração anual o IRPJ + CSLL fica <b>' + 'R$ ' + U.formatarCentavos(dif) + ' maior</b> do que somando os trimestres — neste caso o trimestral é melhor.';
-    // Dá para esconder os acumulados do meio e ficar só com o do último mês (Dony, 07/10/2026: "eu quero poder
-    // ocultar o acumulado de fevereiro e ficar só com o acumulado de março").
-    const caixaAcumulado = simulado || !(A.temIntermediarios || !A.intermediarios) ? '' :
-      '<label class="caixa-opcao nao-imprimir" style="margin-left:10px;font-weight:400"><input type="checkbox" data-opcao="lalur-acumulado"' +
-      (A.intermediarios ? ' checked' : '') + '> Mostrar os acumulados do meio</label>';
     return '<h3 class="apres-sub">LALUR anual' + (simulado ? ' na simulação' : '') + ' <small>' +
-      'cada mês e, ao lado, o <b>acumulado de janeiro até ele</b> (o balancete de suspensão ou redução)' +
-      (A.intermediarios ? '' : ' · mostrando só o acumulado do último mês') +
-      ' · o adicional de 10% é sobre o que passa de R$ 20.000,00 por mês do período e a compensação é 30% do lucro real do período</small>' +
-      caixaAcumulado + '</h3>' + tab +
+      'uma coluna por mês, e cada uma já é o <b>acumulado de janeiro até ele</b> (o balancete de suspensão ou redução)' +
+      ' · o adicional de 10% é sobre o que passa de R$ 20.000,00 por mês do período e a compensação é 30% do lucro real do período</small></h3>' + tab +
       '<p class="apres-nota">' + conta +
-      ' <b>Como ler:</b> a coluna do <b>mês</b> é só aquele mês; a coluna <b>Acum.</b> é a apuração de janeiro até ali — é ela que vale para suspender ou reduzir o imposto, e a última delas é a apuração do período inteiro. ' +
-      'No mês sozinho o saldo de prejuízo fiscal vai sendo consumido de um mês para o outro, e o IR retido informado em cada trimestre entra no último mês com movimento dele. ' +
-      'Nas <b>adições e exclusões</b> dos meses, uma conta que oscila entra como adição num mês e como exclusão no outro — o que fecha com o acumulado é a diferença entre as duas linhas.' +
+      ' <b>Como ler:</b> cada coluna é a apuração do ano <b>até aquele mês</b> — janeiro é só janeiro, fevereiro é janeiro + fevereiro, março é janeiro a março, e assim por diante. ' +
+      'É ela que vale para suspender ou reduzir o imposto, e a última coluna é a apuração do período inteiro. ' +
+      'O prejuízo fiscal compensado é sempre o saldo do começo do ano (não vai sendo consumido de um mês para o outro, porque cada coluna já contém a anterior).' +
       (A.completo ? '' : ' <b>Atenção:</b> o ano tem ' + A.meses + ' mês(es) ' + (simulado ? 'no período simulado' : 'de balancete carregado') +
         ' — para a apuração anual de verdade, ' + (simulado ? 'simule o ano inteiro' : 'carregue janeiro a dezembro') + '.') +
       ' O prejuízo fiscal e a base negativa usados são os saldos informados no 1º trimestre da Parte B; o IR retido é a soma dos trimestres (' + 'R$ ' + U.formatarCentavos(A.irRetido) + ').</p>';
@@ -1435,15 +1423,6 @@
         E.marcarLalur = c.checked;
         if (E.marcarLalur && /^dre/.test(E.aba)) E.rel.dre.mensal.linhas.filter((l) => l.tipo === 'grupo').forEach((l) => E.abertos.add(l.id));
         redesenharConteudo(el);
-        return;
-      }
-      // LALUR anual: mostrar os acumulados do meio ou só o do último mês. Como as colunas são apurações
-      // diferentes (o adicional de 10% e a compensação de 30% mudam com o período), o relatório é refeito.
-      if (c.getAttribute('data-opcao') === 'lalur-acumulado') {
-        E.lalurAcumInter = c.checked;
-        guardarPreferencias();
-        E.rel = montarRel();
-        redesenharFolha(el);
         return;
       }
       if (c.getAttribute('data-opcao') === 'avah') E.avah = c.checked;
@@ -3361,11 +3340,10 @@
       larg = larguraValor(L.anual.linhas.map((l) => l.valores), 17);
       f = novaFolha('LALUR anual', [44, 16].concat(L.anual.colunas.map(() => larg)));
       f.titulo('LALUR anual: apuração do lucro real e da CSLL no ano',
-        'Cada mês e, ao lado, o acumulado de janeiro até ele (o balancete de suspensão ou redução)' +
-        (L.anual.intermediarios ? '' : ' · só o acumulado do último mês') +
+        'Uma coluna por mês, e cada uma já é o acumulado de janeiro até ele (o balancete de suspensão ou redução)' +
         ' · no fim, a soma dos trimestres · ' + valoresEm());
       r1 = f.add([{ v: 'Linha', e: 'cabEsq' }, { v: 'Bloco', e: 'cabEsq' }]
-        .concat(L.anual.colunas.map((c) => ({ v: c.rotulo, e: c.anual || c.soma ? 'cabAcum' : c.acumulado ? 'cabTri' : 'cab' }))), { altura: 30 });
+        .concat(L.anual.colunas.map((c) => ({ v: c.rotulo, e: c.anual || c.soma ? 'cabAcum' : 'cab' }))), { altura: 30 });
       L.anual.linhas.forEach((l) => {
         const t = l.destaque ? 'tot' : 'ana';
         f.add([{ v: l.rotulo, e: t + '.rot0' }, { v: l.bloco, e: t + '.cod' }]
