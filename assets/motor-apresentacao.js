@@ -895,9 +895,31 @@
       ['Resumo', 'IRPJ líquido após PAT', 'irpjLiquido', true],
       ['Resumo', 'IRPJ + CSLL líquido após PAT', 'total', true],
     ];
+    // O DETALHE por trás de "Total das Adições" e "Total das Exclusões": conta a conta, nas MESMAS colunas da
+    // tabela (Dony, 07/10/2026: "um sinalzinho de mais e eu possa clicar e ele me traga as adições, as
+    // exclusões, linha a linha; lembrando que tem que vir acumulado ali"). Cada conta entra pela sobra do
+    // PERÍODO da coluna — positivo em adições, negativo em exclusões —, que é exatamente como o total soma.
+    const sobraNoPeriodo = (a, lista) => somaDe(lista.map((m) => a.porMes.get(m.comp))) || 0;
+    const somaDosTrimestres = (a, qual) => trimestres.reduce((s, t) => {
+      const v = sobraNoPeriodo(a, t.meses);
+      return s + (qual === 'adicoes' ? Math.max(0, v) : Math.max(0, -v));
+    }, 0);
+    // listas: uma por coluna — os meses daquele período, ou 'trimestres' na coluna que soma os trimestres.
+    const detalheDe = (listas) => {
+      const faz = (qual) => ajustes.map((a) => ({
+        conta: a.conta, titulo: a.titulo, parcial: !!a.parcial,
+        valores: listas.map((x) => {
+          if (x === 'trimestres') return somaDosTrimestres(a, qual);
+          const v = sobraNoPeriodo(a, x);
+          return qual === 'adicoes' ? Math.max(0, v) : Math.max(0, -v);
+        }),
+      })).filter((l) => l.valores.some((v) => v));
+      return { adicoes: faz('adicoes'), exclusoes: faz('exclusoes') };
+    };
     const parteA = {
       colunas: colunasParteA.map((c) => ({ id: c.id, rotulo: c.rotulo, soma: !!c.soma, parcial: !!(c.trimestre && c.trimestre.parcial) })),
       linhas: LINHAS_A.map(([bloco, rotulo, campo, destaque]) => ({ bloco, rotulo, campo, destaque: !!destaque, valores: colunasParteA.map((c) => c[campo]) })),
+      detalhe: detalheDe(colunasParteA.map((c) => (c.trimestre ? c.trimestre.meses : 'trimestres'))),
     };
 
     // ---------- LALUR ANUAL (lucro real anual, o ano inteiro como um período só)
@@ -956,6 +978,8 @@
         meses: mesesComDado.length,
         colunas: visiveis.map((c) => ({ id: c.id, rotulo: c.rotulo, soma: !!c.soma, anual: !!c.anual, mes: !!c.mes, acumulado: !!c.acumulado })),
         linhas: LINHAS_A.map(([bloco, rotulo, campo, destaque]) => ({ bloco, rotulo, campo, destaque: !!destaque, valores: visiveis.map((c) => c[campo]) })),
+        // No anual o detalhe também vem ACUMULADO, porque a coluna é acumulada.
+        detalhe: detalheDe(visiveis.map((c, k) => (c.soma ? 'trimestres' : mesesComDado.slice(0, k + 1)))),
         diferenca: doAno.total - soma.total,
         irRetido: bAnual.irRetido, prejuizoFiscal: Number(bAnual.prejuizoFiscal) || 0, baseNegativa: Number(bAnual.baseNegativa) || 0,
       };

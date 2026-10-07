@@ -721,7 +721,10 @@ table.apres.marcando td.fixa { max-width: 600px; }
 .lalur-bt.adicao.ligado { background: var(--verde); border-color: var(--verde); color: #fff; }
 .lalur-bt.exclusao.ligado { background: #a4480f; border-color: #a4480f; color: #fff; }
 /* Procurar a conta pelo número ou pelo nome, sem rolar o plano inteiro (Dony, 07/10/2026). */
-.lalur-achados { max-height: 46vh; overflow: auto; border: 1px solid var(--borda); border-radius: 6px; }
+.lalur-achados { max-height: 46vh; overflow: auto; border: 1px solid var(--borda); border-radius: 6px; display: flex; flex-direction: column; }
+/* Conta já marcada que não casa com a busca: fica no fim da lista e avisa que está fora da procura. */
+.lalur-acha.fora-da-busca { border-top: 2px solid var(--borda-forte); opacity: 0.75; }
+.lalur-acha.fora-da-busca .lalur-acha-nome::after { content: ' · já marcada (fora da sua busca)'; font-size: 11px; color: var(--texto-fraco); }
 .lalur-acha { display: flex; align-items: center; gap: 10px; padding: 5px 8px; border-bottom: 1px solid var(--borda); }
 .lalur-acha:last-child { border-bottom: 0; }
 .lalur-acha:hover { background: var(--primaria-clara); }
@@ -739,6 +742,12 @@ table.apres.marcando td.fixa { max-width: 600px; }
 .lalur-bt.ligado-parcial { background: var(--ambar-fundo); border-color: #e2bf62; color: #6d4700; }
 .lalur-parcial-selo { font-size: 10.5px; font-weight: 700; color: #6d4700; background: var(--ambar-fundo); border-radius: 9px; padding: 1px 6px; margin-left: 4px; }
 .apres.simples input.apres-campo.valor { width: 100%; min-width: 86px; text-align: right; padding: 2px 4px; font-size: 12.5px; }
+/* [+] que abre, conta a conta, o que está por trás de "Total das Adições" e "Total das Exclusões". */
+.abre-lalur { font: inherit; font-size: 11px; font-weight: 700; line-height: 1; width: 16px; height: 16px; padding: 0; margin-right: 2px;
+  border: 1px solid var(--borda-forte); border-radius: 4px; background: #fff; color: var(--primaria); cursor: pointer; vertical-align: 1px; }
+.abre-lalur:hover { border-color: var(--primaria); background: var(--primaria-clara); }
+table.apres.simples tr.detalhe-lalur td { background: #fafbfc; font-size: 12.5px; color: var(--texto-suave); }
+table.apres.simples tr.detalhe-lalur td.fixa { padding-left: 26px; }
 /* Valor digitado com o sinal de menos = estorno (entra do lado contrário ao Tipo naquele mês). */
 .apres.simples input.apres-campo.valor.estorno { color: #a4480f; font-weight: 600; }
 .lalur-selo { display: inline-block; font-size: 10px; font-weight: 700; line-height: 1; padding: 2px 6px; border-radius: 9px; margin-right: 6px; vertical-align: 1px; }

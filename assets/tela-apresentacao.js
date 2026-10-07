@@ -67,7 +67,7 @@
 
   // Estado da tela (continua entre redesenhos).
   const E = { codigo: null, ano: null, emp: null, rel: null, registro: null, config: {}, lugares: [], metas: [],
-    aba: 'dre-mensal', avah: true, nivel: 5, semZeradas: false, abertos: new Set(), selecao: null, marcarLalur: false, balancetes: [], fila: null, clienteMes: null, cacheCliente: null, ultimoCliente: null, casas: 2, milhar: false,
+    aba: 'dre-mensal', avah: true, nivel: 5, semZeradas: false, abertos: new Set(), lalurAberto: new Set(), selecao: null, marcarLalur: false, balancetes: [], fila: null, clienteMes: null, cacheCliente: null, ultimoCliente: null, casas: 2, milhar: false,
     dreEdicao: null, balancetesAnt: [], relAnt: null, ultimaDre: 'dre-mensal', ultimoRelatorio: 'cliente', ultimoLalur: 'lalur',
     assinaturaMes: null, assinaturaSoMes: false, assinaturaComparar: false, assinaturaNivel: 3, nivelDre: 2, dfcDetalhe: false, balancoLado: false, balancoPaisagem: false, dmplPaisagem: true };
   (function lerPreferencias() {
@@ -1060,6 +1060,34 @@
       '</tbody></table></div>';
   }
 
+  // As linhas da Parte A / do anual com o [+] que abre, conta a conta, o que está por trás de "Total das
+  // Adições" e "Total das Exclusões" (Dony, 07/10/2026: "um sinalzinho de mais e eu possa clicar e ele me
+  // traga as adições, as exclusões, linha a linha; lembrando que tem que vir acumulado ali"). O detalhe sai
+  // nas MESMAS colunas da tabela: no anual, acumulado; na Parte A, por trimestre.
+  function linhasLalur(linhas, detalhe, chave) {
+    const saida = [];
+    linhas.forEach((l) => {
+      const qual = l.campo === 'adicoes' || l.campo === 'exclusoes' ? l.campo : null;
+      const det = qual && detalhe ? (detalhe[qual] || []) : null;
+      const id = chave + ':' + qual;
+      const aberto = !!(det && det.length) && E.lalurAberto.has(id);
+      const bt = det && det.length
+        ? '<button type="button" class="abre-lalur nao-imprimir" data-lalur-abre="' + T.esc(id) + '" title="' +
+          (aberto ? 'Fechar' : 'Abrir') + ' as ' + det.length + ' conta(s) desta linha">' + (aberto ? '−' : '+') + '</button> '
+        : '';
+      saida.push({ cls: l.destaque ? 'total' : '',
+        cab: [bt + T.esc(l.rotulo) + (det && det.length ? ' <small class="suave nao-imprimir">· ' + det.length + ' conta(s)</small>' : ''),
+          '<span class="suave">' + T.esc(l.bloco) + '</span>'],
+        valores: l.valores });
+      if (!aberto) return;
+      det.forEach((d) => saida.push({ cls: 'detalhe-lalur',
+        cab: ['<span class="cod">' + T.esc(d.conta) + '</span> ' + T.esc(d.titulo || '') +
+          (d.parcial ? ' <small class="lalur-parcial-selo">✎ parcial</small>' : ''), ''],
+        valores: d.valores }));
+    });
+    return saida;
+  }
+
   // LALUR SIMULAÇÃO (Dony, 23/09/2026: "toda empresa que eu fizer o DRE simulação, eu quero que ele crie um
   // LALUR simulação, acompanhando tudo que eu fizer na DRE simulação"): o mesmo LALUR, com o lucro de cada mês
   // vindo da DRE simulada (com os ajustes dela) e as contas dos meses simulados tiradas do ano anterior com o
@@ -1073,8 +1101,7 @@
     if (!A) return '';
     // O último mês (a apuração do período) e a soma dos trimestres em destaque; os outros meses normais.
     const colAn = A.colunas.map((c) => Object.assign({}, c, { cls: c.anual || c.soma ? 'acum' : '' }));
-    const tab = tabelaSimples(['Linha', 'Bloco'], colAn, A.linhas.map((l) => ({ cls: l.destaque ? 'total' : '',
-      cab: [T.esc(l.rotulo), '<span class="suave">' + T.esc(l.bloco) + '</span>'], valores: l.valores })));
+    const tab = tabelaSimples(['Linha', 'Bloco'], colAn, linhasLalur(A.linhas, A.detalhe, (simulado ? 'sim-' : '') + 'anual'));
     const dif = A.diferenca;
     const conta = Math.abs(dif) < 1 ? 'Nos dois jeitos o IRPJ + CSLL dá o mesmo valor.'
       : dif < 0 ? 'Pela apuração <b>anual</b> o IRPJ + CSLL fica <b>' + 'R$ ' + U.formatarCentavos(Math.abs(dif)) + ' menor</b> do que somando os trimestres.'
@@ -1105,8 +1132,7 @@
     const editavel = !(op && op.impressao);
     const cor = (origem) => (origem === 'simulado' ? 'sim' : origem === 'misto' ? 'aj' : '');
     const colA = L.parteA.colunas.map((c) => Object.assign({}, c, { cls: c.soma ? 'acum' : cor(c.origem) }));
-    const parteA = tabelaSimples(['Linha', 'Bloco'], colA, L.parteA.linhas.map((l) => ({ cls: l.destaque ? 'total' : '',
-      cab: [T.esc(l.rotulo), '<span class="suave">' + T.esc(l.bloco) + '</span>'], valores: l.valores })));
+    const parteA = tabelaSimples(['Linha', 'Bloco'], colA, linhasLalur(L.parteA.linhas, L.parteA.detalhe, 'sim-parteA'));
     // O que muda do LALUR real para o simulado, nas linhas que importam.
     const doReal = (campo) => {
       const i = real.parteA.colunas.findIndex((c) => c.acumulado) >= 0 ? real.parteA.colunas.findIndex((c) => c.acumulado) : real.parteA.colunas.length - 1;
@@ -1156,7 +1182,7 @@
   function secaoLalur(op, anual) {
     const L = E.rel.lalur;
     const colA = L.parteA.colunas.map((c) => Object.assign({}, c, { cls: c.soma ? 'acum' : '' }));
-    const parteA = tabelaSimples(['Linha', 'Bloco'], colA, L.parteA.linhas.map((l) => ({ cls: l.destaque ? 'total' : '', cab: [T.esc(l.rotulo), '<span class="suave">' + T.esc(l.bloco) + '</span>'], valores: l.valores })));
+    const parteA = tabelaSimples(['Linha', 'Bloco'], colA, linhasLalur(L.parteA.linhas, L.parteA.detalhe, 'parteA'));
     const colAj = L.ajustes.colunas.map((c) => Object.assign({}, c, { cls: c.trimestre ? 'tri' : '' }));
     const editavel = !(op && op.impressao);
     // O botão fica AQUI também: quem está no LALUR é quem quer pôr ou tirar conta (antes só aparecia o recado
@@ -1312,6 +1338,13 @@
       if (lt) { marcarConta(el, lt.getAttribute('data-lalur-tirar'), null); return; }
       const lp = ev.target.closest('button[data-lalur-parcial]');
       if (lp) { alternarParcial(el, lp.getAttribute('data-lalur-parcial')); return; }
+      const la = ev.target.closest('button[data-lalur-abre]');
+      if (la) {
+        const id = la.getAttribute('data-lalur-abre');
+        if (E.lalurAberto.has(id)) E.lalurAberto.delete(id); else E.lalurAberto.add(id);
+        redesenharFolha(el);
+        return;
+      }
       const mover = ev.target.closest('button[data-mover-conta]');
       if (mover) { await escolherLinhaDaConta(el, mover.getAttribute('data-mover-conta'), mover.getAttribute('data-de')); return; }
       const ajEditar = ev.target.closest('button[data-sim-aj-editar]');
@@ -1709,10 +1742,14 @@
         campo.addEventListener('input', () => {
           const q = U.normalizarNome(campo.value);
           aparecendo = 0;
-          // A conta já marcada continua aparecendo, para ele poder tirar sem procurar de novo.
+          // A conta já marcada continua aparecendo, para ele poder tirar sem procurar de novo — mas vai para
+          // o FIM da lista, senão ela aparece em cima do que ele acabou de procurar e ele clica na errada.
           lista.querySelectorAll('.lalur-acha').forEach((l) => {
-            const fica = !q || l.getAttribute('data-busca').indexOf(q) >= 0 || escolhido.has(l.getAttribute('data-conta'));
+            const casa = !q || l.getAttribute('data-busca').indexOf(q) >= 0;
+            const fica = casa || escolhido.has(l.getAttribute('data-conta'));
             l.hidden = !fica;
+            l.style.order = casa ? '0' : '1';
+            l.classList.toggle('fora-da-busca', fica && !casa);
             if (fica) aparecendo++;
           });
           contar();
