@@ -760,6 +760,13 @@
     const irRetidoNf = (b) => ((b || {}).irRetidoNf !== undefined ? Number((b || {}).irRetidoNf) || 0 : Number((b || {}).irRetido) || 0);
     const irRetidoFin = (b) => Number((b || {}).irRetidoFin) || 0;
     const irRetidoDe = (b) => irRetidoNf(b) + irRetidoFin(b);
+    // E informado POR MÊS (Dony, 08/10/2026: "o IR tem que ser mensal, e não trimestral"): a chave é a
+    // competência do mês. O IR do trimestre é a soma dos meses dele; enquanto não houver nada informado por
+    // mês num trimestre, vale o que já estava guardado naquele trimestre (registro antigo).
+    const temIrMensal = (t) => t.meses.some((m) => { const b = parteB[m.comp]; return b && (b.irRetidoNf !== undefined || b.irRetidoFin !== undefined); });
+    const irRetidoDoTrimestre = (t) => (temIrMensal(t)
+      ? t.meses.reduce((s, m) => s + irRetidoDe(parteB[m.comp]), 0)
+      : irRetidoDe(parteB[t.id]));
 
     // Valor do ajuste de uma conta num mês (positivo = adição, negativo = exclusão).
     const ajusteNoMes = (a, m) => {
@@ -850,7 +857,7 @@
       const estimado = irpjTotal + csll - irRetido;
       const patDespesa = lista.reduce((s, m) => s + (patMes(m) || 0), 0);
       const patPotencial = patDespesa * P.patPercentual * P.patRedutor;
-      const patLimite = irpj15 * P.patLimite;
+      const patLimite = contaPAT ? irpj15 * P.patLimite : 0;
       const patAproveitavel = Math.min(patPotencial, patLimite);
       const irpjLiquido = Math.max(0, irpjTotal - irRetido - patAproveitavel);
       return { t, lucroContabil, adicoes, exclusoes, lrAntes, compPrejuizo, lrIrpj, irpj15, adicional, irpjTotal, irRetido, compBaseNegativa, baseCsll, csll, estimado,
@@ -859,7 +866,7 @@
 
     // Parte A por trimestre.
     const porTrimestre = trimestres.map((t) => {
-      const b = parteB[t.id] || {};
+      const b = Object.assign({}, parteB[t.id] || {}, { irRetido: irRetidoDoTrimestre(t), irRetidoNf: undefined, irRetidoFin: undefined });
       const lucroContabil = t.meses.reduce((s, m) => s + (m.tem ? lucroMes(m) : 0), 0);
       const adicoes = adicoesDoTrimestre(t), exclusoes = exclusoesDoTrimestre(t);
       const lrAntes = lucroContabil + adicoes - exclusoes;
@@ -876,7 +883,7 @@
       const estimado = irpjTotal + csll - irRetido;
       const patDespesa = t.meses.reduce((s, m) => s + (patMes(m) || 0), 0);
       const patPotencial = patDespesa * P.patPercentual * P.patRedutor;
-      const patLimite = irpj15 * P.patLimite;
+      const patLimite = contaPAT ? irpj15 * P.patLimite : 0;
       const patAproveitavel = Math.min(patPotencial, patLimite);
       const irpjLiquido = Math.max(0, irpjTotal - irRetido - patAproveitavel);
       return { t, lucroContabil, adicoes, exclusoes, lrAntes, compPrejuizo, lrIrpj, irpj15, adicional, irpjTotal, irRetido, compBaseNegativa, baseCsll, csll, estimado,
@@ -960,7 +967,7 @@
         prejuizoFiscal: parteB.anual && parteB.anual.prejuizoFiscal !== undefined ? parteB.anual.prejuizoFiscal : primeiro.prejuizoFiscal,
         baseNegativa: parteB.anual && parteB.anual.baseNegativa !== undefined ? parteB.anual.baseNegativa : primeiro.baseNegativa,
         irRetido: parteB.anual && parteB.anual.irRetido !== undefined ? parteB.anual.irRetido
-          : trimestres.reduce((s, t) => s + irRetidoDe(parteB[t.id]), 0),
+          : trimestres.reduce((s, t) => s + irRetidoDoTrimestre(t), 0),
       };
       // true = no acumulado, a conta de valor parcial entra com o valor digitado no mês, sem somar.
       const doAno = apurar(null, mesesComDado, bAnual, mesesComDado.length, true);
@@ -982,6 +989,8 @@
       const irRetidoDoMes = new Map();
       trimestres.forEach((t) => {
         const comDado = t.meses.filter((m) => m.tem);
+        if (temIrMensal(t)) { t.meses.forEach((m) => irRetidoDoMes.set(m.comp, irRetidoDe(parteB[m.comp]))); return; }
+        // Trimestre sem nada informado por mês: o que estava guardado nele entra no último mês com movimento.
         if (comDado.length) irRetidoDoMes.set(comDado[comDado.length - 1].comp, irRetidoDe(parteB[t.id]));
       });
       const colunasAnual = mesesComDado.map((m, i) => {
@@ -1037,17 +1046,44 @@
     };
 
     // Parte B: o que quem usa informa (por trimestre) e as compensações que a Parte A fez.
-    const colunasB = porTrimestre.map((q) => ({ id: q.t.id, rotulo: q.t.rotulo, q }));
+    // Parte B: os saldos continuam por TRIMESTRE (é o saldo que a apuração do período usa) e o IR RETIDO
+    // passa a ser POR MÊS (Dony, 08/10/2026: "o IR tem que ser mensal, e não trimestral"). Cada linha diz em
+    // quais colunas ela é digitável, porque nesta tabela isso muda de linha para linha.
+    const colunasB = meses.map((m) => ({ id: m.comp, rotulo: m.rotulo, mes: m, falta: !m.tem }))
+      .concat(porTrimestre.map((q) => ({ id: q.t.id, rotulo: q.t.rotulo, q })));
+    const soTrimestre = (f) => colunasB.map((c) => (c.q ? f(c) : null));
+    // Quando o trimestre não tem nada informado por mês (registro antigo), o valor que estava guardado nele
+    // aparece no ÚLTIMO mês com movimento — assim a coluna do mês sempre soma com a do trimestre.
+    const irPorMes = (f) => {
+      const mapa = new Map();
+      trimestres.forEach((t) => {
+        if (temIrMensal(t)) { t.meses.forEach((m) => mapa.set(m.comp, f(parteB[m.comp]))); return; }
+        const comDado = t.meses.filter((m) => m.tem);
+        if (comDado.length) mapa.set(comDado[comDado.length - 1].comp, f(parteB[t.id]));
+      });
+      return mapa;
+    };
+    const porMesEDoTrimestre = (f) => {
+      const mapa = irPorMes(f);
+      return colunasB.map((c) => (c.mes ? (mapa.get(c.id) || 0) : c.q.t.meses.reduce((s, m) => s + (mapa.get(m.comp) || 0), 0)));
+    };
     const parteBTabela = {
-      colunas: colunasB.map((c) => ({ id: c.id, rotulo: c.rotulo })),
+      colunas: colunasB.map((c) => ({ id: c.id, rotulo: c.rotulo, mes: !!c.mes, trimestre: !!c.q, falta: !!c.falta })),
       linhas: [
-        { campo: 'prejuizoFiscal', rotulo: 'Prejuízo fiscal acumulado disponível IRPJ', editavel: true, obs: 'Informar o saldo disponível para compensação', valores: colunasB.map((c) => Number((parteB[c.id] || {}).prejuizoFiscal) || 0) },
-        { campo: 'baseNegativa', rotulo: 'Base negativa acumulada disponível CSLL', editavel: true, obs: 'Informar o saldo disponível para compensação', valores: colunasB.map((c) => Number((parteB[c.id] || {}).baseNegativa) || 0) },
-        { campo: 'compPrejuizo', rotulo: 'Compensação efetiva IRPJ', obs: 'Limitada na Parte A pelo menor entre o saldo disponível e 30% do lucro real antes da compensação', valores: colunasB.map((c) => c.q.compPrejuizo) },
-        { campo: 'compBaseNegativa', rotulo: 'Compensação efetiva CSLL', obs: 'Limitada na Parte A pelo menor entre o saldo disponível e 30% da base antes da compensação', valores: colunasB.map((c) => c.q.compBaseNegativa) },
-        { campo: 'irRetidoNf', rotulo: 'IR retido sobre notas fiscais', editavel: true, obs: 'Informar o IR retido na fonte nas notas de serviço do trimestre', valores: colunasB.map((c) => irRetidoNf(parteB[c.id])) },
-        { campo: 'irRetidoFin', rotulo: 'IR retido sobre rendimentos financeiros', editavel: true, obs: 'Informar o IR retido nas aplicações financeiras do trimestre', valores: colunasB.map((c) => irRetidoFin(parteB[c.id])) },
-        { campo: 'irRetido', rotulo: 'IR retido total utilizado', obs: 'Soma dos dois acima; é o que a Parte A abate do IRPJ', valores: colunasB.map((c) => irRetidoDe(parteB[c.id])) },
+        { campo: 'prejuizoFiscal', rotulo: 'Prejuízo fiscal acumulado disponível IRPJ', obs: 'Informar o saldo disponível para compensação (por trimestre)',
+          editaveis: colunasB.map((c) => !!c.q), valores: soTrimestre((c) => Number((parteB[c.id] || {}).prejuizoFiscal) || 0) },
+        { campo: 'baseNegativa', rotulo: 'Base negativa acumulada disponível CSLL', obs: 'Informar o saldo disponível para compensação (por trimestre)',
+          editaveis: colunasB.map((c) => !!c.q), valores: soTrimestre((c) => Number((parteB[c.id] || {}).baseNegativa) || 0) },
+        { campo: 'compPrejuizo', rotulo: 'Compensação efetiva IRPJ', obs: 'Limitada na Parte A pelo menor entre o saldo disponível e 30% do lucro real antes da compensação',
+          editaveis: colunasB.map(() => false), valores: soTrimestre((c) => c.q.compPrejuizo) },
+        { campo: 'compBaseNegativa', rotulo: 'Compensação efetiva CSLL', obs: 'Limitada na Parte A pelo menor entre o saldo disponível e 30% da base antes da compensação',
+          editaveis: colunasB.map(() => false), valores: soTrimestre((c) => c.q.compBaseNegativa) },
+        { campo: 'irRetidoNf', rotulo: 'IR retido sobre notas fiscais', obs: 'Informar MÊS A MÊS o IR retido na fonte nas notas de serviço',
+          editaveis: colunasB.map((c) => !!c.mes), valores: porMesEDoTrimestre(irRetidoNf) },
+        { campo: 'irRetidoFin', rotulo: 'IR retido sobre rendimentos financeiros', obs: 'Informar MÊS A MÊS o IR retido nas aplicações financeiras',
+          editaveis: colunasB.map((c) => !!c.mes), valores: porMesEDoTrimestre(irRetidoFin) },
+        { campo: 'irRetido', rotulo: 'IR retido total utilizado', obs: 'Soma dos dois acima; é o que a Parte A abate do IRPJ',
+          editaveis: colunasB.map(() => false), valores: porMesEDoTrimestre(irRetidoDe) },
       ],
     };
 

@@ -1240,15 +1240,19 @@
     const PT = (anual && L.patAnual) ? L.patAnual : L.pat;
     const colPat = PT.colunas.map((c) => Object.assign({}, c, { cls: c.anual || c.soma || (!anual && c.lalur) ? 'acum' : '' }));
     const pat = tabelaSimples(['Descrição', 'Linha'], colPat, PT.linhas.map((l) => ({ cab: [T.esc(l.rotulo), l.letra], valores: l.valores })));
+    // Cada linha da Parte B diz em quais colunas é digitável: os saldos por trimestre, o IR retido por MÊS.
+    const podeDigitar = (l, k) => (l.editaveis ? !!l.editaveis[k] : !!l.editavel);
     const parteB = '<div class="apres-caixa"><table class="apres simples parte-b"><thead><tr><th class="fixa">Controle</th>' +
-      L.parteB.colunas.map((c) => '<th class="num per">' + T.esc(c.rotulo) + '</th>').join('') + '<th>Observação</th></tr></thead><tbody>' +
-      L.parteB.linhas.map((l) => '<tr class="' + (l.editavel ? 'editavel' : '') + '"><td class="fixa">' + T.esc(l.rotulo) + '</td>' +
-        l.valores.map((v, k) => '<td class="num">' + (l.editavel && editavel
+      L.parteB.colunas.map((c) => '<th class="num per' + (c.trimestre ? ' tri' : '') + (c.falta ? ' falta' : '') + '">' + T.esc(c.rotulo) + '</th>').join('') +
+      '<th>Observação</th></tr></thead><tbody>' +
+      L.parteB.linhas.map((l) => '<tr class="' + (l.editaveis && l.editaveis.some(Boolean) ? 'editavel' : (l.editavel ? 'editavel' : '')) + '"><td class="fixa">' + T.esc(l.rotulo) + '</td>' +
+        l.valores.map((v, k) => '<td class="num' + (L.parteB.colunas[k].trimestre ? ' tri' : '') + '">' + (podeDigitar(l, k) && editavel
           ? '<input class="apres-campo valor" inputmode="decimal" data-parte-b="' + T.esc(L.parteB.colunas[k].id + '|' + l.campo) + '" value="' + (v ? U.formatarCentavos(Math.round(v)) : '') + '" placeholder="0,00">'
           : dinheiro(v)) + '</td>').join('') +
         '<td class="txt pequeno suave">' + T.esc(l.obs || '') + '</td></tr>').join('') + '</tbody></table></div>' +
       (editavel ? '<div class="linha-flex" style="margin-top:8px"><button type="button" class="botao primario pequeno" data-opcao="guardar-parte-b">💾 Guardar a Parte B</button>' +
-        '<span class="suave pequeno">Os valores entram na Parte A na hora (compensação limitada a 30% e IR retido abatido do IRPJ).</span></div>' : '');
+        '<span class="suave pequeno">Os saldos de prejuízo e base negativa são por <b>trimestre</b>; o <b>IR retido é por mês</b>, e a coluna do trimestre mostra a soma dos meses dele. ' +
+        'Os valores entram na Parte A na hora (compensação limitada a 30% e IR retido abatido do IRPJ).</span></div>' : '');
     const premissas = '<div class="apres-caixa"><table class="apres simples premissas"><thead><tr><th class="fixa">Tema</th><th>Premissa usada</th><th>Fonte / Base</th><th>Status</th><th>Comentário</th></tr></thead><tbody>' +
       L.premissas.map((p) => '<tr><td class="fixa">' + T.esc(p[0]) + '</td>' + p.slice(1).map((x) => '<td class="txt">' + T.esc(x) + '</td>').join('') + '</tr>').join('') + '</tbody></table></div>';
     // UMA apuração por aba (Dony, 07/10/2026: "tem que ter LALUR trimestral, só com o trimestral, LALUR anual,
@@ -1267,7 +1271,15 @@
         : 'Ajustes mensais e trimestrais <small>as contas marcadas na DRE ou no balancete · valor positivo = adição · valor negativo = exclusão</small>') + '</h3>' + ajustes +
       '<h3 class="apres-sub">Incentivo fiscal PAT <small>conta ' + T.esc(L.contaPAT || '—') + (L.pat.titulo ? ' · ' + T.esc(L.pat.titulo) : '') +
       ' · menor entre o incentivo potencial e 3,6% do IRPJ principal (15%)' +
-      (anual ? ' · nas mesmas colunas da apuração acima: a linha <b>D</b> é o que entra no <b>IRPJ líquido após PAT</b>' : '') + '</small></h3>' + pat +
+      (anual ? ' · nas mesmas colunas da apuração acima: a linha <b>D</b> é o que entra no <b>IRPJ líquido após PAT</b>' : '') + '</small></h3>' +
+      // Sem conta do PAT escolhida não há incentivo nenhum — e era isso que confundia: a tela mostrava o
+      // LIMITE (3,6% do IRPJ) numa linha, sem dizer que o aproveitável era zero (Dony, 08/10/2026: "é só
+      // subtrair o PAT do valor do IRPJ" — os 2.049,79 que ele viu eram o limite, não o incentivo).
+      (!L.contaPAT
+        ? '<div class="aviso ambar" style="margin:0 0 10px"><span class="icone-aviso">⚠️</span><div><b>Nenhuma conta do PAT escolhida</b>, por isso o incentivo está zerado e <b>nada foi abatido do IRPJ</b>. ' +
+          'Escolha a conta da despesa de alimentação do trabalhador' + (editavel ? ' em <button type="button" class="botao pequeno" data-opcao="editar-ajustes">📋 Lista de ajustes e conta do PAT</button>' : '') + '.</div></div>'
+        : (L.pat.noBalancete ? '' : '<div class="aviso ambar" style="margin:0 0 10px"><span class="icone-aviso">⚠️</span><div>A conta do PAT <b>' + T.esc(L.contaPAT) +
+          '</b> não aparece nos balancetes carregados: o incentivo fica zerado.</div></div>')) + pat +
       '<h3 class="apres-sub">LALUR Parte B: controles fiscais <small>saldos de prejuízo fiscal e base negativa (zerados até você informar) e IR retido</small></h3>' + parteB +
       '<h3 class="apres-sub">Premissas, fontes e pontos de validação</h3>' + premissas;
   }
@@ -2869,13 +2881,14 @@
   async function guardarParteB(el) {
     const parteB = JSON.parse(JSON.stringify(E.config.parteB || {}));
     let invalido = null;
+    // A chave é o trimestre (saldos) ou a competência do mês (IR retido, desde 08/10/2026).
     el.querySelectorAll('input[data-parte-b]').forEach((inp) => {
-      const [trimestre, campo] = inp.getAttribute('data-parte-b').split('|');
+      const [onde, campo] = inp.getAttribute('data-parte-b').split('|');
       const txt = inp.value.trim();
       const n = txt ? U.paraNumero(txt) : 0;
       if (n === null) { invalido = inp; return; }
-      if (!parteB[trimestre]) parteB[trimestre] = {};
-      parteB[trimestre][campo] = U.centavos(n);
+      if (!parteB[onde]) parteB[onde] = {};
+      parteB[onde][campo] = U.centavos(n);
     });
     if (invalido) { invalido.focus(); T.avisoRapido('Valor que não é número: "' + invalido.value + '".', 'erro'); return; }
     try {
