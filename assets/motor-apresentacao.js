@@ -945,6 +945,7 @@
     // escolhendo um regime ou o outro (o adicional de 10% e a trava de 30% da compensação mudam de conta).
     const mesesComDado = meses.filter((m) => m.tem);
     let anual = null;
+    let patAnual = null; // a tabela do PAT com as colunas da apuração anual (ver mais abaixo)
     if (mesesComDado.length) {
       const primeiro = parteB[(trimestres[0] || {}).id] || {};
       // No anual, o prejuízo a compensar é o saldo do COMEÇO DO ANO (o que foi informado no 1º trimestre) e o
@@ -1000,6 +1001,20 @@
         diferenca: doAno.total - soma.total,
         irRetido: bAnual.irRetido, prejuizoFiscal: Number(bAnual.prejuizoFiscal) || 0, baseNegativa: Number(bAnual.baseNegativa) || 0,
       };
+      // A tabela do PAT da aba anual precisa ter as MESMAS colunas da apuração de lá. Com as colunas de
+      // trimestre (as da Parte A), o PAT que aparecia embaixo não era o que entrou no "IRPJ líquido após
+      // PAT" da coluna do mês — e nas colunas de mês o limite e o aproveitável saíam vazios
+      // (Dony, 08/10/2026: "lá no IRPJ líquido após PAT não tá batendo o valor do PAT, tá errado o IRPJ").
+      patAnual = {
+        conta: contaPAT, titulo: indice.get(contaPAT) ? indice.get(contaPAT).titulo : '', noBalancete: !!indice.get(contaPAT),
+        colunas: visiveis.map((c) => ({ id: c.id, rotulo: c.rotulo, anual: !!c.anual, soma: !!c.soma, lalur: true })),
+        linhas: [
+          ['A', 'Despesa PAT elegível - conta ' + contaPAT, 'patDespesa'],
+          ['B', 'Incentivo potencial PAT = despesa elegível x 15% x 90%', 'patPotencial'],
+          ['C', 'Limite PAT = 3,6% do IRPJ principal (15%)', 'patLimite'],
+          ['D', 'Incentivo PAT aproveitável = menor entre B e C', 'patAproveitavel'],
+        ].map(([letra, rotulo, campo]) => ({ letra, rotulo, campo, valores: visiveis.map((c) => c[campo]) })),
+      };
     }
 
     // PAT (tabela própria): os meses, os trimestres, o semestre e o acumulado.
@@ -1049,7 +1064,7 @@
       parametros: P, contaPAT,
       ajustes: { colunas: colunasAjustes.map((c) => ({ id: c.id, rotulo: c.rotulo, trimestre: !!c.trimestre, falta: !!c.falta })), linhas: ajustes, adicoes: adicoesCol, exclusoes: exclusoesCol },
       ajustesAnual,
-      pat, parteA, anual, parteB: parteBTabela, premissas: PREMISSAS, porTrimestre,
+      pat, patAnual, parteA, anual, parteB: parteBTabela, premissas: PREMISSAS, porTrimestre,
       ajustesSemConta: ajustes.filter((a) => !a.noBalancete).map((a) => a.conta),
     };
   }

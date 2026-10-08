@@ -1236,8 +1236,10 @@
           'O lado é o da coluna <b>Tipo</b>; para <b>estornar</b> num mês, digite o valor com o <b>sinal de menos</b> (numa conta de Adição, <b>−500,00</b> entra como exclusão naquele mês). ' +
           'Aqui a regra dinâmica não manda: quem diz o quanto e de que lado entra é você.</span></div>'
         : '');
-    const colPat = L.pat.colunas.map((c) => Object.assign({}, c, { cls: c.lalur ? 'acum' : '' }));
-    const pat = tabelaSimples(['Descrição', 'Linha'], colPat, L.pat.linhas.map((l) => ({ cab: [T.esc(l.rotulo), l.letra], valores: l.valores })));
+    // Na aba ANUAL o PAT sai nas colunas da apuração de lá: é esse valor que entra no IRPJ líquido após PAT.
+    const PT = (anual && L.patAnual) ? L.patAnual : L.pat;
+    const colPat = PT.colunas.map((c) => Object.assign({}, c, { cls: c.anual || c.soma || (!anual && c.lalur) ? 'acum' : '' }));
+    const pat = tabelaSimples(['Descrição', 'Linha'], colPat, PT.linhas.map((l) => ({ cab: [T.esc(l.rotulo), l.letra], valores: l.valores })));
     const parteB = '<div class="apres-caixa"><table class="apres simples parte-b"><thead><tr><th class="fixa">Controle</th>' +
       L.parteB.colunas.map((c) => '<th class="num per">' + T.esc(c.rotulo) + '</th>').join('') + '<th>Observação</th></tr></thead><tbody>' +
       L.parteB.linhas.map((l) => '<tr class="' + (l.editavel ? 'editavel' : '') + '"><td class="fixa">' + T.esc(l.rotulo) + '</td>' +
@@ -1263,7 +1265,9 @@
         ? 'Adições e exclusões acumuladas <small>as contas marcadas na DRE ou no balancete · cada coluna acumula de janeiro até o mês, igual à apuração acima · valor positivo = adição · valor negativo = exclusão · ' +
           'na conta de <b>valor parcial</b> o campo é o valor <b>do mês</b>, que é você quem digita — no total da coluna ela entra pela soma dos meses</small>'
         : 'Ajustes mensais e trimestrais <small>as contas marcadas na DRE ou no balancete · valor positivo = adição · valor negativo = exclusão</small>') + '</h3>' + ajustes +
-      '<h3 class="apres-sub">Incentivo fiscal PAT <small>conta ' + T.esc(L.contaPAT || '—') + (L.pat.titulo ? ' · ' + T.esc(L.pat.titulo) : '') + ' · menor entre o incentivo potencial e 3,6% do IRPJ principal (15%)</small></h3>' + pat +
+      '<h3 class="apres-sub">Incentivo fiscal PAT <small>conta ' + T.esc(L.contaPAT || '—') + (L.pat.titulo ? ' · ' + T.esc(L.pat.titulo) : '') +
+      ' · menor entre o incentivo potencial e 3,6% do IRPJ principal (15%)' +
+      (anual ? ' · nas mesmas colunas da apuração acima: a linha <b>D</b> é o que entra no <b>IRPJ líquido após PAT</b>' : '') + '</small></h3>' + pat +
       '<h3 class="apres-sub">LALUR Parte B: controles fiscais <small>saldos de prejuízo fiscal e base negativa (zerados até você informar) e IR retido</small></h3>' + parteB +
       '<h3 class="apres-sub">Premissas, fontes e pontos de validação</h3>' + premissas;
   }
