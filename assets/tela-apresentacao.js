@@ -1187,7 +1187,7 @@
     // trimestre (Dony, 08/10/2026: "se a apuração é anual, para que separar por trimestral?"). Os campos do
     // valor parcial só existem na aba trimestral, onde a coluna é o mês de verdade.
     const AJ = (anual && L.ajustesAnual) ? L.ajustesAnual : L.ajustes;
-    const digitavel = !anual;
+    const digitavel = !anual; // ligar/desligar o valor parcial é na aba trimestral; os CAMPOS valem nas duas
     const colAj = AJ.colunas.map((c) => Object.assign({}, c, { cls: c.trimestre ? 'tri' : '' }));
     const editavel = !(op && op.impressao);
     // O botão fica AQUI também: quem está no LALUR é quem quer pôr ou tirar conta (antes só aparecia o recado
@@ -1222,7 +1222,7 @@
       ]), (l, v, k, col) => {
         // Na conta de valor parcial, o mês vira campo: ele digita o pedaço, e o movimento inteiro fica de dica.
         // A coluna do mês vem com `id` = competência e `trimestre: false`; a do trimestre continua só somando.
-        if (!editavel || !digitavel || !l.parcial || col.trimestre || col.falta) return dinheiro(v);
+        if (!editavel || !l.parcial || col.trimestre || col.falta) return dinheiro(v);
         const cheio = l.cheio ? l.cheio.get(col.id) : null;
         const digitado = Number((l.digitado || {})[col.id]) || 0;
         return '<input class="apres-campo valor' + (digitado < 0 ? ' estorno' : '') + '" inputmode="decimal" data-ajuste-valor="' + T.esc(l.conta + '|' + col.id) + '"' +
@@ -1230,7 +1230,7 @@
           ' title="Movimento inteiro da conta em ' + T.esc(col.rotulo) + ': ' + T.esc(U.formatarCentavos(Math.abs(Math.round(cheio || 0)))) +
           '. Valor negativo estorna: entra do lado contrário ao Tipo neste mês.">';
       }) +
-      (editavel && digitavel && L.ajustes.linhas.some((a) => a.parcial)
+      (editavel && AJ.linhas.some((a) => a.parcial)
         ? '<div class="linha-flex nao-imprimir" style="margin-top:8px"><button type="button" class="botao primario pequeno" data-opcao="guardar-valores-ajuste">💾 Guardar os valores digitados</button>' +
           '<span class="suave pequeno">Nas contas de <b>valor parcial</b> entra só o que você digitar — mês vazio não entra. Passe o mouse no campo para ver o movimento inteiro da conta naquele mês. ' +
           'O lado é o da coluna <b>Tipo</b>; para <b>estornar</b> num mês, digite o valor com o <b>sinal de menos</b> (numa conta de Adição, <b>−500,00</b> entra como exclusão naquele mês). ' +
@@ -1260,7 +1260,8 @@
         : '1T, 2T, 3T, 4T e o acumulado do ano, a partir da DRE; adições e exclusões pela lista de ajustes; incentivo PAT e Parte B.') +
       (anual ? blocoLalurAnual(L) : parteA) + outraAba +
       '<h3 class="apres-sub">' + (anual
-        ? 'Adições e exclusões acumuladas <small>as contas marcadas na DRE ou no balancete · cada coluna acumula de janeiro até o mês, igual à apuração acima · valor positivo = adição · valor negativo = exclusão · para digitar valor parcial, vá na aba <b>LALUR trimestral</b></small>'
+        ? 'Adições e exclusões acumuladas <small>as contas marcadas na DRE ou no balancete · cada coluna acumula de janeiro até o mês, igual à apuração acima · valor positivo = adição · valor negativo = exclusão · ' +
+          'na conta de <b>valor parcial</b> o campo é o valor <b>do mês</b>, que é você quem digita — no total da coluna ela entra pela soma dos meses</small>'
         : 'Ajustes mensais e trimestrais <small>as contas marcadas na DRE ou no balancete · valor positivo = adição · valor negativo = exclusão</small>') + '</h3>' + ajustes +
       '<h3 class="apres-sub">Incentivo fiscal PAT <small>conta ' + T.esc(L.contaPAT || '—') + (L.pat.titulo ? ' · ' + T.esc(L.pat.titulo) : '') + ' · menor entre o incentivo potencial e 3,6% do IRPJ principal (15%)</small></h3>' + pat +
       '<h3 class="apres-sub">LALUR Parte B: controles fiscais <small>saldos de prejuízo fiscal e base negativa (zerados até você informar) e IR retido</small></h3>' + parteB +

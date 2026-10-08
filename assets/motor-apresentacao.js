@@ -1025,7 +1025,12 @@
       const colunas = mesesComDado.map((m, i) => ({ id: m.comp, rotulo: rotuloAcumuladoAteOMes(mesesComDado, i), acumulado: i > 0 }));
       return {
         colunas,
-        linhas: ajustes.map((a) => Object.assign({}, a, { valores: listas.map((l) => sobraNoPeriodo(a, l)) })),
+        // A conta de VALOR PARCIAL não acumula: o valor dela é o do MÊS, que é o que ele digita (Dony,
+        // 08/10/2026: "quando for valor parcial não tem que ficar somando um mês com o outro… ali eu que
+        // digito"). No total da coluna ela entra pela soma dos meses, como as outras.
+        linhas: ajustes.map((a) => Object.assign({}, a, {
+          valores: a.regra === 'parcial' ? mesesComDado.map((m) => a.porMes.get(m.comp)) : listas.map((l) => sobraNoPeriodo(a, l)),
+        })),
         adicoes: listas.map((l) => ajustes.reduce((s, a) => s + Math.max(0, sobraNoPeriodo(a, l)), 0)),
         exclusoes: listas.map((l) => ajustes.reduce((s, a) => s + Math.max(0, -sobraNoPeriodo(a, l)), 0)),
       };
