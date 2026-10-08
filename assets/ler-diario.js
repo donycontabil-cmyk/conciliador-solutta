@@ -99,7 +99,11 @@
   };
   function cabecalhoPorBloco(linha) {
     const ch = (linha || []).map(chave);
-    if (ch.indexOf('saldo') >= 0) return null;
+    const acharCh = (lista) => ch.findIndex((x) => lista.indexOf(x) >= 0);
+    // Normalmente "Saldo" quer dizer que não é diário (é balancete ou razão). Mas o relatório impresso como
+    // FICHA RAZÃO traz o saldo corrido ao lado e continua sendo o diário (Dony, 08/10/2026, a Jotec): ali
+    // quem prova o desenho é a coluna de CONTRA PARTIDA.
+    if (ch.indexOf('saldo') >= 0 && acharCh(NOMES_BLOCO.contrapartida) < 0) return null;
     const achar = (lista) => ch.findIndex((x) => lista.indexOf(x) >= 0);
     const debito = achar(NOMES_PERNA.debito), credito = achar(NOMES_PERNA.credito);
     const historico = achar(NOMES_PERNA.historico);
@@ -114,12 +118,28 @@
       lote: achar(NOMES_PERNA.lote), documento: achar(NOMES_PERNA.documento), reduzidoContra: achar(NOMES_BLOCO.reduzidoContra) };
     const iData = achar(NOMES.data);
     c.data = iData;
-    c.semColunaDeData = iData < 0;
+    // A data pode vir partida em TRÊS COLUNAS — Dia, Mês, Ano (Dony, 08/10/2026, a Jotec).
+    if (iData < 0) {
+      const dia = ch.indexOf('dia'), mes = ch.indexOf('mes'), ano = ch.indexOf('ano');
+      if (dia >= 0 && mes >= 0 && ano >= 0) c.dma = { dia, mes, ano };
+    }
+    c.semColunaDeData = iData < 0 && !c.dma;
     c.identificacao = c.lote >= 0 ? [c.lote] : [];
     return c;
   }
+  // A data de uma linha quando ela vem em Dia, Mês e Ano separados.
+  function dataDeDMA(l, c) {
+    if (!c || !c.dma) return null;
+    const n = (k) => { const v = String(l[k] === null || l[k] === undefined ? '' : l[k]).trim(); return /^\d{1,4}$/.test(v) ? Number(v) : null; };
+    const d = n(c.dma.dia), m = n(c.dma.mes), a = n(c.dma.ano);
+    if (!d || !m || !a || d > 31 || m > 12 || a < 1900) return null;
+    return a + '-' + String(m).padStart(2, '0') + '-' + String(d).padStart(2, '0');
+  }
   // A linha "Conta: ASSOC BRASILEIRA…  2.01.05.05.05.0152  F00152" (às vezes partida em várias células).
-  const LINHA_DE_CONTA = /^\s*conta\s*:?\s*(.+)$/i;
+  // Também "Conta Contábil: 1.1.1.01.0001 - Caixa    Saldo inicial: 976,45" (Dony, 08/10/2026, a Jotec):
+  // o "Saldo inicial" é cortado antes, senão ele vira parte do nome — ou, pior, é lido como a classificação.
+  const LINHA_DE_CONTA = /^\s*conta(?:\s+cont[áa]bil)?\s*:?\s*(.+)$/i;
+  const SALDO_INICIAL = /\s*saldo\s+inicial\s*:?.*$/i;
   // Sem a palavra "Conta:", a linha do bloco é "237 - 1.3.4.01.006 - Softwares" ou "1.3.4.01.006 - Softwares":
   // reduzido (opcional), CLASSIFICAÇÃO com pelo menos três pedaços, e o nome (Dony, 02/10/2026, a UDLOG).
   // O padrão é fechado de propósito: a continuação de um histórico (" FRANCO 37368676893 - Matriz") não casa.
@@ -136,7 +156,7 @@
       if (!s) return null;
       return { conta: s[2], nome: s[3].trim(), reduzido: s[1] || '' };
     }
-    const resto = m[1];
+    const resto = m[1].replace(SALDO_INICIAL, '');
     const achados = resto.match(/\d+(?:\.\d+){2,}/g);   // a classificação tem pelo menos três pedaços
     if (!achados || !achados.length) return null;
     const conta = achados[achados.length - 1];
@@ -191,8 +211,35 @@
   // e os valores caem uma casa antes. Lendo pelo cabeçalho, o crédito entrava como débito e o diário não
   // fechava (Dony, 02/10/2026: "uma colaboradora não conseguiu ler esse diário"). Aqui o programa olha ONDE
   // OS VALORES ESTÃO e, se o par de colunas vizinhas for outro, usa o que os dados mostram.
+  // O rótulo numa célula e o valor na de ao lado (células mescladas na impressão): se a coluna que o
+  // cabeçalho indica não traz número nenhum e uma vizinha à direita traz, o valor é o da vizinha
+  // (Dony, 08/10/2026, a Jotec: "Débito" na coluna 15 e os valores na 16, "Crédito" na 19 e os valores na 20).
+  function encostarNoValor(linhas, r, c) {
+    const quantos = new Map();
+    let olhadas = 0;
+    for (let i = r + 1; i < linhas.length && olhadas < 600; i++) {
+      const l = linhas[i];
+      if (!l || contaDoBloco(l) || dataDoDia(l)) continue;
+      const primeira = l.find((x) => !(x === null || x === undefined || String(x).trim() === ''));
+      if (primeira === undefined || LINHA_DE_TOTAL.test(String(primeira))) continue;
+      let achou = false;
+      for (let k = 0; k < l.length; k++) { if (valorDe(l[k]) !== null) { quantos.set(k, (quantos.get(k) || 0) + 1); achou = true; } }
+      if (achou) olhadas++;
+    }
+    if (olhadas < 10) return c;
+    const encostada = (k) => {
+      if (k < 0 || (quantos.get(k) || 0) >= 3) return k;
+      for (let d = 1; d <= 2; d++) if ((quantos.get(k + d) || 0) >= 3) return k + d;
+      return k;
+    };
+    const deb = encostada(c.debito), cre = encostada(c.credito);
+    if (deb === c.debito && cre === c.credito) return c;
+    return Object.assign({}, c, { debito: deb, credito: cre, encostada: true });
+  }
+
   function calibrarPorBloco(linhas, r, c) {
-    if (c.contrapartida >= 0) return c;   // com contrapartida, o cabeçalho já se prova sozinho (a Omega)
+    if (c.contrapartida >= 0) return encostarNoValor(linhas, r, c); // com contrapartida o cabeçalho se prova
+    //                                                                 sozinho (a Omega); só o valor pode escorregar
     const onde = new Map();
     let olhadas = 0;
     for (let i = r + 1; i < linhas.length && olhadas < 500; i++) {
@@ -428,6 +475,14 @@
         if (!l) continue;
         const texto = l.map((x) => (x === null || x === undefined ? '' : String(x))).join(' ');
         if (!empresa) { const m = texto.match(/Empresa:\s*(?:\d+\s*-\s*)?(.+?)(?:\s{2,}|$)/); if (m) empresa = m[1].replace(/\s+/g, ' ').trim(); }
+        // Há relatório que não escreve "Empresa:": o nome vem sozinho numa célula do cabeçalho, antes do
+        // primeiro lançamento (Dony, 08/10/2026, a Jotec). Vale a célula mais longa que acaba em LTDA/S.A./ME.
+        if (!empresa && !c && r < 12) {
+          const nome = (l || []).map((x) => String(x === null || x === undefined ? '' : x).replace(/\s+/g, ' ').trim())
+            .filter((x) => x.length >= 12 && /\b(LTDA|S\.?A\.?|EIRELI|ME|EPP|MEI)\b\.?$/i.test(x) && !/^(CNPJ|FOLHA|P[ÁA]GINA)/i.test(x))
+            .sort((a, b) => b.length - a.length)[0];
+          if (nome) empresa = nome;
+        }
         if (!cnpj) { const m = texto.match(/CNPJ\s*:?\s*(\d{2}\.?\d{3}\.?\d{3}\/?\d{4}-?\d{2})/i); if (m && Util.cnpjValido(Util.limparCnpj(m[1]))) cnpj = Util.limparCnpj(m[1]); }
         const cab = naOrdem(l, opc.desenho);
         if (cab) {
@@ -459,21 +514,33 @@
         const primeira = l.find((x) => !vazio(x));
         if (primeira !== undefined && LINHA_DE_TOTAL.test(String(primeira))) {
           if (/total\s+(do\s+)?dia/i.test(String(primeira)) && data) {
-            const numeros = l.map((x) => (vazio(x) || /^\s*(total|cre|deb)/i.test(String(x)) ? null : valorDe(x))).filter((x) => x !== null);
-            if (numeros.length >= 2) totaisDoDia.push({ data: data.texto, debito: numeros[0], credito: numeros[numeros.length - 1] });
+            // Com as colunas de valor conhecidas (por bloco ou por perna), o total do dia sai delas. Pegar
+            // "o primeiro e o último número da linha" fazia o programa somar o NÚMERO DO DIA como se fosse
+            // dinheiro: "Total do Dia | 8 | : | 300 | 0 | 1.276,45" virava 8,00 de débito
+            // (Dony, 08/10/2026, a Jotec).
+            const porColuna = (c.porBloco || c.porPerna) && c.debito >= 0 && c.credito >= 0;
+            const vd = porColuna ? valorDe(l[c.debito]) : null;
+            const vc = porColuna ? valorDe(l[c.credito]) : null;
+            if (porColuna && (vd !== null || vc !== null)) totaisDoDia.push({ data: data.texto, debito: vd || 0, credito: vc || 0 });
+            else if (!porColuna) {
+              const numeros = l.map((x) => (vazio(x) || /^\s*(total|cre|deb)/i.test(String(x)) ? null : valorDe(x))).filter((x) => x !== null);
+              if (numeros.length >= 2) totaisDoDia.push({ data: data.texto, debito: numeros[0], credito: numeros[numeros.length - 1] });
+            }
           }
           linhasIgnoradas++;
           ultima = null;
           continue;
         }
-        const d = c.data >= 0 ? Util.lerData(l[c.data]) : null;
+        // A data vem da coluna Data ou, quando o relatório a parte em três, de Dia + Mês + Ano (a Jotec).
+        const d = c.data >= 0 ? Util.lerData(l[c.data]) : (c.dma ? Util.lerData(dataDeDMA(l, c)) : null);
         const partida = c.porBloco ? lerBloco(l, c, bloco) : c.porPerna ? lerPerna(l, c) : lerPartida(l, c);
         const debito = partida.debito, credito = partida.credito;
         const v = partida.valor;
         // Linha só com texto no histórico, depois de uma partida: a continuação do histórico (o relatório quebra o
         // histórico longo em mais de uma linha). Junta com espaço.
         const hist = limparHistorico(l[c.historico]);
-        if (ultima && hist && (c.data < 0 || vazio(l[c.data])) && l.every((x, k) => k === c.historico || vazio(x)) && !/^(di[aá]rio|empresa|total|transporte|p[aá]gina|folha)\b/i.test(hist)) {
+        const semData = c.data >= 0 ? vazio(l[c.data]) : (c.dma ? !dataDeDMA(l, c) : true);
+        if (ultima && hist && semData && l.every((x, k) => k === c.historico || vazio(x)) && !/^(di[aá]rio|empresa|total|transporte|p[aá]gina|folha)\b/i.test(hist)) {
           ultima.historico = (ultima.historico + ' ' + hist).trim();
           continue;
         }
@@ -543,10 +610,20 @@
     // CONFERÊNCIA COM O TOTAL DO DIA que o relatório imprime: cada dia lido tem que dar o mesmo número.
     const porDia = new Map();
     lancamentos.forEach((x) => { const a = porDia.get(x.data) || { debito: 0, credito: 0 }; if (x.debito) a.debito += x.valor; if (x.credito) a.credito += x.valor; porDia.set(x.data, a); });
-    const diasConferidos = [];
+    // O relatório pode imprimir o "Total do Dia" UMA VEZ POR DIA (a Omega, organizada por dia) ou UMA VEZ
+    // POR CONTA dentro do dia, quando ele é uma ficha razão (Dony, 08/10/2026, a Jotec). No segundo caso a
+    // mesma data aparece várias vezes, e o total do dia do diário é a SOMA delas — comparando um a um, o
+    // programa avisava que 659 dias não batiam, quando na verdade batiam todos.
+    const impressoPorDia = new Map();
     totaisDoDia.forEach((t) => {
-      const lido = porDia.get(t.data) || { debito: 0, credito: 0 };
-      diasConferidos.push({ data: t.data, impresso: t.debito, lido: lido.debito, confere: t.debito === lido.debito });
+      const a = impressoPorDia.get(t.data) || { debito: 0, credito: 0 };
+      a.debito += t.debito; a.credito += t.credito;
+      impressoPorDia.set(t.data, a);
+    });
+    const diasConferidos = [];
+    impressoPorDia.forEach((t, dataDoTotal) => {
+      const lido = porDia.get(dataDoTotal) || { debito: 0, credito: 0 };
+      diasConferidos.push({ data: dataDoTotal, impresso: t.debito, lido: lido.debito, confere: t.debito === lido.debito });
     });
     const diasQueNaoBatem = diasConferidos.filter((x) => !x.confere);
     if (diasQueNaoBatem.length) {
