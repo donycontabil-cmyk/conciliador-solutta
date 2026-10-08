@@ -671,6 +671,13 @@
     if (!meses.length) return 'Acumulado';
     return NOMES_MES[meses[0].mes - 1] + '–' + NOMES_MES[meses[meses.length - 1].mes - 1];
   }
+  // O rótulo das colunas do LALUR anual: o mês manda, e o período acumulado vai entre parênteses
+  // ("Fev/26 (Jan–Fev)"). Janeiro sozinho já é o acumulado dele, então vai só "Jan/26".
+  function rotuloAcumuladoAteOMes(mesesComDado, i) {
+    const m = mesesComDado[i];
+    if (i === 0) return m.rotulo;
+    return m.rotulo + ' (' + NOMES_MES[mesesComDado[0].mes - 1] + '–' + NOMES_MES[m.mes - 1] + ')';
+  }
 
   // ------------------------------------------------------------------
   // BALANÇO PATRIMONIAL simulado (Dony, 18/09/2026: "cria um balanço patrimonial e lança no resultado do
@@ -967,9 +974,7 @@
           prejuizoFiscal: bAnual.prejuizoFiscal, baseNegativa: bAnual.baseNegativa,
           irRetido: lista.reduce((s, x) => s + (irRetidoDoMes.get(x.comp) || 0), 0),
         }, lista.length);
-        // "Fev/26 (Jan–Fev)": o mês manda no rótulo, e o período fica entre parênteses para não restar dúvida.
-        const periodo = String(mesesComDado[0].rotulo).split('/')[0] + '–' + String(m.rotulo).split('/')[0];
-        return Object.assign({ id: 'M' + m.comp, rotulo: i === 0 ? m.rotulo : m.rotulo + ' (' + periodo + ')',
+        return Object.assign({ id: 'M' + m.comp, rotulo: rotuloAcumuladoAteOMes(mesesComDado, i),
           mes: true, acumulado: i > 0, anual: ultimo, mesesNoPeriodo: lista.length }, r);
       });
       const visiveis = colunasAnual.concat([Object.assign({ id: 'soma-trimestres', rotulo: 'Soma dos trimestres', soma: true }, soma)]);
@@ -1011,9 +1016,25 @@
       ],
     };
 
+    // A lista de ajustes DO ANUAL: uma coluna por mês com o valor ACUMULADO de janeiro até ali, e sem coluna
+    // de trimestre (Dony, 08/10/2026: "a conta 35203004 não tá somando janeiro e fevereiro na coluna de
+    // fevereiro (…) ali no mensal eu não quero que você coloque trimestre. Você só vai colocar as adições
+    // trimestrais quando for na apuração trimestral. Se a apuração é anual, para que separar por trimestral?").
+    const ajustesAnual = !mesesComDado.length ? null : (function () {
+      const listas = mesesComDado.map((m, i) => mesesComDado.slice(0, i + 1));
+      const colunas = mesesComDado.map((m, i) => ({ id: m.comp, rotulo: rotuloAcumuladoAteOMes(mesesComDado, i), acumulado: i > 0 }));
+      return {
+        colunas,
+        linhas: ajustes.map((a) => Object.assign({}, a, { valores: listas.map((l) => sobraNoPeriodo(a, l)) })),
+        adicoes: listas.map((l) => ajustes.reduce((s, a) => s + Math.max(0, sobraNoPeriodo(a, l)), 0)),
+        exclusoes: listas.map((l) => ajustes.reduce((s, a) => s + Math.max(0, -sobraNoPeriodo(a, l)), 0)),
+      };
+    })();
+
     return {
       parametros: P, contaPAT,
       ajustes: { colunas: colunasAjustes.map((c) => ({ id: c.id, rotulo: c.rotulo, trimestre: !!c.trimestre, falta: !!c.falta })), linhas: ajustes, adicoes: adicoesCol, exclusoes: exclusoesCol },
+      ajustesAnual,
       pat, parteA, anual, parteB: parteBTabela, premissas: PREMISSAS, porTrimestre,
       ajustesSemConta: ajustes.filter((a) => !a.noBalancete).map((a) => a.conta),
     };

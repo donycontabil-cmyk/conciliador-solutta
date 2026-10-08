@@ -1183,7 +1183,12 @@
     const L = E.rel.lalur;
     const colA = L.parteA.colunas.map((c) => Object.assign({}, c, { cls: c.soma ? 'acum' : '' }));
     const parteA = tabelaSimples(['Linha', 'Bloco'], colA, linhasLalur(L.parteA.linhas, L.parteA.detalhe, 'parteA'));
-    const colAj = L.ajustes.colunas.map((c) => Object.assign({}, c, { cls: c.trimestre ? 'tri' : '' }));
+    // Na aba ANUAL a lista de ajustes acompanha a apuração: uma coluna por mês, já acumulada, e sem coluna de
+    // trimestre (Dony, 08/10/2026: "se a apuração é anual, para que separar por trimestral?"). Os campos do
+    // valor parcial só existem na aba trimestral, onde a coluna é o mês de verdade.
+    const AJ = (anual && L.ajustesAnual) ? L.ajustesAnual : L.ajustes;
+    const digitavel = !anual;
+    const colAj = AJ.colunas.map((c) => Object.assign({}, c, { cls: c.trimestre ? 'tri' : '' }));
     const editavel = !(op && op.impressao);
     // O botão fica AQUI também: quem está no LALUR é quem quer pôr ou tirar conta (antes só aparecia o recado
     // "vá na DRE", e só enquanto a lista estava vazia).
@@ -1194,27 +1199,30 @@
       '<b>O lado é decidido mês a mês pelo movimento da conta:</b> movimento <b>devedor</b> entra como <b>adição</b>, movimento <b>credor</b> entra como <b>exclusão</b> — ' +
       'a mesma conta pode ser adição num mês e exclusão no outro, e é por isso que ela aparece com valor positivo e negativo na tabela. ' +
       'O que você escolhe ao marcar é só como ela fica na coluna <b>Tipo</b>. Conta de ativo ou passivo entra pelo <b>aumento do saldo credor</b>. No ✕ você tira a conta do LALUR.</p>' : '') +
-      tabelaSimples(['Descrição', 'Conta', 'Tipo'], colAj, L.ajustes.linhas.map((a) => ({
+      tabelaSimples(['Descrição', 'Conta', 'Tipo'], colAj, AJ.linhas.map((a) => ({
         cab: [T.esc(a.titulo || '') + (a.noBalancete ? '' : ' <span class="rel-aviso">(não está nos balancetes)</span>') +
           (a.regra === 'aumento-credor' ? ' <small class="suave">· aumento do saldo credor</small>' : '') +
           (a.parcial ? ' <small class="lalur-parcial-selo" title="Só o pedaço que você digitou entra no LALUR; o resto da conta fica de fora">✎ valor parcial</small>' : '') +
-          (a.contraMarca.length ? ' <small class="lalur-contra nao-imprimir" title="Regra dinâmica da planilha: o movimento do trimestre foi do lado contrário ao marcado">⚠ no ' +
+          // O aviso do lado contrário fala de TRIMESTRE: só na aba trimestral.
+          (!anual && a.contraMarca.length ? ' <small class="lalur-contra nao-imprimir" title="Regra dinâmica da planilha: o movimento do trimestre foi do lado contrário ao marcado">⚠ no ' +
             T.esc(a.contraMarca.join(', ')) + ' entrou como ' + (a.tipo === 'Exclusão' ? 'adição' : 'exclusão') + '</small>' : ''),
         '<span class="cod">' + T.esc(a.conta) + '</span>',
-        a.tipo + (editavel ? ' <button type="button" class="lalur-bt nao-imprimir' + (a.parcial ? ' ligado-parcial' : '') + '" data-lalur-parcial="' + T.esc(a.conta) + '" title="' +
-          (a.parcial ? 'Voltar a pegar o movimento inteiro da conta' : 'Só uma parte desta conta é ajuste: digitar o valor mês a mês') + '">' +
-          (a.parcial ? '↺ valor cheio' : '✎ valor parcial') + '</button>' +
-          ' <button type="button" class="lalur-tirar nao-imprimir" data-lalur-tirar="' + T.esc(a.conta) + '" title="Tirar esta conta do LALUR">✕</button>' : '')],
+        a.tipo +
+          // Ligar/desligar o valor parcial só na aba trimestral, que é onde a coluna é o mês de verdade.
+          (editavel && digitavel ? ' <button type="button" class="lalur-bt nao-imprimir' + (a.parcial ? ' ligado-parcial' : '') + '" data-lalur-parcial="' + T.esc(a.conta) + '" title="' +
+            (a.parcial ? 'Voltar a pegar o movimento inteiro da conta' : 'Só uma parte desta conta é ajuste: digitar o valor mês a mês') + '">' +
+            (a.parcial ? '↺ valor cheio' : '✎ valor parcial') + '</button>' : '') +
+          (editavel ? ' <button type="button" class="lalur-tirar nao-imprimir" data-lalur-tirar="' + T.esc(a.conta) + '" title="Tirar esta conta do LALUR">✕</button>' : '')],
         valores: a.valores, conta: a.conta, parcial: a.parcial, cheio: a.cheioPorMes,
         // O que ele digitou, com o sinal: é isso que volta no campo (o valor da tabela já vem virado pelo Tipo).
         digitado: ((ajustesAtuais().find((x) => x.conta === a.conta) || {}).valores) || {},
       })).concat([
-        { cls: 'total', cab: ['Total das Adições', '', ''], valores: L.ajustes.adicoes },
-        { cls: 'total', cab: ['Total das Exclusões', '', ''], valores: L.ajustes.exclusoes },
+        { cls: 'total', cab: ['Total das Adições', '', ''], valores: AJ.adicoes },
+        { cls: 'total', cab: ['Total das Exclusões', '', ''], valores: AJ.exclusoes },
       ]), (l, v, k, col) => {
         // Na conta de valor parcial, o mês vira campo: ele digita o pedaço, e o movimento inteiro fica de dica.
         // A coluna do mês vem com `id` = competência e `trimestre: false`; a do trimestre continua só somando.
-        if (!editavel || !l.parcial || col.trimestre || col.falta) return dinheiro(v);
+        if (!editavel || !digitavel || !l.parcial || col.trimestre || col.falta) return dinheiro(v);
         const cheio = l.cheio ? l.cheio.get(col.id) : null;
         const digitado = Number((l.digitado || {})[col.id]) || 0;
         return '<input class="apres-campo valor' + (digitado < 0 ? ' estorno' : '') + '" inputmode="decimal" data-ajuste-valor="' + T.esc(l.conta + '|' + col.id) + '"' +
@@ -1222,7 +1230,7 @@
           ' title="Movimento inteiro da conta em ' + T.esc(col.rotulo) + ': ' + T.esc(U.formatarCentavos(Math.abs(Math.round(cheio || 0)))) +
           '. Valor negativo estorna: entra do lado contrário ao Tipo neste mês.">';
       }) +
-      (editavel && L.ajustes.linhas.some((a) => a.parcial)
+      (editavel && digitavel && L.ajustes.linhas.some((a) => a.parcial)
         ? '<div class="linha-flex nao-imprimir" style="margin-top:8px"><button type="button" class="botao primario pequeno" data-opcao="guardar-valores-ajuste">💾 Guardar os valores digitados</button>' +
           '<span class="suave pequeno">Nas contas de <b>valor parcial</b> entra só o que você digitar — mês vazio não entra. Passe o mouse no campo para ver o movimento inteiro da conta naquele mês. ' +
           'O lado é o da coluna <b>Tipo</b>; para <b>estornar</b> num mês, digite o valor com o <b>sinal de menos</b> (numa conta de Adição, <b>−500,00</b> entra como exclusão naquele mês). ' +
@@ -1251,7 +1259,9 @@
       anual ? 'Um mês por coluna e o ano inteiro como um período só, ao lado da soma dos trimestres — o imposto não é o mesmo nos dois jeitos.'
         : '1T, 2T, 3T, 4T e o acumulado do ano, a partir da DRE; adições e exclusões pela lista de ajustes; incentivo PAT e Parte B.') +
       (anual ? blocoLalurAnual(L) : parteA) + outraAba +
-      '<h3 class="apres-sub">Ajustes mensais e trimestrais <small>as contas marcadas na DRE ou no balancete · valor positivo = adição · valor negativo = exclusão</small></h3>' + ajustes +
+      '<h3 class="apres-sub">' + (anual
+        ? 'Adições e exclusões acumuladas <small>as contas marcadas na DRE ou no balancete · cada coluna acumula de janeiro até o mês, igual à apuração acima · valor positivo = adição · valor negativo = exclusão · para digitar valor parcial, vá na aba <b>LALUR trimestral</b></small>'
+        : 'Ajustes mensais e trimestrais <small>as contas marcadas na DRE ou no balancete · valor positivo = adição · valor negativo = exclusão</small>') + '</h3>' + ajustes +
       '<h3 class="apres-sub">Incentivo fiscal PAT <small>conta ' + T.esc(L.contaPAT || '—') + (L.pat.titulo ? ' · ' + T.esc(L.pat.titulo) : '') + ' · menor entre o incentivo potencial e 3,6% do IRPJ principal (15%)</small></h3>' + pat +
       '<h3 class="apres-sub">LALUR Parte B: controles fiscais <small>saldos de prejuízo fiscal e base negativa (zerados até você informar) e IR retido</small></h3>' + parteB +
       '<h3 class="apres-sub">Premissas, fontes e pontos de validação</h3>' + premissas;
