@@ -816,10 +816,21 @@
     // sobre o que passa de R$ 20.000 por mês do período (R$ 240.000 no ano fechado) e a compensação de
     // prejuízo é 30% do lucro real DO ANO — por isso o imposto anual não é a soma dos trimestres
     // (Dony, 25/09/2026: "eu quero o LALUR trimestral e o anual, porque é diferente um do outro").
-    const apurar = (t, lista, b, mesesDoPeriodo) => {
+    // Quanto a conta entra num período. Na conta de VALOR PARCIAL, quando o período é ACUMULADO (o LALUR
+    // anual), vale o valor que ele digitou NAQUELE MÊS — o programa não soma com os meses de antes
+    // (Dony, 08/10/2026: "quando for valor parcial não tem que ficar somando um mês com o outro… ali eu que
+    // digito"). Era essa soma que fazia a coluna não fechar com as linhas mostradas.
+    const entraNoPeriodo = (a, lista, parcialDireto) => {
+      if (parcialDireto && a.regra === 'parcial') {
+        const ultimo = lista[lista.length - 1];
+        return (ultimo && a.porMes.get(ultimo.comp)) || 0;
+      }
+      return somaDe(lista.map((m) => a.porMes.get(m.comp))) || 0;
+    };
+    const apurar = (t, lista, b, mesesDoPeriodo, parcialDireto) => {
       const lucroContabil = lista.reduce((s, m) => s + (m.tem ? lucroMes(m) : 0), 0);
-      const adicoes = ajustes.reduce((s, a) => s + Math.max(0, somaDe(lista.map((m) => a.porMes.get(m.comp))) || 0), 0);
-      const exclusoes = ajustes.reduce((s, a) => s + Math.max(0, -(somaDe(lista.map((m) => a.porMes.get(m.comp))) || 0)), 0);
+      const adicoes = ajustes.reduce((s, a) => s + Math.max(0, entraNoPeriodo(a, lista, parcialDireto)), 0);
+      const exclusoes = ajustes.reduce((s, a) => s + Math.max(0, -entraNoPeriodo(a, lista, parcialDireto)), 0);
       const lrAntes = lucroContabil + adicoes - exclusoes;
       const compPrejuizo = Math.min(Math.max(0, lrAntes * P.compensacao), Number(b.prejuizoFiscal) || 0);
       const lrIrpj = Math.max(0, lrAntes - compPrejuizo);
@@ -906,18 +917,18 @@
     // tabela (Dony, 07/10/2026: "um sinalzinho de mais e eu possa clicar e ele me traga as adições, as
     // exclusões, linha a linha; lembrando que tem que vir acumulado ali"). Cada conta entra pela sobra do
     // PERÍODO da coluna — positivo em adições, negativo em exclusões —, que é exatamente como o total soma.
-    const sobraNoPeriodo = (a, lista) => somaDe(lista.map((m) => a.porMes.get(m.comp))) || 0;
+    const sobraNoPeriodo = (a, lista, parcialDireto) => entraNoPeriodo(a, lista, parcialDireto);
     const somaDosTrimestres = (a, qual) => trimestres.reduce((s, t) => {
       const v = sobraNoPeriodo(a, t.meses);
       return s + (qual === 'adicoes' ? Math.max(0, v) : Math.max(0, -v));
     }, 0);
     // listas: uma por coluna — os meses daquele período, ou 'trimestres' na coluna que soma os trimestres.
-    const detalheDe = (listas) => {
+    const detalheDe = (listas, parcialDireto) => {
       const faz = (qual) => ajustes.map((a) => ({
         conta: a.conta, titulo: a.titulo, parcial: !!a.parcial,
         valores: listas.map((x) => {
           if (x === 'trimestres') return somaDosTrimestres(a, qual);
-          const v = sobraNoPeriodo(a, x);
+          const v = sobraNoPeriodo(a, x, parcialDireto);
           return qual === 'adicoes' ? Math.max(0, v) : Math.max(0, -v);
         }),
       })).filter((l) => l.valores.some((v) => v));
@@ -944,7 +955,8 @@
         irRetido: parteB.anual && parteB.anual.irRetido !== undefined ? parteB.anual.irRetido
           : trimestres.reduce((s, t) => s + (Number((parteB[t.id] || {}).irRetido) || 0), 0),
       };
-      const doAno = apurar(null, mesesComDado, bAnual, mesesComDado.length);
+      // true = no acumulado, a conta de valor parcial entra com o valor digitado no mês, sem somar.
+      const doAno = apurar(null, mesesComDado, bAnual, mesesComDado.length, true);
       const soma = somar(porTrimestre);
       // MÊS A MÊS (Dony, 07/10/2026: "no LALUR anual eu quero ter mês a mês e não acumulado… e aí sim uma
       // opção de clicar e ele fazer o acumulado"). É assim que se acompanha o lucro real anual: cada mês com
@@ -973,7 +985,7 @@
         const r = ultimo ? doAno : apurar(null, lista, {
           prejuizoFiscal: bAnual.prejuizoFiscal, baseNegativa: bAnual.baseNegativa,
           irRetido: lista.reduce((s, x) => s + (irRetidoDoMes.get(x.comp) || 0), 0),
-        }, lista.length);
+        }, lista.length, true);
         return Object.assign({ id: 'M' + m.comp, rotulo: rotuloAcumuladoAteOMes(mesesComDado, i),
           mes: true, acumulado: i > 0, anual: ultimo, mesesNoPeriodo: lista.length }, r);
       });
@@ -984,7 +996,7 @@
         colunas: visiveis.map((c) => ({ id: c.id, rotulo: c.rotulo, soma: !!c.soma, anual: !!c.anual, mes: !!c.mes, acumulado: !!c.acumulado })),
         linhas: LINHAS_A.map(([bloco, rotulo, campo, destaque]) => ({ bloco, rotulo, campo, destaque: !!destaque, valores: visiveis.map((c) => c[campo]) })),
         // No anual o detalhe também vem ACUMULADO, porque a coluna é acumulada.
-        detalhe: detalheDe(visiveis.map((c, k) => (c.soma ? 'trimestres' : mesesComDado.slice(0, k + 1)))),
+        detalhe: detalheDe(visiveis.map((c, k) => (c.soma ? 'trimestres' : mesesComDado.slice(0, k + 1))), true),
         diferenca: doAno.total - soma.total,
         irRetido: bAnual.irRetido, prejuizoFiscal: Number(bAnual.prejuizoFiscal) || 0, baseNegativa: Number(bAnual.baseNegativa) || 0,
       };
@@ -1025,14 +1037,11 @@
       const colunas = mesesComDado.map((m, i) => ({ id: m.comp, rotulo: rotuloAcumuladoAteOMes(mesesComDado, i), acumulado: i > 0 }));
       return {
         colunas,
-        // A conta de VALOR PARCIAL não acumula: o valor dela é o do MÊS, que é o que ele digita (Dony,
-        // 08/10/2026: "quando for valor parcial não tem que ficar somando um mês com o outro… ali eu que
-        // digito"). No total da coluna ela entra pela soma dos meses, como as outras.
-        linhas: ajustes.map((a) => Object.assign({}, a, {
-          valores: a.regra === 'parcial' ? mesesComDado.map((m) => a.porMes.get(m.comp)) : listas.map((l) => sobraNoPeriodo(a, l)),
-        })),
-        adicoes: listas.map((l) => ajustes.reduce((s, a) => s + Math.max(0, sobraNoPeriodo(a, l)), 0)),
-        exclusoes: listas.map((l) => ajustes.reduce((s, a) => s + Math.max(0, -sobraNoPeriodo(a, l)), 0)),
+        // A conta de VALOR PARCIAL não acumula: o valor dela é o do MÊS, que é o que ele digita — e é com
+        // ESSE valor que ela entra no total da coluna, senão a coluna não fecha com as linhas mostradas.
+        linhas: ajustes.map((a) => Object.assign({}, a, { valores: listas.map((l) => sobraNoPeriodo(a, l, true)) })),
+        adicoes: listas.map((l) => ajustes.reduce((s, a) => s + Math.max(0, sobraNoPeriodo(a, l, true)), 0)),
+        exclusoes: listas.map((l) => ajustes.reduce((s, a) => s + Math.max(0, -sobraNoPeriodo(a, l, true)), 0)),
       };
     })();
 
