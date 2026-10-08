@@ -754,6 +754,12 @@
     // Sem conta do PAT escolhida: a da planilha modelo, se ela existe no plano desta empresa.
     const contaPAT = cfg.contaPAT === undefined ? (indice.has(CONTA_PAT_MODELO) ? CONTA_PAT_MODELO : '') : cfg.contaPAT;
     const parteB = cfg.parteB || {};
+    // IR retido em DOIS campos (Dony, 08/10/2026: "eu quero IR retido sobre notas fiscais e IR retido sobre
+    // rendimentos financeiros; consegue colocar para a gente poder digitar?"). O que abate do IRPJ é a soma
+    // dos dois. Registro antigo, que só tinha `irRetido`: ele continua valendo como o das notas fiscais.
+    const irRetidoNf = (b) => ((b || {}).irRetidoNf !== undefined ? Number((b || {}).irRetidoNf) || 0 : Number((b || {}).irRetido) || 0);
+    const irRetidoFin = (b) => Number((b || {}).irRetidoFin) || 0;
+    const irRetidoDe = (b) => irRetidoNf(b) + irRetidoFin(b);
 
     // Valor do ajuste de uma conta num mês (positivo = adição, negativo = exclusão).
     const ajusteNoMes = (a, m) => {
@@ -837,7 +843,7 @@
       const irpj15 = lrIrpj * P.irpj;
       const adicional = Math.max(0, lrIrpj - P.limiteAdicionalMes * mesesDoPeriodo) * P.adicional;
       const irpjTotal = irpj15 + adicional;
-      const irRetido = Number(b.irRetido) || 0;
+      const irRetido = irRetidoDe(b);
       const compBaseNegativa = Math.min(Math.max(0, lrAntes * P.compensacao), Number(b.baseNegativa) || 0);
       const baseCsll = Math.max(0, lrAntes - compBaseNegativa);
       const csll = baseCsll * P.csll;
@@ -863,7 +869,7 @@
       const mesesDoPeriodo = t.emAndamento ? t.carregados : 3;
       const adicional = Math.max(0, lrIrpj - P.limiteAdicionalMes * mesesDoPeriodo) * P.adicional;
       const irpjTotal = irpj15 + adicional;
-      const irRetido = Number(b.irRetido) || 0;
+      const irRetido = irRetidoDe(b);
       const compBaseNegativa = Math.min(Math.max(0, lrAntes * P.compensacao), Number(b.baseNegativa) || 0);
       const baseCsll = Math.max(0, lrAntes - compBaseNegativa);
       const csll = baseCsll * P.csll;
@@ -954,7 +960,7 @@
         prejuizoFiscal: parteB.anual && parteB.anual.prejuizoFiscal !== undefined ? parteB.anual.prejuizoFiscal : primeiro.prejuizoFiscal,
         baseNegativa: parteB.anual && parteB.anual.baseNegativa !== undefined ? parteB.anual.baseNegativa : primeiro.baseNegativa,
         irRetido: parteB.anual && parteB.anual.irRetido !== undefined ? parteB.anual.irRetido
-          : trimestres.reduce((s, t) => s + (Number((parteB[t.id] || {}).irRetido) || 0), 0),
+          : trimestres.reduce((s, t) => s + irRetidoDe(parteB[t.id]), 0),
       };
       // true = no acumulado, a conta de valor parcial entra com o valor digitado no mês, sem somar.
       const doAno = apurar(null, mesesComDado, bAnual, mesesComDado.length, true);
@@ -976,7 +982,7 @@
       const irRetidoDoMes = new Map();
       trimestres.forEach((t) => {
         const comDado = t.meses.filter((m) => m.tem);
-        if (comDado.length) irRetidoDoMes.set(comDado[comDado.length - 1].comp, Number((parteB[t.id] || {}).irRetido) || 0);
+        if (comDado.length) irRetidoDoMes.set(comDado[comDado.length - 1].comp, irRetidoDe(parteB[t.id]));
       });
       const colunasAnual = mesesComDado.map((m, i) => {
         const ultimo = i === mesesComDado.length - 1;
@@ -1039,7 +1045,9 @@
         { campo: 'baseNegativa', rotulo: 'Base negativa acumulada disponível CSLL', editavel: true, obs: 'Informar o saldo disponível para compensação', valores: colunasB.map((c) => Number((parteB[c.id] || {}).baseNegativa) || 0) },
         { campo: 'compPrejuizo', rotulo: 'Compensação efetiva IRPJ', obs: 'Limitada na Parte A pelo menor entre o saldo disponível e 30% do lucro real antes da compensação', valores: colunasB.map((c) => c.q.compPrejuizo) },
         { campo: 'compBaseNegativa', rotulo: 'Compensação efetiva CSLL', obs: 'Limitada na Parte A pelo menor entre o saldo disponível e 30% da base antes da compensação', valores: colunasB.map((c) => c.q.compBaseNegativa) },
-        { campo: 'irRetido', rotulo: 'IR retido utilizado', editavel: true, obs: 'Informado por quem usa para abatimento do IRPJ do trimestre', valores: colunasB.map((c) => Number((parteB[c.id] || {}).irRetido) || 0) },
+        { campo: 'irRetidoNf', rotulo: 'IR retido sobre notas fiscais', editavel: true, obs: 'Informar o IR retido na fonte nas notas de serviço do trimestre', valores: colunasB.map((c) => irRetidoNf(parteB[c.id])) },
+        { campo: 'irRetidoFin', rotulo: 'IR retido sobre rendimentos financeiros', editavel: true, obs: 'Informar o IR retido nas aplicações financeiras do trimestre', valores: colunasB.map((c) => irRetidoFin(parteB[c.id])) },
+        { campo: 'irRetido', rotulo: 'IR retido total utilizado', obs: 'Soma dos dois acima; é o que a Parte A abate do IRPJ', valores: colunasB.map((c) => irRetidoDe(parteB[c.id])) },
       ],
     };
 
