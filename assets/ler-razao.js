@@ -910,6 +910,102 @@
     return { historico: col('historico'), documento: col('documento'), chave: col('chave'), contra: col('contra'),
       participante: col('participante'), debito: col('debito'), credito: col('credito'), saldo: col('saldo') };
   }
+  // ------------------------------------------------------------------
+  // Desenho I — "Livro Razão" de UMA CONTA SÓ, do sistema do Grupo Semar (Dony, 09/10/2026: dois razões
+  // distintos, "Repasses a Receber" e "Repasses a Pagar", para conciliar um contra o outro). O cabeçalho do
+  // relatório traz a conta ("Conta Contábil: 2.01.004.0002.00003 - Repasses a Pagar") e o período ("Data
+  // inicial:" / "Data final:"); depois vêm as colunas "Data Lançamento | Lançamento | Loja | Histórico |
+  // Complemento Histórico | Débito | Crédito | Tipo do Movimento | Saldo | Status partida dobrada", a linha
+  // "SALDO ANTERIOR" e uma linha por lançamento. A LOJA é o que identifica o outro lado do empréstimo, então
+  // ela entra no lançamento e também no começo do histórico.
+  // Sem isto, o programa achava que era extrato bancário ("Data, Histórico, Débito, Crédito, Saldo" sem conta
+  // por linha) e recusava o arquivo.
+  // ------------------------------------------------------------------
+  const CONTA_SEMAR = /^\s*conta\s+cont[áa]bil\s*:?\s*([\d.]+)\s*[-–]\s*(.+?)\s*$/i;
+  function cabecalhoSemar(linha) {
+    const ch = (linha || []).map((v) => Util.semAcento(String(v === null || v === undefined ? '' : v)).toLowerCase().replace(/[^a-z]/g, ''));
+    const achar = (...nomes) => ch.findIndex((x) => nomes.indexOf(x) >= 0);
+    const data = achar('datalancamento', 'datalanc', 'data');
+    const debito = achar('debito'), credito = achar('credito'), historico = achar('historico');
+    if (data < 0 || debito < 0 || credito < 0 || historico < 0) return null;
+    if (achar('loja') < 0 || achar('lancamento') < 0) return null;   // é o que separa este desenho dos outros
+    return { data, lancamento: achar('lancamento'), loja: achar('loja'), historico,
+      complemento: achar('complementohistorico', 'complemento'), debito, credito,
+      tipo: achar('tipodomovimento', 'tipomovimento'), saldo: achar('saldo'), status: achar('statuspartidadobrada', 'status') };
+  }
+  function ehRazaoSemar(abas) {
+    return (abas || []).some((a) => {
+      const linhas = a.linhas || [];
+      const temConta = linhas.slice(0, 30).some((l) => l && celulasCheias(l).some((x) => CONTA_SEMAR.test(String(x.v))));
+      if (!temConta) return false;
+      return linhas.slice(0, 40).some((l) => l && cabecalhoSemar(l));
+    });
+  }
+  function lerRazaoSemar(abas, opcoes) {
+    const nomeArquivo = (opcoes && opcoes.nomeArquivo) || '';
+    const avisos = [];
+    const contas = [];
+    let linhasIgnoradas = 0;
+    const info = { empresa: '', cnpj: '', periodo: null, titulo: 'Livro Razão' };
+    const texto = (linha, i) => (i === undefined || i < 0 || linha[i] === null || linha[i] === undefined ? '' : String(linha[i]).replace(/\s+/g, ' ').trim());
+    for (const aba of abas) {
+      const linhas = aba.linhas || [];
+      let mapa = null, conta = null;
+      for (let r = 0; r < linhas.length; r++) {
+        const linha = linhas[r];
+        if (!linha) continue;
+        const cheias = celulasCheias(linha);
+        if (!cheias.length) continue;
+        // O cabeçalho do relatório: a conta, o período e o CNPJ.
+        if (!mapa) {
+          for (const x of cheias) {
+            const s = String(x.v);
+            const mc = s.match(CONTA_SEMAR);
+            // Este relatório não imprime os totais de débito e crédito: sem declarar null, a conferência
+            // reclamava que "os totais declarados não batem" — e não havia total declarado nenhum.
+            if (mc) { conta = { codigo: mc[1], classificacao: mc[1], nome: mc[2], saldoAnterior: null, lancamentos: [],
+              totalDebitoDeclarado: null, totalCreditoDeclarado: null, saldoFinalDeclarado: null, avisos: [] }; continue; }
+            const mi = s.match(/data\s+inicial\s*:?\s*(\d{1,2}[\/.-]\d{1,2}[\/.-]\d{2,4})/i);
+            const mf = s.match(/data\s+final\s*:?\s*(\d{1,2}[\/.-]\d{1,2}[\/.-]\d{2,4})/i);
+            if (mi) info.periodo = Object.assign({}, info.periodo, { de: Util.lerData(mi[1]) });
+            if (mf) info.periodo = Object.assign({}, info.periodo, { ate: Util.lerData(mf[1]) });
+            const mcnpj = s.match(/CNPJ\s*:?\s*(\d{2}\.?\d{3}\.?\d{3}\/?\d{4}-?\d{2})/i);
+            if (mcnpj && !info.cnpj) info.cnpj = Util.limparCnpj(mcnpj[1]);
+          }
+        }
+        const cab = cabecalhoSemar(linha);
+        if (cab) { mapa = cab; if (conta) contas.push(conta); continue; }
+        if (!mapa || !conta) { linhasIgnoradas++; continue; }
+        const d = texto(linha, mapa.debito), c = texto(linha, mapa.credito);
+        const debito = numeroDe(d) || 0, credito = numeroDe(c) || 0;
+        const hist = [texto(linha, mapa.historico), texto(linha, mapa.complemento)].filter(Boolean).join(' · ');
+        // "SALDO ANTERIOR" não é lançamento: é o saldo com que a conta começa.
+        if (/^\s*saldo\s+anterior/i.test(hist)) { conta.saldoAnterior = numeroDe(texto(linha, mapa.saldo)); continue; }
+        const data = Util.lerData(linha[mapa.data]);
+        if (!data) {
+          // A última linha do relatório traz só o saldo final.
+          const sf = numeroDe(texto(linha, mapa.saldo));
+          if (sf !== null && !debito && !credito) conta.saldoFinalDeclarado = sf;
+          linhasIgnoradas++;
+          continue;
+        }
+        if (!debito && !credito) { linhasIgnoradas++; continue; }
+        const loja = texto(linha, mapa.loja);
+        conta.lancamentos.push({ data: data.texto, dia: data.dia, mes: data.mes, ano: data.ano,
+          numero: texto(linha, mapa.lancamento), historico: (loja ? 'Loja ' + loja + ' · ' : '') + hist,
+          loja, contrapartida: '', debito, credito, saldo: numeroDe(texto(linha, mapa.saldo)),
+          status: texto(linha, mapa.status) });
+      }
+      if (conta && contas.indexOf(conta) < 0) contas.push(conta);
+    }
+    for (const c of contas) conferirConta(c);
+    if (!contas.length) avisos.push('Não achei nenhuma conta neste razão.');
+    const periodo = info.periodo && info.periodo.de && info.periodo.ate
+      ? { de: info.periodo.de.texto, ate: info.periodo.ate.texto } : null;
+    return { tipo: 'razao', desenho: 'I', empresa: info.empresa, cnpj: info.cnpj, titulo: info.titulo,
+      periodo, periodoOrigem: periodo ? 'conteudo' : 'datas-dos-lancamentos', contas, avisos, linhasIgnoradas, nomeArquivo };
+  }
+
   function ehLivroCaixa(abas) {
     return abas.some((a) => {
       const r = a.linhas.slice(0, 30).findIndex((l) => l && cabecalhoH(l));
@@ -1025,6 +1121,9 @@
    * @returns { tipo: 'razao' | 'balancete' | null, motivo }
    */
   function reconhecer(abas) {
+    if (ehRazaoSemar(abas)) {
+      return { tipo: 'razao', semar: true, motivo: 'Livro Razão de uma conta só: "Conta Contábil" no cabeçalho e as colunas Data Lançamento, Lançamento, Loja, Histórico, Débito, Crédito e Saldo.' };
+    }
     if (ehLivroCaixa(abas)) {
       return { tipo: 'razao', livroCaixa: true, motivo: 'Razão e livro caixa: a conta ("código - classificação - nome") com o saldo anterior, a data numa linha só dela e Histórico, Documento, Contra, Participante, Débito, Crédito e Saldo.' };
     }
@@ -1064,6 +1163,7 @@
     const nomeArquivo = (opcoes && opcoes.nomeArquivo) || '';
     // Razão e livro caixa (desenho H), lançamentos detalhados (desenho G), razão por contrapartida (desenho E) e
     // razão analítico (desenho F) têm leitores próprios.
+    if (ehRazaoSemar(abas)) return lerRazaoSemar(abas, opcoes);
     if (ehLivroCaixa(abas)) return lerLivroCaixa(abas, opcoes);
     if (ehLancamentosDetalhados(abas)) return lerLancamentosDetalhados(abas);
     if (ehRazaoPorContrapartida(abas)) return lerPorContrapartida(abas);
