@@ -111,11 +111,18 @@
         // coluna do valor aparecia, porque era a única com estilo (Dony, 05/10/2026: "não vem um monte de
         // informações"). O zero também passa a ser escrito, em vez de sumir.
         const cc = (c !== null && c !== undefined && typeof c === 'object') ? c : { v: c };
-        if (cc.v === null || cc.v === undefined) return '';
-        maxCol = Math.max(maxCol, k);
         const ref = coluna(k) + (r + 1);
         const s = cc.e !== undefined && indice.has(cc.e) ? ' s="' + indice.get(cc.e) + '"' : '';
-        if (cc.v === '') return '<c r="' + ref + '"' + s + '/>';
+        // SEM VALOR: a célula ainda tem que sair QUANDO TEM ESTILO — é ela que leva o fundo e as bordas da
+        // tabela. O AH % de janeiro, por exemplo, é sempre vazio: sem a célula, ficava um rasgo branco no
+        // meio da planilha (Dony, 09/10/2026: "os relatórios em Excel saiu com a formatação um pouco bugada").
+        // Valor cru vazio, sem estilo nenhum, continua não virando célula.
+        if (cc.v === null || cc.v === undefined || cc.v === '') {
+          if (!s) return '';
+          maxCol = Math.max(maxCol, k);
+          return '<c r="' + ref + '"' + s + '/>';
+        }
+        maxCol = Math.max(maxCol, k);
         if (typeof cc.v === 'number') return isFinite(cc.v) ? '<c r="' + ref + '"' + s + '><v>' + cc.v + '</v></c>' : '<c r="' + ref + '"' + s + '/>';
         return '<c r="' + ref + '"' + s + ' t="inlineStr"><is><t xml:space="preserve">' + esc(limpo(cc.v)) + '</t></is></c>';
       }).join('');
