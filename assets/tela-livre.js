@@ -30,6 +30,7 @@
   const DATA = (de) => ({ tipo: 'data', de });
   const NUM = (de) => ({ tipo: 'numero', de });
 
+  const FOLGA_DIAS = 5;   // a folga do 📆 (ele pediu: primeiro no mesmo dia, depois com alguns dias)
   let E = null; // estado da tela aberta
 
   // ------------------------------------------------------------------
@@ -42,7 +43,11 @@
     definicoes(emp).forEach((d) => { const x = Number(String(d.id).replace(/[^0-9]/g, '')); if (x >= n) n = x + 1; });
     return 'L' + n;
   }
-  function nomeDaDefinicao(d) { return d.nome || ((d.contaA && d.contaA.titulo) || d.contaA.codigo) + ' × ' + ((d.contaB && d.contaB.titulo) || (d.contaB && d.contaB.codigo) || 'relatório'); }
+  function nomeDaDefinicao(d) {
+    if (d.nome) return d.nome;
+    if (d.origem === 'arquivo') return d.ladoUnico ? 'Razão que eu subo (um lado só)' : 'Dois razões que eu subo';
+    return ((d.contaA && d.contaA.titulo) || (d.contaA && d.contaA.codigo) || 'Parte A') + ' × ' + ((d.contaB && d.contaB.titulo) || (d.contaB && d.contaB.codigo) || 'relatório');
+  }
   function idDoRegistro(codigo, idLivre, comp) { return 'L-' + codigo + '-' + idLivre + '-' + U.anoMes(comp); }
 
   // ------------------------------------------------------------------
@@ -107,7 +112,8 @@
       (lista.length ? '<div class="cartao corpo" style="margin-top:14px"><h3 style="margin:0 0 8px">Guardadas nesta empresa</h3>' +
         '<table class="tabela"><thead><tr><th>Conciliação</th><th>Parte A</th><th>Parte B</th><th>Cruzamento</th><th></th></tr></thead><tbody>' +
         lista.map((d) => '<tr><td><b>' + T.esc(nomeDaDefinicao(d)) + '</b></td>' +
-          '<td>' + T.esc(textoDaConta(d.contaA)) + '</td><td>' + T.esc(d.contaB ? textoDaConta(d.contaB) : 'relatório (a combinar)') + '</td>' +
+          '<td>' + T.esc(d.origem === 'arquivo' ? 'do arquivo que eu subo' : textoDaConta(d.contaA)) + '</td>' +
+          '<td>' + T.esc(d.origem === 'arquivo' ? (d.ladoUnico ? '— (um lado só)' : 'do arquivo que eu subo') : (d.contaB ? textoDaConta(d.contaB) : 'relatório (a combinar)')) + '</td>' +
           '<td>' + T.esc(d.regra === 'mesmo-valor' ? 'mesmo valor dos dois lados' : 'contrapartida (uma baixa a outra)') + '</td>' +
           '<td class="num"><button type="button" class="botao pequeno" data-editar="' + T.esc(d.id) + '">Editar</button> ' +
           '<button type="button" class="botao pequeno perigo" data-apagar="' + T.esc(d.id) + '">Apagar</button></td></tr>').join('') +
@@ -124,6 +130,8 @@
 
   function textoDaConta(c) { return c ? (c.codigo + (c.titulo ? ' · ' + c.titulo : '')) : ''; }
   function textoDaDefinicao(d) {
+    if (d.origem === 'arquivo') return (d.ladoUnico ? 'um razão que eu subo (um lado só)' : 'dois razões que eu subo') + ' · ' +
+      (d.regra === 'mesmo-valor' ? 'mesmo valor dos dois lados' : 'contrapartida');
     return textoDaConta(d.contaA) + ' × ' + (d.contaB ? textoDaConta(d.contaB) : 'um relatório') + ' · ' +
       (d.regra === 'mesmo-valor' ? 'mesmo valor dos dois lados' : 'contrapartida');
   }
@@ -135,7 +143,9 @@
     const emp = app().empresas.find((e) => String(e.codigo) === String(codigo));
     const d = id ? definicaoDe(emp, id) : null;
     const contas = contasParaEscolher(dados.plano);
-    if (!contas.length) {
+    // SEM livro diário ainda dá para criar a conciliação: a de ARQUIVO não depende dele (Dony, 09/10/2026:
+    // "quero poder subir arquivos diversos para conciliar").
+    if (!contas.length && d && d.origem !== 'arquivo') {
       T.avisoRapido('Sem o livro diário e o balancete do ano, não dá para listar as contas. Suba-os em 📒 Livro diário.', 'ambar', 9000);
       return;
     }
@@ -144,26 +154,51 @@
     const r = await T.janela({
       titulo: d ? 'Editar a conciliação' : 'Nova conciliação',
       corpo: '<div class="campo"><label for="lv-nome">Nome (como ela vai aparecer)</label>' +
-        '<input id="lv-nome" maxlength="80" autofocus placeholder="Ex.: Impostos a recuperar × impostos a pagar" value="' + T.esc(d ? d.nome || '' : '') + '"></div>' +
+        '<input id="lv-nome" maxlength="80" autofocus placeholder="Ex.: Repasses a receber × repasses a pagar" value="' + T.esc(d ? d.nome || '' : '') + '"></div>' +
+        // DE ONDE VÊM OS LANÇAMENTOS (Dony, 09/10/2026: "quero poder subir arquivos diversos para conciliar,
+        // e pode ser lado A com lado B, e somente lado A").
+        '<div class="campo" style="margin-top:10px"><label for="lv-origem">De onde vêm os lançamentos</label>' +
+        '<select id="lv-origem">' +
+        '<option value="diario"' + (!d || d.origem !== 'arquivo' ? ' selected' : '') + '>Do livro diário do ano — escolho duas contas do plano</option>' +
+        '<option value="arquivo"' + (d && d.origem === 'arquivo' ? ' selected' : '') + '>De arquivos que eu subo — um razão de cada lado</option>' +
+        '</select></div>' +
+        '<div id="lv-contas"' + (d && d.origem === 'arquivo' ? ' hidden' : '') + '>' +
         '<div class="campo" style="margin-top:10px"><label for="lv-a">Parte A · a conta que você quer conciliar</label>' +
         '<select id="lv-a">' + opcoes(d && d.contaA ? d.contaA.codigo : '') + '</select></div>' +
         '<div class="campo" style="margin-top:10px"><label for="lv-b">Parte B · com qual conta ela cruza</label>' +
-        '<select id="lv-b">' + opcoes(d && d.contaB ? d.contaB.codigo : '') + '</select></div>' +
+        '<select id="lv-b">' + opcoes(d && d.contaB ? d.contaB.codigo : '') + '</select></div></div>' +
+        '<div id="lv-arquivo"' + (!d || d.origem !== 'arquivo' ? ' hidden' : '') + '>' +
+        '<label class="caixa-opcao" style="margin-top:12px"><input type="checkbox" id="lv-unico"' + (d && d.ladoUnico ? ' checked' : '') + '> ' +
+        '<b>Só a Parte A</b> — achar o que se anula dentro do próprio razão</label>' +
+        '<p class="suave pequeno" style="margin:8px 0 0;line-height:1.5">Você sobe o razão de cada lado na própria conciliação, e as contas saem do arquivo. ' +
+        'Serve para relatório que não está no livro diário — dois razões de sistemas diferentes, por exemplo.</p></div>' +
         '<div class="campo" style="margin-top:10px"><label for="lv-regra">Como as duas se cruzam</label>' +
         '<select id="lv-regra">' +
         '<option value="contrapartida"' + (!d || d.regra !== 'mesmo-valor' ? ' selected' : '') + '>Contrapartida — o débito de uma casa com o crédito da outra</option>' +
         '<option value="mesmo-valor"' + (d && d.regra === 'mesmo-valor' ? ' selected' : '') + '>Mesmo valor — as duas mostram o mesmo valor, do mesmo lado</option>' +
         '</select></div>' +
-        '<p class="suave pequeno" style="margin:10px 0 0;line-height:1.5">As duas contas saem do <b>livro diário</b>, então não precisa subir razão. ' +
-        'A conciliação vale <b>todo mês</b>: ao abrir, você escolhe a competência.<br>' +
-        '<b>Relatório de suporte</b> (livro fiscal, extrato, planilha do financeiro) na Parte B: me mande um arquivo de exemplo que eu ensino o programa a ler.</p>',
+        '<p class="suave pequeno" style="margin:10px 0 0;line-height:1.5">A conciliação vale <b>todo mês</b>: ao abrir, você escolhe a competência. ' +
+        'Nos botões dela estão as regras — inclusive <b>⚡ data e valor</b>, que é a que casa dois razões sem documento em comum.</p>',
+      aoAbrir: (j) => {
+        const origem = j.querySelector('#lv-origem');
+        const troca = () => {
+          const arq = origem.value === 'arquivo';
+          j.querySelector('#lv-contas').hidden = arq;
+          j.querySelector('#lv-arquivo').hidden = !arq;
+        };
+        origem.addEventListener('change', troca);
+        troca();
+      },
       botoes: [{ texto: 'Cancelar', valor: null }, { texto: d ? 'Guardar' : 'Criar a conciliação', tipo: 'primario', antes: (j) => {
         const val = (x) => { const e = j.querySelector('#' + x); return e ? e.value : ''; };
+        const origem = val('lv-origem') === 'arquivo' ? 'arquivo' : 'diario';
+        const ladoUnico = origem === 'arquivo' && !!j.querySelector('#lv-unico').checked;
+        if (origem === 'arquivo') return { nome: val('lv-nome'), origem, ladoUnico, regra: val('lv-regra') };
         const acha = (r2) => contas.find((c) => String(c.reduzido) === String(r2));
         const a = acha(val('lv-a')), b = acha(val('lv-b'));
         if (!a || !b) { T.avisoRapido('Escolha as duas contas.', 'ambar'); return false; }
         if (String(a.reduzido) === String(b.reduzido)) { T.avisoRapido('As duas partes não podem ser a mesma conta — para a conta com ela mesma, use o Passo ④.', 'ambar', 8000); return false; }
-        return { nome: val('lv-nome'), a, b, regra: val('lv-regra') };
+        return { nome: val('lv-nome'), origem, ladoUnico: false, a, b, regra: val('lv-regra') };
       } }],
     });
     if (!r) return;
@@ -171,9 +206,14 @@
     const nova = {
       id: d ? d.id : proximoId(emp),
       nome: String(r.nome || '').trim(),
-      contaA: conta(r.a), contaB: conta(r.b), regra: r.regra === 'mesmo-valor' ? 'mesmo-valor' : 'contrapartida',
+      origem: r.origem,
+      ladoUnico: !!r.ladoUnico,
+      contaA: r.a ? conta(r.a) : (d && d.origem === 'arquivo' ? d.contaA : null),
+      contaB: r.b ? conta(r.b) : (d && d.origem === 'arquivo' ? d.contaB : null),
+      regra: r.regra === 'mesmo-valor' ? 'mesmo-valor' : 'contrapartida',
       criadoEm: d ? d.criadoEm : U.agoraISO(), criadoPor: d ? d.criadoPor : app().usuario.nome,
     };
+
     const lista = definicoes(emp).filter((x) => String(x.id) !== String(nova.id)).concat([nova]);
     await app().armazenamento.salvarEmpresa(Object.assign({}, emp, { conciliacoesLivres: lista }));
     await app().armazenamento.registrarNoLog({ codigo, acao: d ? 'livre-editada' : 'livre-criada', alvo: nova.id, detalhe: nomeDaDefinicao(nova) });
@@ -199,6 +239,65 @@
   // ------------------------------------------------------------------
   // A CONCILIAÇÃO (#/empresa/<codigo>/livre/<id>/<AAAA-MM>)
   // ------------------------------------------------------------------
+  // CONCILIAÇÃO DE ARQUIVO: os dois lados saem de razões que ele sobe aqui mesmo, em vez de saírem do livro
+  // diário (Dony, 09/10/2026: "quero poder subir arquivos diversos para conciliar, e pode ser lado A com
+  // lado B, e somente lado A"). Cada lado tem o seu lugar de arquivo, com versões, como nos passos.
+  // ------------------------------------------------------------------
+  function lugaresDoArquivo(d, comp, metas) {
+    // O papel fica em m.conta.papel (é assim que a TelaSubir guarda o lugar de onde o arquivo veio).
+    const doLugar = (idLugar) => (metas || []).filter((m) => m.tipo === 'razao' && m.conta && m.conta.papel === 'livre-' + d.id + '-' + idLugar);
+    const lugares = [{ id: 'ladoA', parte: 'Parte A', titulo: 'Razão da Parte A', sub: U.nomeCompetencia(comp),
+      nome: 'Razão da Parte A', log: 'livre/' + d.id + '/A', tipo: 'razao', papel: 'livre-' + d.id + '-ladoA',
+      competencia: comp, arquivos: doLugar('ladoA') }];
+    if (!d.ladoUnico) {
+      lugares.push({ id: 'ladoB', parte: 'Parte B', titulo: 'Razão da Parte B', sub: U.nomeCompetencia(comp),
+        nome: 'Razão da Parte B', log: 'livre/' + d.id + '/B', tipo: 'razao', papel: 'livre-' + d.id + '-ladoB',
+        competencia: comp, arquivos: doLugar('ladoB') });
+    }
+    return lugares;
+  }
+  // Lê os razões subidos. Devolve { A, B, lugares, metas } — A e B são a conta do razão (com lancamentos).
+  async function razoesDoArquivo(codigo, d, comp, conferir) {
+    const arm = app().armazenamento;
+    let metas = [];
+    try { metas = await arm.arquivos(codigo); } catch (e) { metas = []; }
+    if (conferir && !conferir()) return null;
+    const lugares = lugaresDoArquivo(d, comp, metas);
+    const contaDoLugar = async (idLugar) => {
+      const lista = (metas || []).filter((m) => m.tipo === 'razao' && m.conta && m.conta.papel === 'livre-' + d.id + '-' + idLugar)
+        .sort((x, y) => U.paraMs(y.enviadoEm) - U.paraMs(x.enviadoEm));
+      if (!lista.length) return null;
+      const meta = lista[0];
+      const conteudo = await arm.conteudoDoArquivo(meta.id);
+      if (!conteudo) return null;
+      // O arquivo guardado traz UMA conta (é assim que a TelaSubir grava o razão de um lugar); o razão
+      // lido na hora traz a lista. Os dois servem.
+      const r = conteudo.razao || (conteudo.tipo === 'razao' ? conteudo : null);
+      const contas = (r && r.contas) || (r && r.conta ? [r.conta] : []);
+      if (!contas.length) return null;
+      // O razão de uma conta só (o caso do pedido): a primeira conta é a conta do relatório. Vindo mais de
+      // uma, o programa junta os lançamentos de todas — é o que o relatório mostra.
+      if (contas.length === 1) return Object.assign({}, contas[0], { arquivo: meta.nome || '' });
+      const juntos = [];
+      contas.forEach((c) => (c.lancamentos || []).forEach((l) => juntos.push(l)));
+      return { codigo: contas.map((c) => c.codigo).join(', ').slice(0, 40), nome: contas.length + ' contas do arquivo',
+        classificacao: '', lancamentos: juntos, arquivo: meta.arquivo || '' };
+    };
+    const A = await contaDoLugar('ladoA');
+    if (conferir && !conferir()) return null;
+    const B = d.ladoUnico ? null : await contaDoLugar('ladoB');
+    if (conferir && !conferir()) return null;
+    return { A, B, lugares, metas };
+  }
+  function painelDeArquivos(codigo, d, comp, arqs) {
+    return '<div id="lv-arquivos">' + raiz.TelaSubir.painel({
+      chave: 'livre-' + codigo + '-' + d.id + '-' + U.anoMes(comp),
+      titulo: 'Arquivos desta conciliação', resumo: U.nomeCompetencia(comp), aberto: !arqs.A, fixo: false,
+      lugares: arqs.lugares, metas: arqs.metas,
+    }) + '</div>';
+  }
+
+  // ------------------------------------------------------------------
   async function mostrar(el, codigo, id, anoMes, conferir) {
     const emp = app().empresas.find((e) => String(e.codigo) === String(codigo));
     if (!emp) { el.innerHTML = '<div class="aviso ambar">Empresa não cadastrada. <a href="#/">Voltar</a></div>'; return; }
@@ -207,22 +306,46 @@
     if (!d) { el.innerHTML = '<div class="aviso ambar">Esta conciliação não existe mais. <a href="' + voltar + '">Voltar</a></div>'; return; }
     const comp = anoMes + '-01';
     T.carregando(el, 'Abrindo ' + nomeDaDefinicao(d) + ' de ' + U.nomeCompetencia(comp) + '…');
-    const dados = await carregarDiario(codigo, anoMes.slice(0, 4), conferir);
+    // A conciliação DE ARQUIVO não depende do livro diário: os dois lados saem dos razões que ele sobe aqui
+    // (Dony, 09/10/2026, os repasses entre lojas do Grupo Semar).
+    const porArquivo = d.origem === 'arquivo';
+    const dados = porArquivo ? { diario: null, balancetes: [], metas: [], plano: null } : await carregarDiario(codigo, anoMes.slice(0, 4), conferir);
     if (!dados) return;
     const cabecalho = '<a class="voltar" href="' + voltar + '">← Minhas conciliações</a>' +
       '<div class="cabecalho"><div class="titulos"><h1>' + T.esc(nomeDaDefinicao(d)) + '</h1>' +
       '<p class="suave">' + T.esc(emp.codigo + ' · ' + emp.nome) + ' · ' + U.nomeCompetencia(comp) + ' · ' + T.esc(textoDaDefinicao(d)) + '</p></div>' +
       '<div class="linha-flex"><span class="guardado" id="lv-guardado">—</span>' +
       '<button type="button" class="botao" data-acao="excel" title="As duas partes e as conciliações em Excel">⬇ Excel</button></div></div>';
-    if (!dados.diario) {
+    if (!porArquivo && !dados.diario) {
       el.innerHTML = cabecalho + '<div class="aviso ambar"><span class="icone-aviso">📒</span><div><b>Sem livro diário de ' + T.esc(anoMes.slice(0, 4)) + '.</b> ' +
         'Suba o diário do ano em <a href="#/empresa/' + encodeURIComponent(codigo) + '/diario">📒 Livro diário</a> — as duas contas saem dele.</div></div>';
       return;
     }
-    const razao = (conta) => MD().razaoDaConta(dados.diario, dados.balancetes, conta.codigo, { ate: comp });
-    const rA = razao(d.contaA);
-    const rB = razao(d.contaB);
+    let rA = null, rB = null, arquivosDaConc = null;
+    if (porArquivo) {
+      arquivosDaConc = await razoesDoArquivo(codigo, d, comp, conferir);
+      if (!arquivosDaConc) return;
+      if (!arquivosDaConc.A) {
+        el.innerHTML = cabecalho + painelDeArquivos(codigo, d, comp, arquivosDaConc) +
+          '<div class="aviso ambar"><span class="icone-aviso">📄</span><div><b>Suba o razão da Parte A</b> aí em cima' +
+          (d.ladoUnico ? '.' : ' e o da Parte B.') + ' As contas saem do próprio arquivo.</div></div>';
+        raiz.TelaSubir.ligar(el.querySelector('#lv-arquivos .arquivos-passo'), codigo, arquivosDaConc.lugares);
+        raiz.TelaSubir.ligarBotao(el.querySelector('[data-abrir-arquivos]'));
+        return;
+      }
+      rA = { conta: arquivosDaConc.A };
+      rB = arquivosDaConc.B ? { conta: arquivosDaConc.B } : { conta: { codigo: '', nome: '', lancamentos: [] } };
+    } else {
+      const razao = (conta) => MD().razaoDaConta(dados.diario, dados.balancetes, conta.codigo, { ate: comp });
+      rA = razao(d.contaA);
+      rB = razao(d.contaB);
+    }
     if (conferir && !conferir()) return;
+    // Com origem ARQUIVO a conta sai do razão lido: daí para a frente a tela é a mesma de sempre.
+    if (porArquivo) {
+      d.contaA = { codigo: rA.conta.codigo || 'A', classificacao: rA.conta.classificacao || '', titulo: rA.conta.nome || 'Parte A' };
+      d.contaB = { codigo: (rB.conta && rB.conta.codigo) || (d.ladoUnico ? '—' : 'B'), classificacao: '', titulo: (rB.conta && rB.conta.nome) || (d.ladoUnico ? 'um lado só' : 'Parte B') };
+    }
     // A Parte A entra pelo lado do saldo dela (ativo cresce no débito; passivo e resultado credor, no crédito).
     const sinalA = ladoDaConta(d.contaA, rA);
     const entrada = {
@@ -239,7 +362,8 @@
     entrada.decisoes = decisoes;
     const itens = M().itensLivres(entrada);
     E = { codigo, comp, emp, d, voltar, cabecalho, dados, rA, rB, entrada, itens, decisoes, registro, el: null,
-      selA: new Set(), selB: new Set(), abertos: new Set(), filtros: { busca: '', mostrar: '' }, fila: Promise.resolve() };
+      selA: new Set(), selB: new Set(), abertos: new Set(), filtros: { busca: '', mostrar: '' }, fila: Promise.resolve(),
+      arquivos: arquivosDaConc };
     const arrumado = M().arrumarGruposAB(decisoes.conciliacoesAB, itens.legado);
     decisoes.conciliacoesAB = arrumado.grupos;
     el.innerHTML = '<div class="tela-livre"></div>';
@@ -263,6 +387,7 @@
   // ------------------------------------------------------------------
   function desenhar() {
     E.el.innerHTML = E.cabecalho +
+      (E.arquivos ? painelDeArquivos(E.codigo, E.d, E.comp, E.arquivos) : '') +
       '<div id="lv-avisos"></div>' +
       '<div class="grade-4" id="lv-cartoes" style="margin-top:14px"></div>' +
       '<div id="lv-acoes"></div>' +
@@ -270,6 +395,10 @@
       '<div class="grade-2" id="lv-partes"></div>' +
       '<div id="lv-lista"></div>' +
       '<div id="lv-barra"></div>';
+    if (E.arquivos) {
+      raiz.TelaSubir.ligar(E.el.querySelector('#lv-arquivos .arquivos-passo'), E.codigo, E.arquivos.lugares);
+      raiz.TelaSubir.ligarBotao(E.el.querySelector('#lv-arquivos [data-abrir-arquivos]'));
+    }
     desenharAvisos();
     desenharCartoes();
     desenharAcoes();
@@ -305,15 +434,27 @@
     const ab = M().emAbertoAB(E.itens, E.decisoes.conciliacoesAB);
     const fecha = soma(E.itens.A) - soma(E.itens.B) === (ab.valorA - ab.valorB) + somaDasConciliacoes();
     partes.push(conferido && fecha
-      ? '<div class="aviso verde"><span class="icone-aviso">✓</span><div><b>Conferido no centavo.</b> As duas contas saem do livro diário e batem com o balancete; ' +
+      ? '<div class="aviso verde"><span class="icone-aviso">✓</span><div><b>Conferido no centavo.</b> ' +
+        (E.d.origem === 'arquivo' ? 'Os lançamentos são os dos arquivos que você subiu; ' : 'As duas contas saem do livro diário e batem com o balancete; ') +
         'o que está em aberto na Parte A menos o que está em aberto na Parte B, mais o que as conciliações levaram, é o movimento das duas contas.</div></div>'
       : '<div class="aviso ambar"><span class="icone-aviso">⚠️</span><div><b>Confira antes de usar.</b><ul class="pequeno">' +
         (fecha ? '' : '<li>As somas das partes não fecham com as conciliações.</li>') +
         avisos.map((a) => '<li>' + T.esc(a) + '</li>').join('') + '</ul></div></div>');
-    partes.push('<div class="aviso info"><span class="icone-aviso">📒</span><div>Do livro diário de ' + T.esc(String(E.dados.meta.competencia).slice(0, 4)) + ': ' +
-      '<b>' + T.esc(E.d.contaA.codigo) + '</b> ' + T.esc(E.rA.conta.nome) + ' (' + E.rA.conta.lancamentos.length.toLocaleString('pt-BR') + ' lanç.) e ' +
-      '<b>' + T.esc(E.d.contaB.codigo) + '</b> ' + T.esc(E.rB.conta.nome) + ' (' + E.rB.conta.lancamentos.length.toLocaleString('pt-BR') + ' lanç.), de ' +
-      T.esc(E.rA.periodo.de) + ' a ' + T.esc(E.rA.periodo.ate) + '.</div></div>');
+    if (E.d.origem === 'arquivo') {
+      const umLado = E.d.ladoUnico;
+      partes.push('<div class="aviso info"><span class="icone-aviso">📄</span><div>Dos arquivos que você subiu: ' +
+        '<b>' + T.esc(E.d.contaA.codigo) + '</b> ' + T.esc(E.rA.conta.nome) + ' (' + E.rA.conta.lancamentos.length.toLocaleString('pt-BR') + ' lanç.' +
+        (E.rA.conta.arquivo ? ', ' + T.esc(E.rA.conta.arquivo) : '') + ')' +
+        (umLado ? ' — conciliação de <b>um lado só</b>: o que se anula dentro do próprio razão.'
+          : ' e <b>' + T.esc(E.d.contaB.codigo) + '</b> ' + T.esc(E.rB.conta.nome) + ' (' + E.rB.conta.lancamentos.length.toLocaleString('pt-BR') + ' lanç.' +
+            (E.rB.conta.arquivo ? ', ' + T.esc(E.rB.conta.arquivo) : '') + ').') +
+        ' Para casar dois razões sem documento em comum, use o <b>📅 Data e valor</b>.</div></div>');
+    } else {
+      partes.push('<div class="aviso info"><span class="icone-aviso">📒</span><div>Do livro diário de ' + T.esc(String(E.dados.meta.competencia).slice(0, 4)) + ': ' +
+        '<b>' + T.esc(E.d.contaA.codigo) + '</b> ' + T.esc(E.rA.conta.nome) + ' (' + E.rA.conta.lancamentos.length.toLocaleString('pt-BR') + ' lanç.) e ' +
+        '<b>' + T.esc(E.d.contaB.codigo) + '</b> ' + T.esc(E.rB.conta.nome) + ' (' + E.rB.conta.lancamentos.length.toLocaleString('pt-BR') + ' lanç.), de ' +
+        T.esc(E.rA.periodo.de) + ' a ' + T.esc(E.rA.periodo.ate) + '.</div></div>');
+    }
     E.el.querySelector('#lv-avisos').innerHTML = partes.join('');
   }
 
@@ -329,15 +470,19 @@
     const acao = (id, classe, icone, titulo, sub, dica) => '<button type="button" class="acao ' + classe + '" data-acao="' + id + '" title="' + T.esc(dica) + '">' +
       '<span class="acao-icone" aria-hidden="true">' + icone + '</span><span class="acao-texto"><b>' + T.esc(titulo) + '</b><small>' + T.esc(sub) + '</small></span></button>';
     const lote = (id, cor, rotulo, qtd) => qtd ? '<button type="button" class="chip-desfazer" data-acao="' + id + '"><span class="cor ' + cor + '"></span>' + rotulo + ' <span class="qtd">' + n(qtd) + '</span></button>' : '';
-    const doc = grupos.filter((g) => g.regra !== 'manual' && !M().ehPorValor(g) && !M().ehComMargem(g) && !M().ehPorFornecedor(g) && !M().ehPorProximo(g)).length;
+    const doc = grupos.filter((g) => g.regra !== 'manual' && !M().ehPorValor(g) && !M().ehComMargem(g) && !M().ehPorFornecedor(g) && !M().ehPorProximo(g) && !M().ehPorDataEValor(g)).length;
     E.el.querySelector('#lv-acoes').innerHTML = '<div class="acoes-ab">' +
       '<div class="rotulo-regras pequeno">Conciliar automaticamente · escolha a regra (o que ela achar ganha ID e entra na lista)</div>' +
-      '<div class="acoes-conciliar cinco">' +
+      '<div class="acoes-conciliar sete">' +
       acao('conciliar-tudo', 'documento', '⚡', 'Documento e nome', 'o mesmo documento nos dois lados', 'Acha tudo o que casa pelo documento (a nota, o número do lançamento), primeiro com o mesmo nome e depois só pelo documento.') +
       acao('conciliar-fornecedor', 'fornecedor', '👤', 'Nome e valor', 'sem olhar o documento', 'Depois do ⚡, casa o que sobrou pelo MESMO nome e mesmo valor, sem olhar o documento.') +
       acao('conciliar-proximo', 'proximo', '👥', 'Nome próximo', 'nome parecido, mesmo valor', 'Depois do 👤, casa o que sobrou quando o nome começa pela mesma palavra e o valor é igual. Confira uma a uma.') +
       acao('conciliar-valor', 'valor', '≈', 'Só pelo valor', 'sem documento e sem nome', 'Casa o que sobrou por valor igual, sem olhar documento e nome. Só valor quebrado: inteiro terminado em zero fica de fora.') +
       acao('conciliar-margem', 'margem', '±', 'Com margem', 'doc + nome · até ' + T.moeda(M().MARGEM_AB), 'Casa pelo mesmo documento e nome aceitando diferença de até ' + T.moeda(M().MARGEM_AB) + '.') +
+      // DATA E VALOR: a regra que casa dois razões sem documento e sem nome em comum (Dony, 09/10/2026,
+      // os repasses entre lojas): primeiro no mesmo dia e, num botão à parte, com alguns dias de folga.
+      acao('conciliar-data', 'data', '📅', 'Data e valor', 'mesmo dia, mesmo valor', 'Casa um item de cada lado com o MESMO valor no MESMO dia — e, dentro da Parte A, o que se anula no mesmo dia. É a regra para dois razões sem documento em comum.') +
+      acao('conciliar-data-folga', 'data-folga', '📆', 'Data com folga', 'até ' + FOLGA_DIAS + ' dias de diferença', 'Depois do 📅, casa o que sobrou aceitando até ' + FOLGA_DIAS + ' dias entre uma data e a outra, pegando sempre o par mais perto.') +
       '</div>' +
       (grupos.length ? '<div class="desfazer-lote"><span class="rotulo-lote">↺ Desfazer em lote</span>' +
         lote('desfazer-automaticas', 'documento', 'Pelo documento', doc) +
@@ -345,6 +490,7 @@
         lote('desfazer-proximo', 'proximo', 'Nome próximo', grupos.filter(M().ehPorProximo).length) +
         lote('desfazer-valor', 'valor', 'Só pelo valor', grupos.filter(M().ehPorValor).length) +
         lote('desfazer-margem', 'margem', 'Com margem', grupos.filter(M().ehComMargem).length) +
+        lote('desfazer-data', 'data', 'Data e valor', grupos.filter(M().ehPorDataEValor).length) +
         lote('desfazer-manuais', 'manual', 'À mão', grupos.filter((g) => g.regra === 'manual').length) +
         '</div>' : '') +
       '</div>';
@@ -352,7 +498,7 @@
 
   function filtro(nome) { return E.filtros[nome] || ''; }
   function desenharFiltros() {
-    const opcoes = [['', 'Em aberto'], ['conciliados', 'Conciliados'], ['documento', '⚡ Conciliados pelo documento'],
+    const opcoes = [['', 'Em aberto'], ['conciliados', 'Conciliados'], ['documento', '⚡ Conciliados pelo documento'], ['data', '📅 Conciliados por data e valor'],
       ['fornecedor', '👤 Conciliados por nome e valor'], ['proximo', '👥 Conciliados por nome próximo'],
       ['valor', '≈ Conciliados só pelo valor'], ['margem', '± Conciliados com margem'],
       // As feitas à mão em separado (Dony, 05/10/2026): é o que mais se quer reconferir depois.
@@ -377,7 +523,8 @@
       const g = grupoDoItem(x);
       if (mostrar === 'todos') return true;
       if (mostrar === 'conciliados') return !!g;
-      if (mostrar === 'documento') return !!g && g.regra !== 'manual' && !M().ehPorValor(g) && !M().ehComMargem(g) && !M().ehPorFornecedor(g) && !M().ehPorProximo(g);
+      if (mostrar === 'documento') return !!g && g.regra !== 'manual' && !M().ehPorValor(g) && !M().ehComMargem(g) && !M().ehPorFornecedor(g) && !M().ehPorProximo(g) && !M().ehPorDataEValor(g);
+      if (mostrar === 'data') return M().ehPorDataEValor(g);
       if (mostrar === 'fornecedor') return M().ehPorFornecedor(g);
       if (mostrar === 'proximo') return M().ehPorProximo(g);
       if (mostrar === 'valor') return M().ehPorValor(g);
@@ -510,6 +657,13 @@
       if (novas.length) novas = iguais.concat(novas);
       nome = '👥 nome próximo';
     } else if (qual === 'valor') { novas = M().conciliarPorValor(E.itens, jaTem.concat(docs), quem, quando); nome = '≈ só pelo valor'; }
+    else if (qual === 'data') { novas = M().conciliarPorDataEValor(E.itens, jaTem.concat(docs), quem, quando, { folgaDias: 0 }); nome = '📅 data e valor'; }
+    else if (qual === 'data-folga') {
+      const exatas = M().conciliarPorDataEValor(E.itens, jaTem.concat(docs), quem, quando, { folgaDias: 0 });
+      novas = M().conciliarPorDataEValor(E.itens, jaTem.concat(docs, exatas), quem, quando, { folgaDias: FOLGA_DIAS });
+      if (novas.length) novas = exatas.concat(novas); else novas = exatas;
+      nome = '📆 data com folga';
+    }
     else if (qual === 'margem') { novas = M().conciliarAutomatico(E.itens, jaTem.concat(docs), quem, quando, { margem: M().MARGEM_AB }); nome = '± com margem'; }
     const entram = qual === 'documento' ? novas : docs.concat(novas);
     if (!entram.length) { T.avisoRapido('Nada casa por aí no que ficou em aberto.', 'ok', 7000); return; }
@@ -531,8 +685,8 @@
 
   async function desfazerEm(tipo) {
     const de = {
-      automaticas: (g) => g.regra !== 'manual' && !M().ehPorValor(g) && !M().ehComMargem(g) && !M().ehPorFornecedor(g) && !M().ehPorProximo(g),
-      fornecedor: M().ehPorFornecedor, proximo: M().ehPorProximo, valor: M().ehPorValor, margem: M().ehComMargem,
+      automaticas: (g) => g.regra !== 'manual' && !M().ehPorValor(g) && !M().ehComMargem(g) && !M().ehPorFornecedor(g) && !M().ehPorProximo(g) && !M().ehPorDataEValor(g),
+      fornecedor: M().ehPorFornecedor, proximo: M().ehPorProximo, valor: M().ehPorValor, margem: M().ehComMargem, data: M().ehPorDataEValor,
       manuais: (g) => g.regra === 'manual',
     }[tipo];
     const saem = E.decisoes.conciliacoesAB.filter(de);
@@ -637,7 +791,8 @@
       if (a === 'conciliar-mao') { await conciliarAMao(); return; }
       if (a.indexOf('desfazer-') === 0) { await desfazerEm(a.slice('desfazer-'.length)); return; }
       if (a.indexOf('conciliar-') === 0) {
-        const qual = { 'conciliar-tudo': 'documento', 'conciliar-fornecedor': 'fornecedor', 'conciliar-proximo': 'proximo', 'conciliar-valor': 'valor', 'conciliar-margem': 'margem' }[a];
+        const qual = { 'conciliar-tudo': 'documento', 'conciliar-fornecedor': 'fornecedor', 'conciliar-proximo': 'proximo', 'conciliar-valor': 'valor', 'conciliar-margem': 'margem',
+          'conciliar-data': 'data', 'conciliar-data-folga': 'data-folga' }[a];
         if (qual) await conciliarPor(qual);
       }
     });

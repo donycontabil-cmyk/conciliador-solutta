@@ -115,6 +115,9 @@
     'doc-par': 'mesmo documento, nome diferente: a baixa (ou compensação) mata a nota (ou adiantamento) de mesmo valor',
     'doc': 'mesmo documento, nome diferente: soma igual nos dois lados',
     // Só pelo valor (botão próprio, ver conciliarPorValor): sem olhar documento nem fornecedor.
+    // Data e valor (botão próprio, ver conciliarPorDataEValor): o que liga dois razões sem documento em comum.
+    'data-valor': 'data e valor: um item da Parte A e um da Parte B de mesmo valor na mesma data (ou perto, no botão com folga)',
+    'data-valor-par': 'data e valor: dentro da Parte A, o aumento e a redução de mesmo valor na mesma data (ou perto)',
     'valor-par': 'só pelo valor, sem documento e sem fornecedor: dentro da Parte A, quem aumenta com quem diminui o saldo, de mesmo valor quebrado',
     'valor': 'só pelo valor, sem documento e sem fornecedor: um item da Parte A e um da Parte B de mesmo valor quebrado',
     // Fornecedor e valor (botão próprio, ver conciliarPorFornecedor): mesmo fornecedor, SEM olhar o documento.
@@ -152,6 +155,7 @@
     'margem-fornecedor-par': '± doc + fornecedor · par', 'margem-fornecedor': '± doc + fornecedor', 'margem-fornecedor-valor': '± doc + fornecedor · valor',
     'margem-nome-par': '± doc + nome · par', 'margem-nome': '± doc + nome', 'margem-nome-valor': '± doc + nome · valor',
     'margem-palavra-par': '± doc + 1ª palavra · par', 'margem-palavra': '± doc + 1ª palavra', 'margem-palavra-valor': '± doc + 1ª palavra · valor',
+    'data-valor': 'data + valor', 'data-valor-par': 'data + valor · par',
     'manual': 'à mão',
   };
   // Margem do botão "± Conciliar com margem" (Dony, 16/09/2026: "até um real de margem"), em centavos.
@@ -489,6 +493,79 @@
     }
     return novos;
   }
+
+
+  // ------------------------------------------------------------------
+  // Conciliar por DATA E VALOR (Dony, 09/10/2026, os repasses entre lojas do Grupo Semar: "ele precisa achar
+  // o valor que sai do contas a receber no contas a pagar do outro lado, mas precisa checar a data e o
+  // valor"). Dois razões distintos, sem documento e sem fornecedor em comum: o que liga os dois lados é a
+  // data do lançamento com o valor.
+  //   1. data-valor     — um item da Parte A e um da Parte B, mesmo valor e MESMA DATA;
+  //   2. data-valor-par — dentro da Parte A, o aumento e a redução de mesmo valor e mesma data (é o que
+  //                       serve na conciliação de UM LADO SÓ, para achar o que se anula no próprio razão).
+  // Com folga de dias (opcoes.folgaDias), aceita a data perto e pega sempre o par MAIS PRÓXIMO no tempo —
+  // ele pediu assim: primeiro no mesmo dia, e o que sobrar num segundo botão, com folga.
+  // O valor redondo entra: aqui a data já é a garantia.
+  // ------------------------------------------------------------------
+  function conciliarPorDataEValor(itens, existentes, quem, quando, opcoes) {
+    const folga = Math.max(0, Math.min(90, Number((opcoes || {}).folgaDias) || 0));
+    const usados = new Set();
+    (existentes || []).forEach((g) => (g.a || []).concat(g.b || []).forEach((id) => usados.add(id)));
+    let proximo = proximoIdAB(existentes);
+    const novos = [];
+    const soma = (xs) => xs.reduce((s, x) => s + x.valor, 0);
+    const serve = (x) => !usados.has(x.id);
+    const dia = (x) => (typeof x.ordem === 'number' ? x.ordem : null);
+    const perto = (a, b) => {
+      const da = dia(a), db = dia(b);
+      if (da === null || db === null) return null;
+      const d = Math.abs(da - db);
+      return d <= folga ? d : null;
+    };
+    function registrar(a, b, regra, distancia) {
+      const todos = a.concat(b);
+      const nomeDe = (todos.find((x) => x.chave !== SEM) || todos[0]).nome;
+      const g = { id: proximo++, tipo: tipoAB(a.length, b.length), regra, documento: (todos.find((x) => x.doc) || {}).doc || '', nome: nomeDe,
+        a: a.map((x) => x.id), b: b.map((x) => x.id), valorA: soma(a), valorB: soma(b), quem: quem || '', quando: quando || '' };
+      if (distancia) g.diasDeDiferenca = distancia;
+      novos.push(g);
+      todos.forEach((x) => usados.add(x.id));
+    }
+    // 1. Parte A com Parte B: mesmo valor e a data mais próxima dentro da folga.
+    const ladoA = (itens.A || []).filter(serve).sort((p, q) => p.ordem - q.ordem);
+    const ladoB = (itens.B || []).filter(serve).sort((p, q) => p.ordem - q.ordem);
+    const porValorB = new Map();
+    ladoB.forEach((b) => { const k = b.valor; if (!porValorB.has(k)) porValorB.set(k, []); porValorB.get(k).push(b); });
+    for (const a of ladoA) {
+      if (!serve(a)) continue;
+      const lista = porValorB.get(a.valor);
+      if (!lista || !lista.length) continue;
+      let melhor = -1, melhorD = null;
+      lista.forEach((b, j) => {
+        if (!serve(b)) return;
+        const d = perto(a, b);
+        if (d === null) return;
+        if (melhorD === null || d < melhorD) { melhor = j; melhorD = d; }
+      });
+      if (melhor >= 0) { const b = lista[melhor]; registrar([a], [b], 'data-valor', melhorD); lista.splice(melhor, 1); }
+    }
+    // 2. Dentro da Parte A: o aumento e a redução de mesmo valor e data perto (a conciliação de um lado só).
+    const aumentos = (itens.A || []).filter((x) => serve(x) && x.valor > 0).sort((p, q) => p.ordem - q.ordem);
+    const reducoes = (itens.A || []).filter((x) => serve(x) && x.valor < 0).sort((p, q) => p.ordem - q.ordem);
+    for (const r of reducoes) {
+      if (!serve(r)) continue;
+      let melhor = -1, melhorD = null;
+      aumentos.forEach((n, j) => {
+        if (!serve(n) || n.valor !== -r.valor) return;
+        const d = perto(n, r);
+        if (d === null) return;
+        if (melhorD === null || d < melhorD) { melhor = j; melhorD = d; }
+      });
+      if (melhor >= 0) { registrar([aumentos[melhor], r], [], 'data-valor-par', melhorD); aumentos.splice(melhor, 1); }
+    }
+    return novos;
+  }
+  function ehPorDataEValor(g) { return !!g && (g.regra === 'data-valor' || g.regra === 'data-valor-par'); }
 
   // ------------------------------------------------------------------
   // Conciliar por FORNECEDOR E VALOR (Dony, 22/09/2026: "se eu tenho um fornecedor que tem o débito e o
@@ -1107,6 +1184,6 @@
     normalizarDocumento, documentoDaLinha, itensAB, conciliarAutomatico, emAbertoAB, tipoAB, proximoIdAB, REGRAS_AB,
     compararPorDocumento, arrumarGruposAB, relatorioAB, pendenciasAB, saldoInicialAB, idsDeTitulos, COMO_AB, nomeComparavel, ladosDoRazao,
     conciliarPorValor, valorRedondo, ehPorValor, ladoDC,
-    ehComMargem, ehAMao, ehPorFornecedor, ehPorProximo, conciliarPorFornecedor, MARGEM_AB, atualizarAB, faltandoNoGrupo, resumoDoItem, compararVersoes, resumoDaComparacao,
+    ehComMargem, ehAMao, ehPorFornecedor, ehPorProximo, conciliarPorFornecedor, conciliarPorDataEValor, ehPorDataEValor, MARGEM_AB, atualizarAB, faltandoNoGrupo, resumoDoItem, compararVersoes, resumoDaComparacao,
   };
 });

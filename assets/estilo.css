@@ -196,6 +196,9 @@ p { margin: 0; }
 .acoes-conciliar.quatro { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 /* Com cinco regras os botões ficam menores, mas continuam do mesmo tamanho entre si (Dony, 22/09/2026). */
 .acoes-conciliar.cinco { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
+/* Sete regras (as cinco de sempre + data e valor, das conciliações de arquivo). */
+.acoes-conciliar.sete { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+@media (min-width: 1500px) { .acoes-conciliar.sete { grid-template-columns: repeat(7, minmax(0, 1fr)); } }
 .acoes-conciliar.cinco .acao { padding: 7px 10px 7px 8px; gap: 8px; }
 .acoes-conciliar.cinco .acao-icone { width: 30px; height: 30px; font-size: 16px; border-radius: 9px; }
 .acoes-conciliar.cinco .acao-texto b { font-size: 13px; }

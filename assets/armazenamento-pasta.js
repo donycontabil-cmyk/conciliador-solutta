@@ -452,9 +452,14 @@
       for (const d of valor) {
         if (!d || !/^[A-Za-z0-9_-]{1,20}$/.test(String(d.id || '')) || vistos.has(String(d.id))) continue;
         const a = conta(d.contaA), b = conta(d.contaB);
-        if (!a || !b) continue;
+        // A conciliação DE ARQUIVO não tem conta no cadastro: as contas saem do razão que ele sobe
+        // (Dony, 09/10/2026). Sem isto, a definição dela era descartada na gravação.
+        const porArquivo = d.origem === 'arquivo';
+        if (!porArquivo && (!a || !b)) continue;
         vistos.add(String(d.id));
-        limpo.push({ id: String(d.id), nome: String(d.nome || '').slice(0, 120), contaA: a, contaB: b,
+        limpo.push({ id: String(d.id), nome: String(d.nome || '').slice(0, 120),
+          origem: porArquivo ? 'arquivo' : 'diario', ladoUnico: porArquivo && !!d.ladoUnico,
+          contaA: a, contaB: b,
           regra: d.regra === 'mesmo-valor' ? 'mesmo-valor' : 'contrapartida',
           criadoEm: Util.paraMs(d.criadoEm) ? String(d.criadoEm) : Util.agoraISO(), criadoPor: String(d.criadoPor || '').slice(0, 60) });
         if (limpo.length >= 60) break;
