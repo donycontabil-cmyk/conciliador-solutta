@@ -137,6 +137,14 @@
       'A empresa de origem <b>não muda em nada</b>: ela é só lida.</p>' +
       (outras.length ? '<div class="linha-flex" style="gap:8px;flex-wrap:wrap">' +
         '<select id="md-origem" style="min-width:280px">' + opcoes + '</select>' +
+        // MULTIPLICAR (Dony, 20/10/2026): "só muda os valores de forma proporcional". Inteiro, para
+        // tudo continuar exato — ver o comentário em armazenamento-pasta.js.
+        '<label class="suave pequeno" style="display:flex;align-items:center;gap:6px" ' +
+        'title="1 = cópia igual. Outro número multiplica todos os valores: as contas, as datas e as proporções (AV %, AH %, indicadores) ficam iguais, só a escala muda.">' +
+        // Campo de TEXTO, não de número: num campo de número o navegador apaga o que ele não
+        // entende ("1,5" some) e o multiplicador viraria 1 calado. Aqui o que foi digitado fica
+        // na tela e o programa diz por que não serve.
+        'multiplicar por <input id="md-fator" type="text" inputmode="numeric" maxlength="4" value="1" style="width:60px;text-align:center"></label>' +
         '<button type="button" class="botao primario" data-acao="copiar-modelo">📋 Copiar os dados para cá</button>' +
         (temDados ? '<button type="button" class="botao" data-acao="limpar-modelo" title="Apaga os arquivos e as conciliações desta empresa modelo (o original continua inteiro na empresa de origem)">🧹 Limpar esta empresa</button>' : '') +
         '</div>' +
@@ -160,10 +168,23 @@
         const daOrigem = app().empresas.find((e) => String(e.codigo) === String(origem)) || {};
         const quantos = (await arm.arquivos(origem)).length;
         const tinha = (await arm.arquivos(emp.codigo)).length;
+        const campoFator = painel.querySelector('#md-fator');
+        const digitado = campoFator ? String(campoFator.value).trim() : '';
+        // Campo vazio é 1 (cópia igual). Qualquer outra coisa tem que ser inteiro: "1,5" e "abc"
+        // viram aviso, não viram 1 em silêncio.
+        const fator = digitado === '' ? 1 : Number(digitado.replace(',', '.'));
+        if (!Number.isInteger(fator) || fator < 1 || fator > 1000) {
+          aviso.innerHTML = '<div class="aviso ambar"><span class="icone-aviso">⚠️</span><div>O multiplicador precisa ser um número <b>inteiro</b> de 1 a 1000 (<b>1</b> = cópia igual).<br>' +
+            '<span class="suave pequeno">Com fator quebrado os centavos não se distribuem igual entre os dois lados, e o balanço deixaria de fechar.</span></div></div>';
+          return;
+        }
         const sim = await T.confirmar({
           titulo: 'Copiar os dados para a empresa modelo?',
-          texto: 'Vai trazer para <b>' + T.esc(emp.nome) + '</b> uma cópia igual de <b>' + T.esc(daOrigem.nome || origem) + '</b>: ' +
-            quantos + ' arquivo(s), as conciliações e a configuração.' +
+          texto: 'Vai trazer para <b>' + T.esc(emp.nome) + '</b> uma cópia de <b>' + T.esc(daOrigem.nome || origem) + '</b>: ' +
+            quantos + ' arquivo(s)' + (fator === 1 ? ', as conciliações e a configuração.' : ' e a configuração.') +
+            (fator !== 1 ? '<br><br><b>Todos os valores serão multiplicados por ' + fator + '.</b> As contas, as datas e as proporções ficam iguais — só a escala muda. ' +
+              'As conciliações já feitas <b>não vêm</b> (elas se amarram no valor de cada lançamento): é só apertar os botões de conciliar aqui depois. ' +
+              'O arquivo original também não vem, porque ele traz os valores de verdade dentro.' : '') +
             (tinha ? '<br><br>O que está aqui hoje (' + tinha + ' arquivo(s)) <b>é apagado antes</b>, para as duas empresas não se misturarem.' : '') +
             '<br><br><span class="suave pequeno">A empresa de origem não muda: ela é só lida.</span>',
           botao: '📋 Copiar',
@@ -172,12 +193,14 @@
         b.disabled = true;
         aviso.innerHTML = '<span class="suave pequeno">Copiando…</span>';
         try {
-          const r = await arm.copiarEmpresa(origem, emp.codigo, { limparAntes: true });
+          const r = await arm.copiarEmpresa(origem, emp.codigo, { limparAntes: true, fator });
           app().empresas = await arm.empresas();
           aviso.innerHTML = '<div class="aviso verde"><span class="icone-aviso">✓</span><div><b>Copiado de ' + T.esc(r.nomeDaOrigem) + '.</b> ' +
-            r.arquivos + ' arquivo(s), ' + r.conciliacoes + ' conciliação(ões)' +
+            r.arquivos + ' arquivo(s)' + (r.semConciliacoes ? '' : ', ' + r.conciliacoes + ' conciliação(ões)') +
             (r.documentos ? ', ' + r.documentos + ' tabela(s) do ERP' : '') +
-            (r.config.length ? ' e a configuração (' + T.esc(r.config.join(', ')) + ')' : '') + '.</div></div>';
+            (r.config.length ? ' e a configuração (' + T.esc(r.config.join(', ')) + ')' : '') + '.' +
+            (r.fator !== 1 ? '<br>Os valores foram <b>multiplicados por ' + r.fator + '</b>. As conciliações não vieram: aperte os botões de conciliar para refazê-las.' : '') +
+            '</div></div>';
           setTimeout(() => app().mostrarRota(), 900);
         } catch (x) {
           b.disabled = false;

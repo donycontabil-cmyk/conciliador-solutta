@@ -724,6 +724,10 @@
       const dirMes = dir && await pasta(dir, ['arquivos', p.anoMes], false);
       const doc = dirMes && await lerJson(dirMes, id + '.json');
       if (!doc) return null;
+      // Arquivo guardado SEM original: acontece na cópia com fator (o original traz os valores de
+      // verdade dentro) e em qualquer conteúdo que não nasceu de um arquivo subido. Devolve null —
+      // antes, isto quebrava com "path must be of type string".
+      if (!doc.meta || !doc.meta.original) return null;
       return lerBytes(dirMes, doc.meta.original);
     }
 
@@ -1139,10 +1143,51 @@
       return r;
     }
 
+    // MULTIPLICAR OS VALORES (Dony, 20/10/2026: "que tal você colocar uma opção de multiplicar os
+    // dados por x?"): a cópia sai com a mesma estrutura, as mesmas contas e as mesmas datas, mas
+    // com os valores noutra escala — serve para mostrar o programa sem mostrar o faturamento real.
+    //
+    // O FATOR É INTEIRO, de propósito. Tudo aqui é centavo INTEIRO: inteiro × inteiro continua
+    // exato, e toda identidade se mantém sozinha (a × f + b × f = (a + b) × f). Com fator quebrado
+    // metade dos valores cairia em meio centavo, o arredondamento não se distribuiria igual entre
+    // ativo e passivo, e o balanço passaria a não fechar por centavos.
+    //
+    // Multiplica só o que é DINHEIRO (a lista abaixo): dia, mês, ano, nível, código de conta,
+    // número de documento e contagem ficam como estão. O plano de contas não tem valor nenhum —
+    // e o "total" dele é quantidade de contas, não dinheiro.
+    const CAMPOS_DE_DINHEIRO = ['debito', 'credito', 'saldo', 'saldoAnterior', 'saldoAtual', 'saldoFinal',
+      'saldoFinalDeclarado', 'totalDebito', 'totalCredito', 'totalDebitos', 'totalCreditos', 'debitos',
+      'creditos', 'valor', 'valorOriginal', 'valorNff', 'valorA', 'valorB', 'total'];
+    function multiplicarValores(valor, fator, dentroDeDinheiro) {
+      if (typeof valor === 'number') return dentroDeDinheiro && Number.isFinite(valor) ? Math.round(valor) * fator : valor;
+      if (Array.isArray(valor)) return valor.map((x) => multiplicarValores(x, fator, dentroDeDinheiro));
+      if (valor && typeof valor === 'object') {
+        const saida = {};
+        Object.keys(valor).forEach((k) => {
+          saida[k] = multiplicarValores(valor[k], fator, dentroDeDinheiro || CAMPOS_DE_DINHEIRO.indexOf(k) >= 0);
+        });
+        return saida;
+      }
+      return valor;
+    }
+    function comFator(conteudo, fator) {
+      if (!conteudo || typeof conteudo !== 'object' || fator === 1) return conteudo;
+      if (conteudo.tipo === 'plano') return conteudo;
+      return multiplicarValores(conteudo, fator, false);
+    }
+
     async function copiarEmpresa(de, para, opcoes) {
       exigirConexao();
       const origem = validarCodigo(de);
       const destino = validarCodigo(para);
+      // Nada de arredondar por conta própria: 1,5 vira 2 em silêncio e a cópia sai com o dobro sem
+      // ninguém ter pedido. Fator que não é inteiro é RECUSADO, dizendo por quê.
+      const pedido = (opcoes || {}).fator;
+      const fator = (pedido === undefined || pedido === null || pedido === '') ? 1 : Number(pedido);
+      if (!Number.isInteger(fator) || fator < 1 || fator > 1000) {
+        throw erro('Validacao', 'O multiplicador precisa ser um número INTEIRO de 1 a 1000 (1 = cópia igual). ' +
+          'Com fator quebrado, os centavos não se distribuem igual entre os dois lados e o balanço deixaria de fechar.');
+      }
       if (opcoes && opcoes.limparAntes && origem !== destino) await limparEmpresa(destino);
       if (origem === destino) throw erro('Validacao', 'A empresa de origem e a de destino são a mesma.');
       const lista = (await lerJson(raiz, 'empresas.json')) || [];
@@ -1153,12 +1198,14 @@
       if (!eDestino.ehModelo) throw erro('NaoEhModelo', 'A empresa ' + destino + ' (' + eDestino.nome + ') não está marcada como EMPRESA MODELO. ' +
         'Só a empresa modelo recebe cópia de outra: marque isso no cadastro dela.');
 
-      const r = { de: origem, para: destino, nomeDaOrigem: eOrigem.nome, arquivos: 0, jaTinha: 0,
-        conciliacoes: 0, congelados: 0, documentos: 0, config: [] };
+      const r = { de: origem, para: destino, nomeDaOrigem: eOrigem.nome, fator, arquivos: 0, jaTinha: 0,
+        conciliacoes: 0, congelados: 0, documentos: 0, config: [], semConciliacoes: fator !== 1 };
 
       for (const meta of await arquivos(origem)) {
-        const conteudo = await conteudoDoArquivo(meta.id);
-        const bytes = await bytesOriginais(meta.id);
+        const conteudo = comFator(await conteudoDoArquivo(meta.id), fator);
+        // Com fator, o arquivo ORIGINAL não vem: ele traz os valores de verdade dentro, e a cópia
+        // ficaria dizendo uma coisa no que o programa leu e outra no arquivo guardado como prova.
+        const bytes = fator === 1 ? await bytesOriginais(meta.id) : null;
         const novo = Object.assign({}, meta, { codigo: destino, preservarDatas: true });
         delete novo.id;
         delete novo.original;
@@ -1166,12 +1213,18 @@
         if (salvo.jaExistia) r.jaTinha++; else r.arquivos++;
       }
 
-      for (const c of await conciliacoes(origem)) {
-        const novo = Object.assign({}, c, { codigo: destino, id: idNoutraEmpresa(c.id, origem, destino) });
-        delete novo.criadoEm;
-        delete novo.atualizadoEm;
-        await salvarConciliacao(novo);
-        r.conciliacoes++;
+      // As conciliações só vêm na cópia IGUAL. Cada item conciliado é achado por uma "digital" que
+      // nasce do conteúdo do lançamento — conta, data, histórico e VALOR. Mudando o valor, a digital
+      // muda e as conciliações apontariam para itens que não existem mais. Com fator, é só apertar
+      // os botões de conciliar na cópia: eles refazem tudo em segundos.
+      if (fator === 1) {
+        for (const c of await conciliacoes(origem)) {
+          const novo = Object.assign({}, c, { codigo: destino, id: idNoutraEmpresa(c.id, origem, destino) });
+          delete novo.criadoEm;
+          delete novo.atualizadoEm;
+          await salvarConciliacao(novo);
+          r.conciliacoes++;
+        }
       }
 
       const dirOrigem = await pastaDaEmpresa(origem, false);
@@ -1182,7 +1235,7 @@
         if (!doc) continue;
         const dirCongDestino = await pasta(await pastaDaEmpresa(destino, true), ['congelados'], true);
         const id = idNoutraEmpresa(doc.id, origem, destino);
-        await gravar(dirCongDestino, id + '.json', JSON.stringify(Object.assign({}, doc, { id })));
+        await gravar(dirCongDestino, id + '.json', JSON.stringify(Object.assign({}, doc, { id, conteudo: comFator(doc.conteudo, fator) })));
         r.congelados++;
       }
 
@@ -1204,7 +1257,8 @@
 
       await registrarNoLog({ codigo: destino, acao: 'empresa-copiada', alvo: origem,
         detalhe: 'de ' + origem + ' · ' + r.arquivos + ' arquivo(s), ' + r.conciliacoes + ' conciliação(ões), ' +
-          r.documentos + ' tabela(s) do ERP' + (r.jaTinha ? ' · ' + r.jaTinha + ' arquivo(s) já estavam lá' : '') });
+          r.documentos + ' tabela(s) do ERP' + (fator !== 1 ? ' · valores multiplicados por ' + fator : '') +
+          (r.jaTinha ? ' · ' + r.jaTinha + ' arquivo(s) já estavam lá' : '') });
       return r;
     }
     // O que a empresa guarda de TRABALHO CONFERIDO, além do cadastro: as linhas da DRE, as colunas do
