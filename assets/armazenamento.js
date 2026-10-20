@@ -39,6 +39,8 @@
     'documentoGeral', 'salvarDocumentoGeral', 'documentosGerais',
     'registrarNoLog',
     'exportarTudo', 'exportarEmpresa', 'importarTudo',
+    // Empresa modelo: copiar os dados de uma empresa de verdade e limpar para copiar outra.
+    'copiarEmpresa', 'limparEmpresa',
   ];
 
   function conferirContrato(impl, nome) {

@@ -107,11 +107,106 @@
       return;
     }
     el.innerHTML = '<a class="voltar" href="#/">← Empresas</a>' +
-      '<div class="cabecalho"><div class="titulos"><h1>' + T.esc(emp.nome) + '</h1><p class="suave">Código ' + T.esc(emp.codigo) + (detalhes.length ? ' · ' + T.esc(detalhes.join(' · ')) : '') + '</p>' +
+      '<div class="cabecalho"><div class="titulos"><h1>' + (emp.ehModelo ? '🧪 ' : '') + T.esc(emp.nome) + '</h1><p class="suave">Código ' + T.esc(emp.codigo) + (detalhes.length ? ' · ' + T.esc(detalhes.join(' · ')) : '') + '</p>' +
       (padroes.length ? '<p class="suave pequeno" title="O que o programa já aprendeu do sistema desta empresa: os próximos arquivos entram por aqui">🧠 Padrões desta empresa · ' + T.esc(padroes.join(' · ')) + '</p>' : '') + '</div>' +
       '<button class="botao" id="bt-editar">Editar cadastro</button></div>' +
+      painelDoModelo(emp, arquivos) +
       '<div class="grade-3">' + cartaoApresentacao + cartaoDiario + cartoes + cartaoLivres + cartaoResultado + cartaoBackup + '</div>';
     el.querySelector('#bt-editar').addEventListener('click', () => raiz.TelaCarteira.formulario(emp));
+    ligarModelo(el, emp);
+  }
+
+  // ------------------------------------------------------------------
+  // EMPRESA MODELO (Dony, 20/10/2026: "criei aqui a empresa modelo e queria ter a opção de copiar os
+  // dados de outra empresa… cópia igual, aí eu analiso aqui" + "quero poder excluir e copiar outro"
+  // + "isso só no modelo, ok?"). O painel só aparece na empresa marcada como modelo no cadastro.
+  // A cópia é FIEL: os mesmos arquivos (com os originais), as mesmas conciliações e a configuração.
+  // A empresa de origem é só lida — nada nela muda.
+  // ------------------------------------------------------------------
+  function painelDoModelo(emp, arquivos) {
+    if (!emp.ehModelo) return '';
+    const outras = app().empresas.filter((e) => String(e.codigo) !== String(emp.codigo) && !e.ehGrupo && !e.ehModelo)
+      .sort((a, b) => String(a.nome).localeCompare(String(b.nome)));
+    const temDados = arquivos.length > 0;
+    const opcoes = ['<option value="">— escolha a empresa —</option>'].concat(outras.map((e) =>
+      '<option value="' + T.esc(e.codigo) + '">' + T.esc(e.codigo + ' · ' + e.nome) + '</option>')).join('');
+    return '<div class="cartao corpo modelo-painel" style="margin-bottom:14px">' +
+      '<h3 style="margin:0 0 6px">🧪 Empresa modelo</h3>' +
+      '<p class="suave" style="line-height:1.55;margin:0 0 10px">Esta empresa é para estudar e demonstrar. Traga para cá os dados de uma empresa de verdade — ' +
+      '<b>cópia igual</b>: os mesmos arquivos (com os originais), as mesmas conciliações e a configuração dela. ' +
+      'A empresa de origem <b>não muda em nada</b>: ela é só lida.</p>' +
+      (outras.length ? '<div class="linha-flex" style="gap:8px;flex-wrap:wrap">' +
+        '<select id="md-origem" style="min-width:280px">' + opcoes + '</select>' +
+        '<button type="button" class="botao primario" data-acao="copiar-modelo">📋 Copiar os dados para cá</button>' +
+        (temDados ? '<button type="button" class="botao" data-acao="limpar-modelo" title="Apaga os arquivos e as conciliações desta empresa modelo (o original continua inteiro na empresa de origem)">🧹 Limpar esta empresa</button>' : '') +
+        '</div>' +
+        (temDados ? '<p class="suave pequeno" style="margin:10px 0 0">Já tem ' + arquivos.length + ' arquivo(s) aqui. Copiar outra empresa <b>limpa isto antes</b>, para as duas não se misturarem.</p>' : '')
+        : '<p class="suave pequeno">Nenhuma outra empresa cadastrada para copiar.</p>') +
+      '<div id="md-aviso" style="margin-top:10px"></div></div>';
+  }
+
+  function ligarModelo(el, emp) {
+    const painel = el.querySelector('.modelo-painel');
+    if (!painel) return;
+    const aviso = painel.querySelector('#md-aviso');
+    painel.addEventListener('click', async (ev) => {
+      const b = ev.target.closest('[data-acao]');
+      if (!b) return;
+      const acao = b.getAttribute('data-acao');
+      const arm = app().armazenamento;
+      if (acao === 'copiar-modelo') {
+        const origem = painel.querySelector('#md-origem').value;
+        if (!origem) { aviso.innerHTML = '<div class="aviso ambar"><span class="icone-aviso">⚠️</span><div>Escolha a empresa de onde copiar.</div></div>'; return; }
+        const daOrigem = app().empresas.find((e) => String(e.codigo) === String(origem)) || {};
+        const quantos = (await arm.arquivos(origem)).length;
+        const tinha = (await arm.arquivos(emp.codigo)).length;
+        const sim = await T.confirmar({
+          titulo: 'Copiar os dados para a empresa modelo?',
+          texto: 'Vai trazer para <b>' + T.esc(emp.nome) + '</b> uma cópia igual de <b>' + T.esc(daOrigem.nome || origem) + '</b>: ' +
+            quantos + ' arquivo(s), as conciliações e a configuração.' +
+            (tinha ? '<br><br>O que está aqui hoje (' + tinha + ' arquivo(s)) <b>é apagado antes</b>, para as duas empresas não se misturarem.' : '') +
+            '<br><br><span class="suave pequeno">A empresa de origem não muda: ela é só lida.</span>',
+          botao: '📋 Copiar',
+        });
+        if (!sim) return;
+        b.disabled = true;
+        aviso.innerHTML = '<span class="suave pequeno">Copiando…</span>';
+        try {
+          const r = await arm.copiarEmpresa(origem, emp.codigo, { limparAntes: true });
+          app().empresas = await arm.empresas();
+          aviso.innerHTML = '<div class="aviso verde"><span class="icone-aviso">✓</span><div><b>Copiado de ' + T.esc(r.nomeDaOrigem) + '.</b> ' +
+            r.arquivos + ' arquivo(s), ' + r.conciliacoes + ' conciliação(ões)' +
+            (r.documentos ? ', ' + r.documentos + ' tabela(s) do ERP' : '') +
+            (r.config.length ? ' e a configuração (' + T.esc(r.config.join(', ')) + ')' : '') + '.</div></div>';
+          setTimeout(() => app().mostrarRota(), 900);
+        } catch (x) {
+          b.disabled = false;
+          aviso.innerHTML = '<div class="aviso vermelho"><span class="icone-aviso">⚠️</span><div>' + T.esc(T.mensagemDeErro(x)) + '</div></div>';
+        }
+        return;
+      }
+      if (acao === 'limpar-modelo') {
+        const sim = await T.confirmar({
+          titulo: 'Limpar a empresa modelo?',
+          texto: 'Apaga os arquivos, as conciliações e a configuração de <b>' + T.esc(emp.nome) + '</b>. O cadastro dela fica.' +
+            '<br><br><span class="suave pequeno">É cópia: o original continua inteiro na empresa de onde você copiou.</span>',
+          botao: '🧹 Limpar',
+          perigo: true,
+        });
+        if (!sim) return;
+        b.disabled = true;
+        try {
+          const r = await arm.limparEmpresa(emp.codigo);
+          app().empresas = await arm.empresas();
+          aviso.innerHTML = '<div class="aviso verde"><span class="icone-aviso">✓</span><div><b>Limpa.</b> ' +
+            r.arquivos + ' arquivo(s) e ' + r.conciliacoes + ' conciliação(ões) apagados.</div></div>';
+          setTimeout(() => app().mostrarRota(), 900);
+        } catch (x) {
+          b.disabled = false;
+          aviso.innerHTML = '<div class="aviso vermelho"><span class="icone-aviso">⚠️</span><div>' + T.esc(T.mensagemDeErro(x)) + '</div></div>';
+        }
+      }
+    });
   }
 
   raiz.TelaEmpresa = { mostrar };

@@ -186,6 +186,11 @@
         '<div class="emp-obrigacoes">' + obrigacoesParaMarcar().map((o) => '<label class="caixa-opcao"><input type="checkbox" data-ob="' + T.esc(o.chave) + '"' +
           ((e.obrigacoes || []).indexOf(o.chave) >= 0 ? ' checked' : '') + '> ' + T.esc(o.nome) + '</label>').join('') + '</div>' +
         '<span class="ajuda">Só as marcadas entram no <b>Controle de obrigações</b>. Sem marcar nenhuma, ela aparece em todas.</span></div>' +
+        // EMPRESA MODELO (Dony, 20/10/2026): a empresa de estudo. Só ela recebe a cópia dos dados de
+        // uma empresa de verdade, e só ela o programa deixa limpar de uma vez.
+        '<div class="campo inteiro"><label class="caixa-opcao"><input type="checkbox" id="f-modelo"' + (e.ehModelo ? ' checked' : '') + '> ' +
+        '<b>É a empresa modelo</b> (para estudo e demonstração)</label>' +
+        '<span class="ajuda">Dentro dela aparece a opção de <b>copiar os dados de uma empresa de verdade</b> para mexer à vontade, e de limpar tudo para copiar outra. Nenhuma outra empresa recebe cópia.</span></div>' +
         '</div><div id="f-erro" style="margin-top:12px"></div>',
       botoes: [{ texto: 'Cancelar', valor: null }, {
         texto: novo ? 'Cadastrar' : 'Salvar', tipo: 'primario',
@@ -200,6 +205,7 @@
             obrigacoes: Array.from(j.querySelectorAll('[data-ob]')).filter((c) => c.checked).map((c) => c.getAttribute('data-ob')),
             atividade: j.querySelector('#f-atividade').value.trim(),
             grupo: j.querySelector('#f-grupo').value.trim(),
+            ehModelo: j.querySelector('#f-modelo').checked,
           };
           const erro = j.querySelector('#f-erro');
           if (novo && app().empresas.some((x) => String(x.codigo) === dados.codigo)) {

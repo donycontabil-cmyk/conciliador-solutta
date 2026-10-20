@@ -614,6 +614,10 @@
       const cons = limparConsolidacao(empresa.consolidacao !== undefined ? empresa.consolidacao : (anterior && anterior.consolidacao));
       if (cons) { registro.consolidacao = cons; registro.ehGrupo = true; }
       else if (empresa.ehGrupo === true || (empresa.ehGrupo === undefined && anterior && anterior.ehGrupo)) registro.ehGrupo = true;
+      // EMPRESA MODELO (Dony, 20/10/2026: "isso só no modelo, ok?"): a empresa de estudo, a única que
+      // pode receber a cópia dos dados de uma empresa de verdade — e a única que o programa deixa
+      // limpar de uma vez. Sem esta marca, copiar por cima de um cliente não acontece nem por engano.
+      if (empresa.ehModelo === true || (empresa.ehModelo === undefined && anterior && anterior.ehModelo)) registro.ehModelo = true;
       // As obrigações que esta empresa entrega (vazio = entra em todas).
       const obrigs = limparObrigacoesDaEmpresa(empresa.obrigacoes !== undefined ? empresa.obrigacoes : (anterior && anterior.obrigacoes));
       if (obrigs.length) registro.obrigacoes = obrigs;
@@ -1060,6 +1064,138 @@
 
     async function exportarTudo() { return montarPacote(null); }
     async function exportarEmpresa(codigo) { return montarPacote(codigo); }
+
+    // ------------------------------------------------------------------
+    // COPIAR OS DADOS DE UMA EMPRESA PARA OUTRA (Dony, 20/10/2026: "criei aqui a empresa modelo e
+    // queria ter a opção de copiar os dados de outra empresa… cópia igual, aí eu analiso aqui").
+    // Cópia FIEL: os mesmos arquivos (com os bytes originais), as mesmas conciliações, os mesmos
+    // congelados e as tabelas do ERP. Nada da empresa de origem é alterado — ela é só lida.
+    //
+    // O que NÃO vem: o nome, o código e o CNPJ (são do destino) e a CONSOLIDAÇÃO (ela aponta para
+    // outras empresas e transformaria a empresa modelo num grupo sem balancete próprio).
+    //
+    // O id de cada coisa nasce do CÓDIGO da empresa: o arquivo ganha id novo sozinho (guardarArquivo
+    // monta pelo código + competência + conteúdo) e o da conciliação é trocado aqui, mantendo o
+    // resto do id. Os itens de dentro das conciliações (RZ:…, LA:…) nascem do CONTEÚDO do
+    // lançamento, que não muda numa cópia fiel: por isso as conciliações continuam valendo.
+    // ------------------------------------------------------------------
+    function idNoutraEmpresa(id, de, para) {
+      const s = String(id || '');
+      const inicio = s.indexOf('-' + de + '-');
+      if (inicio < 0) return s;
+      return s.slice(0, inicio) + '-' + para + '-' + s.slice(inicio + de.length + 2);
+    }
+
+    // LIMPAR a empresa sem apagá-la do cadastro (Dony, 20/10/2026: "quero poder excluir e copiar
+    // outro"): a empresa modelo volta a ficar vazia, pronta para receber os dados de outra empresa,
+    // e o cadastro (código, nome, CNPJ, regime) fica. A configuração APRENDIDA sai junto — ela era
+    // da empresa copiada, e desenho de arquivo de um cliente atrapalha a leitura do próximo.
+    // Isto é para a empresa modelo: o original continua inteiro na empresa de origem.
+    async function limparEmpresa(codigo) {
+      exigirConexao();
+      const c = validarCodigo(codigo);
+      const lista = (await lerJson(raiz, 'empresas.json')) || [];
+      const atual = lista.find((e) => String(e.codigo) === c);
+      if (!atual) throw erro('Validacao', 'A empresa ' + c + ' não está nesta pasta de dados.');
+      if (!atual.ehModelo) throw erro('NaoEhModelo', 'A empresa ' + c + ' (' + atual.nome + ') não está marcada como EMPRESA MODELO. ' +
+        'Limpar de uma vez só vale para a empresa modelo: marque isso no cadastro dela, ou apague os arquivos um a um.');
+      const r = { codigo: c, arquivos: (await arquivos(c)).length, conciliacoes: (await conciliacoes(c)).length, config: [] };
+      const dirEmpresas = await pasta(raiz, ['empresas'], true);
+      const dir = await pastaDaEmpresa(c, false);
+      if (dir) {
+        const nomePasta = pastasDeEmpresa.get(c) || c;
+        try { await dirEmpresas.removeEntry(nomePasta, { recursive: true }); } catch (e) {
+          throw erro('NaoDeuParaApagar', 'Não deu para limpar a pasta da empresa ' + c + ': ' + (e && e.message ? e.message : e));
+        }
+        pastasDeEmpresa.delete(c);
+      }
+      // O cadastro limpo é gravado DIRETO: salvarEmpresa, de propósito, nunca apaga configuração
+      // (o campo que falta fica como estava, e "desenhos" até soma ao que já havia). Aqui é o
+      // contrário: a configuração era da empresa copiada e precisa sair de verdade.
+      const cadastro = Object.assign({}, atual, { atualizadoEm: Util.agoraISO(), atualizadoPor: quem() });
+      CONFIG_DA_EMPRESA.forEach((k) => {
+        if (k === 'bpo' || k === 'celula' || semConteudo(cadastro[k])) return;
+        delete cadastro[k];
+        r.config.push(k);
+      });
+      delete cadastro.ehGrupo;
+      const i = lista.findIndex((e) => String(e.codigo) === c);
+      lista[i] = cadastro;
+      await gravar(raiz, 'empresas.json', JSON.stringify(lista, null, 2));
+      await pastaDaEmpresa(c, true);
+      await registrarNoLog({ codigo: c, acao: 'empresa-limpa', alvo: c,
+        detalhe: r.arquivos + ' arquivo(s) e ' + r.conciliacoes + ' conciliação(ões) apagados' });
+      return r;
+    }
+
+    async function copiarEmpresa(de, para, opcoes) {
+      exigirConexao();
+      const origem = validarCodigo(de);
+      const destino = validarCodigo(para);
+      if (opcoes && opcoes.limparAntes && origem !== destino) await limparEmpresa(destino);
+      if (origem === destino) throw erro('Validacao', 'A empresa de origem e a de destino são a mesma.');
+      const lista = (await lerJson(raiz, 'empresas.json')) || [];
+      const eOrigem = lista.find((e) => String(e.codigo) === origem);
+      const eDestino = lista.find((e) => String(e.codigo) === destino);
+      if (!eOrigem) throw erro('Validacao', 'A empresa ' + origem + ' não está nesta pasta de dados.');
+      if (!eDestino) throw erro('Validacao', 'A empresa ' + destino + ' não está nesta pasta de dados: cadastre-a antes.');
+      if (!eDestino.ehModelo) throw erro('NaoEhModelo', 'A empresa ' + destino + ' (' + eDestino.nome + ') não está marcada como EMPRESA MODELO. ' +
+        'Só a empresa modelo recebe cópia de outra: marque isso no cadastro dela.');
+
+      const r = { de: origem, para: destino, nomeDaOrigem: eOrigem.nome, arquivos: 0, jaTinha: 0,
+        conciliacoes: 0, congelados: 0, documentos: 0, config: [] };
+
+      for (const meta of await arquivos(origem)) {
+        const conteudo = await conteudoDoArquivo(meta.id);
+        const bytes = await bytesOriginais(meta.id);
+        const novo = Object.assign({}, meta, { codigo: destino });
+        delete novo.id;
+        delete novo.original;
+        const salvo = await guardarArquivo(destino, novo, conteudo, bytes);
+        if (salvo.jaExistia) r.jaTinha++; else r.arquivos++;
+      }
+
+      for (const c of await conciliacoes(origem)) {
+        const novo = Object.assign({}, c, { codigo: destino, id: idNoutraEmpresa(c.id, origem, destino) });
+        delete novo.criadoEm;
+        delete novo.atualizadoEm;
+        await salvarConciliacao(novo);
+        r.conciliacoes++;
+      }
+
+      const dirOrigem = await pastaDaEmpresa(origem, false);
+      const dirCongOrigem = dirOrigem && await pasta(dirOrigem, ['congelados'], false);
+      for (const item of await listar(dirCongOrigem)) {
+        if (item.tipo !== 'file' || !item.nome.endsWith('.json')) continue;
+        const doc = await lerJson(dirCongOrigem, item.nome);
+        if (!doc) continue;
+        const dirCongDestino = await pasta(await pastaDaEmpresa(destino, true), ['congelados'], true);
+        const id = idNoutraEmpresa(doc.id, origem, destino);
+        await gravar(dirCongDestino, id + '.json', JSON.stringify(Object.assign({}, doc, { id })));
+        r.congelados++;
+      }
+
+      for (const d of await documentos(origem)) {
+        await salvarDocumento(destino, d.chave, d.dados);
+        r.documentos++;
+      }
+
+      // A configuração aprendida (desenhos dos arquivos, colunas do balancete, linhas da DRE,
+      // conciliações livres, papéis de conta…): é o que faz a cópia abrir pronta para trabalhar.
+      const cadastro = Object.assign({}, eDestino);
+      CONFIG_DA_EMPRESA.forEach((k) => {
+        if (k === 'consolidacao') return;
+        if (semConteudo(eOrigem[k])) return;
+        cadastro[k] = eOrigem[k];
+        r.config.push(k);
+      });
+      if (r.config.length) await salvarEmpresa(cadastro);
+
+      await registrarNoLog({ codigo: destino, acao: 'empresa-copiada', alvo: origem,
+        detalhe: 'de ' + origem + ' · ' + r.arquivos + ' arquivo(s), ' + r.conciliacoes + ' conciliação(ões), ' +
+          r.documentos + ' tabela(s) do ERP' + (r.jaTinha ? ' · ' + r.jaTinha + ' arquivo(s) já estavam lá' : '') });
+      return r;
+    }
     // O que a empresa guarda de TRABALHO CONFERIDO, além do cadastro: as linhas da DRE, as colunas do
     // balancete, as assinaturas, o logo, as conciliações livres, os papéis de conta, as contas do diário, as
     // abas escondidas e a nota escrita à mão. Numa importação, isso nunca se perde: se o lado de cá não tem,
@@ -1176,7 +1312,7 @@
       congelar, congelado,
       documento, salvarDocumento, documentos, documentoGeral, salvarDocumentoGeral, documentosGerais,
       registrarNoLog,
-      exportarTudo, importarTudo,
+      exportarTudo, importarTudo, copiarEmpresa, limparEmpresa,
       // extras desta casa
       situacao, desconectar, bytesOriginais, lerLog,
       modo: 'pasta',
