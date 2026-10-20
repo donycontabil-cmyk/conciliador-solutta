@@ -772,11 +772,22 @@
         }
       }
 
+      // Numa CÓPIA fiel (copiarEmpresa) as datas e a versão do original são preservadas. É o
+      // enviadoEm que diz qual é a versão MAIS NOVA de cada mês — e é essa que as telas usam (o
+      // balancete do mês, o razão do passo). Carimbar tudo com a hora de agora embaralharia a
+      // ordem das versões e a cópia abriria com o arquivo errado (Dony, 20/10/2026: copiou a
+      // empresa e o balanço não fechava na cópia, fechando na origem).
+      const preservar = !!(meta.preservarDatas && meta.enviadoEm);
       const registro = Object.assign({}, meta, {
-        id, codigo: c, competencia: meta.competencia, hashDoConteudo, versao,
-        original, enviadoPor: quem(), enviadoEm: Util.agoraISO(),
-        atualizadoPor: quem(), atualizadoEm: Util.agoraISO(),
+        id, codigo: c, competencia: meta.competencia, hashDoConteudo,
+        versao: preservar && meta.versao ? meta.versao : versao,
+        original,
+        enviadoPor: preservar ? (meta.enviadoPor || quem()) : quem(),
+        enviadoEm: preservar ? meta.enviadoEm : Util.agoraISO(),
+        atualizadoPor: preservar ? (meta.atualizadoPor || meta.enviadoPor || quem()) : quem(),
+        atualizadoEm: preservar ? (meta.atualizadoEm || meta.enviadoEm) : Util.agoraISO(),
       });
+      delete registro.preservarDatas;
       await gravar(dirMes, id + '.json', JSON.stringify({ meta: registro, conteudo }));
       indice.push(registro);
       await gravar(dirArq, '_indice.json', JSON.stringify(indice, null, 2));
@@ -1148,7 +1159,7 @@
       for (const meta of await arquivos(origem)) {
         const conteudo = await conteudoDoArquivo(meta.id);
         const bytes = await bytesOriginais(meta.id);
-        const novo = Object.assign({}, meta, { codigo: destino });
+        const novo = Object.assign({}, meta, { codigo: destino, preservarDatas: true });
         delete novo.id;
         delete novo.original;
         const salvo = await guardarArquivo(destino, novo, conteudo, bytes);
