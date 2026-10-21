@@ -445,6 +445,98 @@
     return mudou;
   }
 
+  // ------------------------------------------------------------------
+  // A MÁSCARA DO CÓDIGO (Dony, 21/10/2026, a Center Lar: "o app não puxou as contas patrimoniais").
+  // O balancete dela vem com o código COLADO ("1010101001") e só com as contas ANALÍTICAS — nenhuma
+  // linha de grupo. Sem separador e sem sintética não há como saber onde um nível termina: todas as
+  // contas ficam no 1º nível e o Balanço não monta (o "ATIVO" acabava sendo a primeira conta da
+  // classe 1, a conta Caixa, e as contas patrimoniais não apareciam).
+  //
+  // Com a máscara — o MODELO do código, como no ERP: "1.01.01.01.001" — o programa quebra o código,
+  // CRIA as contas sintéticas que faltam (somando as filhas) e a árvore fica de pé.
+  //
+  // O código do sintético sai pontuado e SEM o zero da frente ("101" -> "1.1"): é assim que o resto
+  // do programa reconhece o ativo circulante (1.1), o passivo circulante (2.1) e o patrimônio
+  // líquido (2.3) quando o grupo não tem nome. A conta analítica fica com o código do arquivo, que
+  // é o que o razão e o livro diário usam.
+  // ------------------------------------------------------------------
+  const NOME_DA_CLASSE = { 1: 'ATIVO', 2: 'PASSIVO', 3: 'RECEITAS', 4: 'CUSTOS', 5: 'DESPESAS' };
+  function tamanhosDaMascara(mascara) {
+    if (Array.isArray(mascara)) {
+      const t = mascara.map(Number).filter((n) => Number.isInteger(n) && n > 0);
+      return t.length >= 2 ? t : null;
+    }
+    const s = String(mascara || '').trim();
+    if (!s) return null;
+    const p = s.split(/[^0-9A-Za-z]+/).filter(Boolean);
+    return p.length >= 2 ? p.map((x) => x.length) : null;
+  }
+  // Quebra "1010101001" em ["1","01","01","01","001"] e devolve o caminho pontuado de cada nível.
+  function caminhosDaConta(codigo, tamanhos) {
+    const caminhos = [];
+    let i = 0, ate = '';
+    for (const n of tamanhos) {
+      const pedaco = codigo.slice(i, i + n);
+      i += n;
+      const limpo = pedaco.replace(/^0+(?=\d)/, '') || '0';
+      ate = ate ? ate + '.' + limpo : limpo;
+      caminhos.push(ate);
+    }
+    return caminhos;
+  }
+  // Ordem da árvore: pedaço por pedaço, como número; a mãe vem antes das filhas (caminho mais curto
+  // primeiro). Sem isto, as sintéticas criadas apareceriam todas no fim da lista.
+  function compararCaminho(a, b) {
+    const x = a.ordemNaArvore || [], y = b.ordemNaArvore || [];
+    for (let i = 0; i < Math.min(x.length, y.length); i++) { if (x[i] !== y[i]) return x[i] - y[i]; }
+    return x.length - y.length;
+  }
+  function arvorePorMascaraDada(contas, mascara) {
+    const tamanhos = tamanhosDaMascara(mascara);
+    if (!tamanhos) return null;
+    const total = tamanhos.reduce((s, n) => s + n, 0);
+    const codigos = contas.map((c) => String(c.conta || '').trim());
+    // Só vale quando TODO código é colado e do tamanho da máscara: meia correspondência montaria uma
+    // árvore errada, que é pior do que árvore nenhuma.
+    if (!contas.length || codigos.some((c) => c.indexOf('.') >= 0 || !/^\d+$/.test(c) || c.length !== total)) return null;
+
+    const sinteticas = new Map();
+    const numeros = (codigo) => {
+      const saida = [];
+      let i = 0;
+      for (const n of tamanhos) { saida.push(Number(codigo.slice(i, i + n)) || 0); i += n; }
+      return saida;
+    };
+    contas.forEach((c, i) => {
+      const caminhos = caminhosDaConta(codigos[i], tamanhos);
+      c.ordemNaArvore = numeros(codigos[i]);
+      // O último caminho é a própria conta: as mães são os anteriores.
+      caminhos.slice(0, -1).forEach((caminho, n) => {
+        if (!sinteticas.has(caminho)) {
+          sinteticas.set(caminho, {
+            // O arquivo não traz o nome dos grupos (ele só tem as analíticas). No 1º nível o nome
+            // sai da classe, que é convenção firme; nos outros fica o CÓDIGO, não um nome chutado —
+            // "1.1" é honesto, "ATIVO CIRCULANTE" seria invenção. Quem quiser o nome sobe o plano
+            // de contas da empresa.
+            conta: caminho, reduzido: '', titulo: n === 0 ? (NOME_DA_CLASSE[Number(caminho)] || caminho) : caminho,
+            nivel: n + 1, pai: n === 0 ? '' : caminhos[n - 1], analitica: false, daMascara: true,
+            ordemNaArvore: numeros(codigos[i]).slice(0, n + 1),
+            saldoAnterior: 0, debitos: 0, creditos: 0, saldoAtual: 0,
+          });
+        }
+        const s = sinteticas.get(caminho);
+        s.saldoAnterior += c.saldoAnterior || 0;
+        s.debitos += c.debitos || 0;
+        s.creditos += c.creditos || 0;
+        s.saldoAtual += c.saldoAtual || 0;
+      });
+      c.nivel = caminhos.length;
+      c.pai = caminhos[caminhos.length - 2] || '';
+      c.analitica = true;
+    });
+    return Array.from(sinteticas.values());
+  }
+
   // A árvore (c.pai e c.nivel). Três jeitos de código:
   //  - com pontos ("1.1.01.001"): a mãe é o código sem o último pedaço;
   //  - sem pontos ("1101001"): a mãe é o maior código do balancete que é o começo dele (ganha os pontos);
@@ -645,9 +737,21 @@
       porConta.set(cod.codigo, nova);
     }
     const avisos = [];
-    // A árvore das contas (mãe e nível): pelos pontos do código, pelo começo do código (sem pontos) ou pela
-    // máscara com número sequencial no fim.
-    const arvore = montarArvore(contas);
+    // A árvore das contas (mãe e nível). Primeiro a MÁSCARA, quando quem usa indicou como o código é
+    // formado: ela é a única que serve para o balancete que vem só com as analíticas e sem separador.
+    let arvore;
+    const mascaraPedida = (opcoes && opcoes.mascara) || '';
+    const daMascara = mascaraPedida ? arvorePorMascaraDada(contas, mascaraPedida) : null;
+    if (daMascara && daMascara.length) {
+      // As sintéticas criadas entram na lista, em ordem, antes das filhas de cada caminho.
+      daMascara.forEach((s) => { contas.push(s); porConta.set(s.conta, s); });
+      contas.sort((a, b) => compararCaminho(a, b));
+      arvore = 'mascara-dada';
+    } else {
+      arvore = montarArvore(contas);
+      if (mascaraPedida) avisos.push('A máscara indicada (' + mascaraPedida + ') não serve para os códigos deste balancete: ' +
+        'eles precisam vir todos colados (sem pontos) e com ' + String(mascaraPedida).replace(/[^0-9A-Za-z]/g, '').length + ' dígitos.');
+    }
     contas.forEach((c) => { delete c.recuo; });
     // Conta que juntou várias (mesma classificação): o nome de uma só delas enganaria — vale o nome da
     // conta-mãe com quantas são ("DUPLICATAS A RECEBER (265 contas)"), que é o que ela representa.
@@ -802,5 +906,42 @@
     saldoAtual: ['Saldo atual', 'Saldo final', 'Saldo', 'Saldo em (2ª data)'], dc: ['D/C', 'Natureza (ao lado do saldo)'],
   };
 
-  return { reconhecer, ler, inferir, lerCodigo, lerValor, campoDoTitulo, competenciaPeloNome, SINONIMOS, CAMPOS };
+  // ------------------------------------------------------------------
+  // Para quem já tem o balancete LIDO e guardado (o relatório de apresentação): aplica a máscara nas
+  // contas sem reler o arquivo. Devolve a lista nova (sintéticas + analíticas) ou null se não servir.
+  // ------------------------------------------------------------------
+  function comMascara(contas, mascara) {
+    if (!Array.isArray(contas) || !contas.length || !mascara) return null;
+    const copia = contas.map((c) => Object.assign({}, c));
+    const sinteticas = arvorePorMascaraDada(copia, mascara);
+    if (!sinteticas || !sinteticas.length) return null;
+    return copia.concat(sinteticas).sort(compararCaminho);
+  }
+  // A máscara que os próprios códigos sugerem, quando todos são colados e do mesmo tamanho: um nível
+  // termina onde acrescentar mais um dígito NÃO cria prefixo novo (o dígito seguinte é o começo do
+  // próximo pedaço, que vem com zero à esquerda). É SUGESTÃO: quem confirma é quem usa.
+  function mascaraSugerida(contas) {
+    const codigos = (contas || []).map((c) => String(c.conta || '').trim());
+    // Com pouca conta a conta de "quantos prefixos distintos" não diz nada: é melhor não sugerir do
+    // que sugerir errado (quem usa confirmaria um palpite achando que o programa sabe).
+    if (codigos.length < 20) return null;
+    if (codigos.some((c) => !/^\d+$/.test(c) || c.length !== codigos[0].length)) return null;
+    const n = codigos[0].length;
+    if (n < 4 || n > 20) return null;
+    const distintos = [];
+    for (let k = 1; k <= n; k++) distintos[k] = new Set(codigos.map((c) => c.slice(0, k))).size;
+    // Com folga de 10%: basta UM subgrupo passar de 9 ("10") para o dígito seguinte deixar de ser
+    // sempre zero, e o corte certo seria perdido (visto na Center Lar: 30 prefixos viram 31).
+    const cortes = [];
+    for (let k = 1; k < n; k++) if (distintos[k + 1] <= Math.ceil(distintos[k] * 1.1)) cortes.push(k);
+    cortes.push(n);
+    const tamanhos = [];
+    let antes = 0;
+    cortes.forEach((k) => { if (k > antes) { tamanhos.push(k - antes); antes = k; } });
+    if (tamanhos.length < 2 || tamanhos.reduce((s, x) => s + x, 0) !== n) return null;
+    return tamanhos.map((t, i) => (i === 0 ? '1'.padStart(t, '0') : '1'.padStart(t, '0'))).join('.');
+  }
+
+  return { reconhecer, ler, inferir, lerCodigo, lerValor, campoDoTitulo, competenciaPeloNome,
+    comMascara, mascaraSugerida, SINONIMOS, CAMPOS };
 });

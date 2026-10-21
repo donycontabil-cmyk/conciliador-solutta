@@ -163,14 +163,60 @@
   function idRegistro(codigo, ano) { return 'F-' + codigo + '-apresentacao-' + ano + '-01'; }
 
   // Os balancetes de um ano (o mais novo de cada mês), com o nome das contas pelo plano de contas da empresa.
-  async function lerBalancetesDoAno(arm, doTipo, ano, plano) {
+  // ------------------------------------------------------------------
+  // A MÁSCARA DO CÓDIGO (Dony, 21/10/2026, a Center Lar: "o app não puxou as contas patrimoniais").
+  // O balancete dela vem com o código colado ("1010101001") e só com as contas analíticas: sem saber
+  // onde cada nível termina, todas ficam no 1º nível e o Balanço sai zerado. Com a máscara guardada
+  // na empresa, as contas sintéticas são criadas aqui mesmo, sem reler arquivo nenhum.
+  // ------------------------------------------------------------------
+  const mascaraDe = (emp) => (emp && emp.mapaBalancete && emp.mapaBalancete.mascara) || '';
+  function mascaraDaEmpresa() { return mascaraDe(E.emp); }
+  function arvorePlana(contas) { return !!(contas || []).length && (contas || []).every((c) => (c.nivel || 1) === 1); }
+  // A máscara vem por PARÂMETRO: os balancetes são lidos antes de E.emp existir (é o primeiro passo
+  // de abrir a tela), e lendo do estado a árvore saía plana na primeira vez que a tela abria.
+  function comArvore(contas, mascara) {
+    if (!mascara || !arvorePlana(contas)) return contas;
+    return raiz.LerBalancete.comMascara(contas, mascara) || contas;
+  }
+
+  async function guardarMascara(el) {
+    const campo = el.querySelector('#apres-mascara');
+    const valor = campo ? String(campo.value).trim() : '';
+    const contas = (E.balancetes[E.balancetes.length - 1] || {}).contas || [];
+    // Conferência antes de guardar: a máscara tem que servir para as contas deste balancete.
+    const teste = valor ? raiz.LerBalancete.comMascara(contas, valor) : null;
+    if (!teste) {
+      T.avisoRapido('A máscara "' + valor + '" não serve para estas contas: a soma dos dígitos tem que dar ' +
+        String((contas[0] || {}).conta || '').length + ', que é o tamanho do código aqui.', 'erro', 7000);
+      return;
+    }
+    const arm = app().armazenamento;
+    const cad = app().empresas.find((e) => String(e.codigo) === String(E.codigo)) || {};
+    const mapa = Object.assign({}, cad.mapaBalancete || { aba: 0, colunas: {} }, { mascara: valor });
+    try {
+      const salvo = await arm.salvarEmpresa(Object.assign({}, cad, { mapaBalancete: mapa }));
+      app().empresas = await arm.empresas();
+      E.emp = salvo;
+      if (!(salvo.mapaBalancete && salvo.mapaBalancete.mascara)) {
+        T.avisoRapido('Não deu para guardar a máscara: confira o formato (ex.: 1.01.01.01.001).', 'erro', 6000);
+        return;
+      }
+      const niveis = teste.filter((c) => !c.analitica).length;
+      T.avisoRapido('Máscara ' + valor + ' guardada nesta empresa: ' + niveis + ' grupo(s) montado(s).', 'ok', 5000);
+      app().mostrarRota();
+    } catch (x) {
+      T.avisoRapido(T.mensagemDeErro(x), 'erro');
+    }
+  }
+
+  async function lerBalancetesDoAno(arm, doTipo, ano, plano, mascara) {
     const lista = [];
     for (let i = 1; i <= 12; i++) {
       const comp = ano + '-' + String(i).padStart(2, '0') + '-01';
       const doMes = doTipo.filter((m) => m.competencia === comp).sort((a, b) => U.paraMs(b.enviadoEm) - U.paraMs(a.enviadoEm));
       if (!doMes.length) continue;
       const c = await arm.conteudoDoArquivo(doMes[0].id);
-      if (c && c.contas) lista.push({ competencia: comp, contas: raiz.TelaSubir.comNomesDoPlano(c.contas, plano) });
+      if (c && c.contas) lista.push({ competencia: comp, contas: comArvore(raiz.TelaSubir.comNomesDoPlano(c.contas, plano), mascara) });
     }
     return lista;
   }
@@ -234,7 +280,7 @@
     // Os balancetes de um ano: os da empresa, ou a SOMA das empresas do grupo (com as eliminações).
     const consolidarAno = async (a) => {
       const partes = [];
-      for (const m of membros) partes.push({ codigo: m.codigo, nome: m.nome, balancetes: await lerBalancetesDoAno(arm, m.doTipo, a, m.plano) });
+      for (const m of membros) partes.push({ codigo: m.codigo, nome: m.nome, balancetes: await lerBalancetesDoAno(arm, m.doTipo, a, m.plano, mascaraDe(m.emp || m)) });
       return raiz.MotorConsolidado.consolidar(partes, { eliminar: grupo.eliminar || [] });
     };
     let consolidado = null;
@@ -246,7 +292,7 @@
       for (const l of lugares) {
         if (l.tipo !== 'balancete' || !l.arquivos.length) continue;
         const c = await arm.conteudoDoArquivo(l.arquivos[0].id);
-        if (c && c.contas) balancetes.push({ competencia: l.competencia, contas: raiz.TelaSubir.comNomesDoPlano(c.contas, plano) });
+        if (c && c.contas) balancetes.push({ competencia: l.competencia, contas: comArvore(raiz.TelaSubir.comNomesDoPlano(c.contas, plano), mascaraDe(emp)) });
       }
     }
     const registro = (await arm.conciliacoes(codigo, anoEscolhido + '-01-01')).find((r) => r.id === idRegistro(codigo, anoEscolhido)) || null;
@@ -256,7 +302,7 @@
     const porAno = {};
     for (const a of anosQueAConfigUsa(configLida, anoEscolhido)) {
       if (a === anoEscolhido || porAno[a] || anosComBalancete.indexOf(a) < 0) continue;
-      porAno[a] = grupo ? (await consolidarAno(a)).balancetes : await lerBalancetesDoAno(arm, doTipo, a, plano);
+      porAno[a] = grupo ? (await consolidarAno(a)).balancetes : await lerBalancetesDoAno(arm, doTipo, a, plano, mascaraDe(emp));
     }
     const balancetesAnt = porAno[anoEscolhido - 1] || [];
     if (conferir && !conferir()) return;
@@ -332,7 +378,35 @@
       'Ele foi lido com a coluna errada: abra o quadro de arquivos aqui de cima e, no cartão "Plano de contas", clique em "🔄 Ler de novo".');
     if (rel.lalur.ajustesSemConta.length) lista.push(rel.lalur.ajustesSemConta.length + ' conta(s) da lista de ajustes do LALUR não aparecem nos balancetes (' + rel.lalur.ajustesSemConta.slice(0, 3).join(', ') + (rel.lalur.ajustesSemConta.length > 3 ? ', …' : '') + '): confira a lista na aba LALUR.');
     if (!rel.lalur.pat.noBalancete && rel.lalur.contaPAT) lista.push('A conta do PAT (' + rel.lalur.contaPAT + ') não aparece nos balancetes: confira na aba LALUR.');
-    return (lista.length ? '<div class="aviso ambar nao-imprimir" style="margin-top:12px"><span class="icone-aviso">⚠️</span><div>' + lista.map((a) => T.esc(a)).join('<br>') + '</div></div>' : '') + avisoDaDre();
+    return (lista.length ? '<div class="aviso ambar nao-imprimir" style="margin-top:12px"><span class="icone-aviso">⚠️</span><div>' + lista.map((a) => T.esc(a)).join('<br>') + '</div></div>' : '') +
+      avisoDaMascara() + avisoDaDre();
+  }
+
+  // BALANCETE SEM A ESTRUTURA DOS GRUPOS: o código vem colado e o arquivo só traz as contas
+  // analíticas. Sem saber onde cada nível do código termina, não há ATIVO nem PASSIVO para montar o
+  // Balanço. Aqui se pergunta UMA vez como o código é formado — e fica guardado na empresa.
+  function avisoDaMascara() {
+    if (mascaraDaEmpresa() || !E.balancetes || !E.balancetes.length) return '';
+    const contas = E.balancetes[E.balancetes.length - 1].contas || [];
+    if (!arvorePlana(contas)) return '';
+    // O aviso aparece sempre que o código vier colado e do mesmo tamanho — a SUGESTÃO é um extra,
+    // e ela só sai com plano grande. Sem o aviso, quem tem poucas contas ficaria sem onde informar.
+    const codigos = contas.map((c) => String(c.conta || '').trim());
+    const colados = codigos.length && codigos.every((c) => /^\d{4,20}$/.test(c) && c.length === codigos[0].length);
+    if (!colados) return '';
+    const sugerida = raiz.LerBalancete.mascaraSugerida(contas) || '';
+    const exemplo = codigos[0];
+    return '<div class="aviso ambar nao-imprimir" style="margin-top:12px"><span class="icone-aviso">🧩</span><div style="flex:1">' +
+      '<b>O Balanço não monta: falta saber como o código das contas é formado.</b><br>' +
+      'Este balancete vem com o código <b>colado</b> (ex.: ' + T.esc(exemplo) + ') e só com as contas analíticas — nenhuma linha de grupo. ' +
+      'Diga em quantos dígitos cada nível termina e o programa monta os grupos (e o Balanço) sozinho.' +
+      '<div class="linha-flex" style="gap:8px;margin-top:8px;flex-wrap:wrap">' +
+      '<input id="apres-mascara" type="text" maxlength="40" value="' + T.esc(sugerida) + '" placeholder="1.01.01.01.001" style="width:190px;text-align:center;font-family:ui-monospace,monospace">' +
+      '<button type="button" class="botao primario pequeno" data-acao="guardar-mascara">Usar esta máscara</button>' +
+      '<span class="suave pequeno">' + (sugerida
+        ? 'Pelos códigos deste arquivo, parece ser <b>' + T.esc(sugerida) + '</b> — confira com o plano de contas da empresa.'
+        : 'Escreva o modelo do código com pontos, somando ' + exemplo.length + ' dígitos (ex.: 1.01.01.01.001).') + '</span>' +
+      '</div></div></div>';
   }
 
   // CONTA DE RESULTADO QUE FICOU FORA DA DRE. É ela que faz o balanço não fechar, porque o balanço usa o
@@ -1307,6 +1381,8 @@
     const bi = el.querySelector('#apres-imprimir');
     if (bi) bi.addEventListener('click', imprimir);
     el.addEventListener('click', async (ev) => {
+      // A máscara do código das contas: guarda na empresa e lê os balancetes de novo com ela.
+      if (ev.target.closest('[data-acao="guardar-mascara"]')) { await guardarMascara(el); return; }
       const aba = ev.target.closest('[data-aba]');
       if (aba) { E.verFora = aba.hasAttribute('data-ver-fora'); irParaAba(el, aba.getAttribute('data-aba')); return; }
       const botaoGrupo = ev.target.closest('[data-aba-grupo]');
@@ -2269,7 +2345,7 @@
     if (faltam.length) {
       T.avisoRapido('Lendo os balancetes de ' + faltam.join(', ') + '…', null, 3000);
       try {
-        for (const a of faltam) E.balancetesPorAno[a] = await lerBalancetesDoAno(app().armazenamento, E.doTipo, a, E.plano);
+        for (const a of faltam) E.balancetesPorAno[a] = await lerBalancetesDoAno(app().armazenamento, E.doTipo, a, E.plano, mascaraDaEmpresa());
       } catch (e) { T.avisoRapido('Não consegui ler os balancetes: ' + T.mensagemDeErro(e), 'erro'); return; }
     }
     E.config = Object.assign({}, E.config, { simulacao: Object.assign({}, E.config.simulacao || {}, { base: { tipo: nova.tipo, anos: nova.anos } }) });

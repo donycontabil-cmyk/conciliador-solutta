@@ -480,13 +480,20 @@
     }
 
     function limparMapaBalancete(valor) {
-      if (!valor || typeof valor !== 'object' || !valor.colunas || typeof valor.colunas !== 'object') return null;
+      if (!valor || typeof valor !== 'object') return null;
+      // A MÁSCARA do código das contas (Dony, 21/10/2026, a Center Lar): "1.01.01.01.001". Ela vale
+      // SOZINHA: o balancete pode ter sido lido pelo cabeçalho, sem colunas indicadas, e mesmo assim
+      // precisar da máscara para o Balanço montar. Antes, um mapa só com a máscara era descartado
+      // inteiro aqui e a máscara não gravava.
+      const mascara = (typeof valor.mascara === 'string' && /^[0-9]+([^0-9A-Za-z][0-9]+){1,9}$/.test(valor.mascara.trim()))
+        ? valor.mascara.trim().slice(0, 40) : '';
+      if (!valor.colunas || typeof valor.colunas !== 'object') return mascara ? { mascara } : null;
       const colunas = {};
       ['conta', 'titulo', 'reduzido', 'saldoAnterior', 'dcAnterior', 'debitos', 'creditos', 'saldoAtual', 'dcAtual'].forEach((k) => {
         const v = valor.colunas[k];
         if (Number.isInteger(v) && v >= 0 && v < 200) colunas[k] = v;
       });
-      if (!['conta', 'saldoAnterior', 'debitos', 'creditos', 'saldoAtual'].every((k) => colunas[k] !== undefined)) return null;
+      if (!['conta', 'saldoAnterior', 'debitos', 'creditos', 'saldoAtual'].every((k) => colunas[k] !== undefined)) return mascara ? { mascara } : null;
       // Os NOMES das colunas no cabeçalho do arquivo: é por eles que o desenho continua valendo no mês
       // seguinte, mesmo que as colunas andem de lugar (PDF).
       const titulos = {};
@@ -498,6 +505,7 @@
       }
       const limpo = { aba: Number.isInteger(valor.aba) && valor.aba >= 0 && valor.aba < 100 ? valor.aba : 0, colunas };
       if (Object.keys(titulos).length) limpo.titulos = titulos;
+      if (mascara) limpo.mascara = mascara;
       return limpo;
     }
 
