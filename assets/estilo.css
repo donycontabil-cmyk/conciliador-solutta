@@ -1159,6 +1159,14 @@ table.rc-tabela-contas { font-size: 7.6pt; }
 .dem-tabela.dem-dmpl td:first-child { overflow-wrap: anywhere; hyphens: auto; }
 .dem-tabela.dem-dmpl td.num { white-space: nowrap; }
 .dem-tabela.dem-dmpl tr.dem-conta td:first-child { padding-left: 4mm; }
+/* O ✕ que tira um grupo do patrimônio líquido, e a lista do que saiu (só na tela). */
+.dem-tirar { border: 0; background: none; color: #b3261e; cursor: pointer; font-size: 9pt; line-height: 1;
+  padding: 0 2px; margin-right: 2px; opacity: .45; }
+.dem-tirar:hover { opacity: 1; }
+.dem-pl-fora { margin-top: 4mm; padding: 2.5mm 3mm; border: 0.2mm dashed #c9c9c9; border-radius: 2mm; font-size: 8.5pt; color: #444; }
+.dem-pl-tirado { display: inline-block; background: #f2f2f2; border-radius: 3mm; padding: 0.6mm 2mm; margin: 0 2mm 1mm 0; }
+.dem-pl-tirado button { border: 0; background: none; color: #1f4e78; cursor: pointer; font-size: 10pt; line-height: 1; padding: 0 0 0 3px; }
+.dem-pl-tirado button:hover { color: #0d2b46; }
 /* Oito ou mais colunas: aperta a fonte em vez de deixar o número quebrar a linha. */
 .dem-tabela.dem-dmpl.dem-dmpl-cheia th { font-size: 6.5pt; }
 .dem-tabela.dem-dmpl.dem-dmpl-cheia td { font-size: 7pt; }

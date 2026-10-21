@@ -617,7 +617,7 @@
       linhas: primeiroNivel.map((c) => ({ conta: c.conta, titulo: c.titulo, patrimonial: c.patrimonial, valores: colunasResumo.map((col) => saldoNoMes(c.conta, col.mes)) })),
     };
     resumo.soma = colunasResumo.map((col, k) => (col.mes && col.mes.tem ? resumo.linhas.reduce((s, l) => s + (l.valores[k] || 0), 0) : null));
-    const balanco = montarBalanco({ meses, contas, linhaDoMes, primeiroNivel, dreMensal });
+    const balanco = montarBalanco({ meses, contas, linhaDoMes, primeiroNivel, dreMensal, plFora: cfg.plFora });
 
     const avisos = [];
     const faltando = meses.filter((m) => !m.tem).map((m) => m.rotulo);
@@ -643,6 +643,9 @@
       acesso: { valor, linhaDoMes, indice, porMes },
       dre: { mensal: dreMensal, trimestral: dreTrimestral, foraDaDre, naoMapeadas, conferencia, situacao: situacaoDre, mapa: mapaUsado, rotulos: rotulosDre, avaliacao,
         acumulado: { semJaneiro: acumulado.semJaneiro, paraEm: acumulado.paraEm === null ? null : meses[acumulado.paraEm].rotulo } },
+      // A configuração usada fica no relatório: a DMPL é montada depois, a partir dele, e precisa
+      // saber quais grupos saíram do patrimônio líquido.
+      config: cfg,
       lalur, resumo, balanco, avisos, faltando };
   }
 
@@ -687,8 +690,18 @@
   // Conferências: ativo − (passivo + PL + resultado) = 0, e o resultado pela DRE = o das contas de resultado
   // ainda abertas no balancete. Passivo e PL com o saldo credor positivo.
   // ------------------------------------------------------------------
+  // CONTAS QUE O PLANO PENDUROU NO PATRIMÔNIO LÍQUIDO MAS NÃO SÃO PL (Dony, 21/10/2026, a Center
+  // Lar: "essa empresa tem algumas compensações de estoque dentro do PL; não deveria, mas está, e
+  // eu preciso excluir isso manualmente"). Quem marca é quem usa, grupo por grupo, na DMPL.
+  //
+  // A conta marcada NÃO SOME: ela sai do patrimônio líquido e entra no PASSIVO. É o que mantém o
+  // balanço fechando sozinho — a contrapartida dela continua lá no ativo (no caso da Center Lar,
+  // "operações com mercadorias" e "bens em comodato", que se anulam entre os dois lados).
+  const listaDeContas = (x) => new Set((Array.isArray(x) ? x : []).map((c) => String(c || '').trim()).filter(Boolean));
+
   function montarBalanco(x) {
     const { meses, contas, linhaDoMes, primeiroNivel, dreMensal } = x;
+    const fora = listaDeContas(x.plFora);
     const saldo = (conta, m) => { if (!m.tem) return null; const l = linhaDoMes(conta, m); return l ? l.saldoAtual : 0; };
     const doResultado = primeiroNivel.filter((c) => !patrimonial(c.conta));
     const lucro = dreMensal.totais.get('lucroLiquido') || [];
@@ -710,6 +723,8 @@
     });
     const resultadoBalancete = meses.map((m) => (m.tem ? -doResultado.reduce((s, c) => s + (saldo(c.conta, m) || 0), 0) : null));
     const soma = (listas) => meses.map((m, k) => (m.tem ? listas.reduce((s, vs) => s + (vs[k] || 0), 0) : null));
+    // Um total menos as listas que saíram dele (o PL sem os grupos que quem usa tirou de lá).
+    const somaMenos = (base, listas) => meses.map((m, k) => (m.tem ? (base[k] || 0) - listas.reduce((s, vs) => s + (vs[k] || 0), 0) : null));
     const filhas = (pai) => contas.filter((c) => c.pai === pai);
     const daConta = (c, sinal, nivel, extra) => Object.assign({ conta: c.conta, rotulo: c.titulo, nivel, tipo: 'conta',
       valores: meses.map((m) => { const v = saldo(c.conta, m); return v === null ? null : sinal * v; }) }, extra || {});
@@ -721,15 +736,24 @@
     linhas.push({ id: 'ativo', rotulo: 'ATIVO', tipo: 'total', nivel: 1, valores: vAtivo });
     if (cb.ativo) filhas(cb.ativo.conta).forEach((c2) => { linhas.push(daConta(c2, 1, 2, { tipo: 'grupo' })); filhas(c2.conta).forEach((c3) => linhas.push(daConta(c3, 1, 3))); });
     const gruposPassivo = P ? filhas(P.conta).filter((c) => !cb.pl || c.conta !== cb.pl.conta) : [];
-    const vPassivo = soma(gruposPassivo.map((c) => daConta(c, -1, 2).valores));
+    // Os grupos do PL que quem usa tirou de lá: vão para o passivo, com os valores e tudo.
+    const tiradosDoPl = cb.pl ? filhas(cb.pl.conta).filter((c) => fora.has(c.conta)) : [];
+    const vPassivo = soma(gruposPassivo.map((c) => daConta(c, -1, 2).valores).concat(tiradosDoPl.map((c) => daConta(c, -1, 2).valores)));
     linhas.push({ id: 'passivo', rotulo: 'PASSIVO', tipo: 'total', nivel: 1, valores: vPassivo });
     gruposPassivo.forEach((c2) => { linhas.push(daConta(c2, -1, 2, { tipo: 'grupo' })); filhas(c2.conta).forEach((c3) => linhas.push(daConta(c3, -1, 3))); });
-    const vPlBalancete = cb.pl ? daConta(cb.pl, -1, 2).valores : zeros;
+    tiradosDoPl.forEach((c2) => {
+      linhas.push(daConta(c2, -1, 2, { tipo: 'grupo', foraDoPl: true }));
+      filhas(c2.conta).forEach((c3) => linhas.push(daConta(c3, -1, 3, { foraDoPl: true })));
+    });
+    const vPlBalancete = cb.pl
+      ? somaMenos(daConta(cb.pl, -1, 2).valores, tiradosDoPl.map((c) => daConta(c, -1, 2).valores))
+      : zeros;
     const vPl = soma([vPlBalancete, resultadoDre]);
     linhas.push({ id: 'pl', rotulo: 'PATRIMÔNIO LÍQUIDO', tipo: 'total', nivel: 1, valores: vPl });
     if (cb.pl) {
-      linhas.push(daConta(cb.pl, -1, 2, { tipo: 'grupo', rotulo: cb.pl.titulo + ' (no balancete)', grupoPl: true }));
-      filhas(cb.pl.conta).forEach((c3) => linhas.push(daConta(c3, -1, 3, { doPl: true })));
+      linhas.push(Object.assign(daConta(cb.pl, -1, 2, { tipo: 'grupo', rotulo: cb.pl.titulo + ' (no balancete)', grupoPl: true }),
+        tiradosDoPl.length ? { valores: vPlBalancete } : {}));
+      filhas(cb.pl.conta).filter((c) => !fora.has(c.conta)).forEach((c3) => linhas.push(daConta(c3, -1, 3, { doPl: true })));
     }
     linhas.push({ id: 'resultado', rotulo: 'Resultado do exercício (pela DRE, desde o último encerramento)', tipo: 'resultado', nivel: 2, valores: resultadoDre });
     const vTotal = soma([vPassivo, vPl]);
@@ -2057,8 +2081,13 @@
     const filhas = (pai) => rel.contas.filter((c) => c.pai === pai);
     // As colunas: as contas de baixo do PL que têm saldo ou movimento. Uma conta só embaixo (o PL inteiro num
     // grupo) abre nas de baixo dela, senão a demonstração teria uma coluna só.
-    let contas = filhas(cb.pl.conta);
-    while (contas.length === 1 && filhas(contas[0].conta).length >= 2) contas = filhas(contas[0].conta);
+    // Os grupos que quem usa tirou do patrimônio líquido não têm coluna aqui: eles foram para o
+    // passivo no balanço (ver montarBalanco), e a DMPL mostra o mesmo PL do balanço.
+    const foraDoPl = listaDeContas((rel.config || {}).plFora);
+    let contas = filhas(cb.pl.conta).filter((c) => !foraDoPl.has(c.conta));
+    while (contas.length === 1 && filhas(contas[0].conta).filter((c) => !foraDoPl.has(c.conta)).length >= 2) {
+      contas = filhas(contas[0].conta).filter((c) => !foraDoPl.has(c.conta));
+    }
     const pl = (mapa, conta) => -(mapa.get(conta) || 0); // o PL é credor: na demonstração vai positivo
     const colunas = contas
       .map((c) => ({ conta: c.conta, titulo: nomeDaDemonstracao(c.titulo), inicio: pl(abertura, c.conta), fim: pl(fechamento, c.conta) }))

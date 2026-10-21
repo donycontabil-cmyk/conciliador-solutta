@@ -184,6 +184,44 @@
     return raiz.LerBalancete.nomearGruposSemNome(raiz.TelaSubir.comNomesDoPlano(contas, plano));
   }
 
+  // ------------------------------------------------------------------
+  // GRUPOS QUE SAÍRAM DO PATRIMÔNIO LÍQUIDO (Dony, 21/10/2026, a Center Lar: "essa empresa tem
+  // algumas compensações de estoque que estão dentro do PL; não deveria, mas está, e eu preciso
+  // excluir isso manualmente"). A lista fica no cadastro da empresa e vale para todos os anos.
+  // A conta tirada NÃO SOME: ela vai para o passivo, e por isso o balanço continua fechando.
+  // ------------------------------------------------------------------
+  function plFora() { return ((E.emp && E.emp.plFora) || []).slice(); }
+  function nomeDaConta(codigo) {
+    const c = (E.rel && E.rel.contas || []).find((x) => x.conta === codigo);
+    return c && c.titulo ? c.titulo : codigo;
+  }
+  // O que foi tirado, com o botão de trazer de volta. Só na tela.
+  function blocoDoPlFora(editavel) {
+    const fora = plFora();
+    if (!fora.length) return '';
+    return '<div class="dem-pl-fora nao-imprimir"><b>Fora do patrimônio líquido:</b> ' +
+      fora.map((c) => '<span class="dem-pl-tirado">' + T.esc(nomeDaConta(c)) + ' <span class="suave pequeno">' + T.esc(c) + '</span>' +
+        (editavel ? '<button type="button" data-voltar-pl="' + T.esc(c) + '" title="Trazer de volta para o patrimônio líquido">↺</button>' : '') +
+        '</span>').join(' ') +
+      '<div class="suave pequeno" style="margin-top:4px">Estes grupos aparecem no <b>passivo</b> do balanço, com os mesmos valores — nada some, e o balanço continua fechando.</div></div>';
+  }
+  async function mudarPlFora(codigo, tirar) {
+    const arm = app().armazenamento;
+    const cad = app().empresas.find((e) => String(e.codigo) === String(E.codigo)) || {};
+    const antes = ((cad.plFora || [])).filter((c) => c !== codigo);
+    const lista = tirar ? antes.concat([codigo]) : antes;
+    try {
+      const salvo = await arm.salvarEmpresa(Object.assign({}, cad, { plFora: lista }));
+      app().empresas = await arm.empresas();
+      E.emp = salvo;
+      await arm.registrarNoLog({ codigo: E.codigo, acao: 'pl-fora', alvo: codigo,
+        detalhe: (tirar ? 'tirado do patrimônio líquido' : 'devolvido ao patrimônio líquido') + ': ' + nomeDaConta(codigo) });
+      T.avisoRapido(tirar ? T.esc(nomeDaConta(codigo)) + ' saiu do patrimônio líquido e foi para o passivo.'
+        : T.esc(nomeDaConta(codigo)) + ' voltou para o patrimônio líquido.', 'ok', 4000);
+      app().mostrarRota();
+    } catch (x) { T.avisoRapido(T.mensagemDeErro(x), 'erro'); }
+  }
+
   async function guardarMascara(el) {
     const campo = el.querySelector('#apres-mascara');
     const valor = campo ? String(campo.value).trim() : '';
@@ -235,7 +273,8 @@
   // As linhas da DRE guardadas na empresa (valem para todos os anos) e o relatório montado com elas.
   function mapaDaEmpresa() { const m = E.emp && E.emp.mapaDre; return m && m.contas && Object.keys(m.contas).length ? m : null; }
   function montarRel(balancetes, dreModo) {
-    return motor().montar({ ano: E.ano, balancetes: balancetes || E.balancetes, config: E.config, mapaDre: mapaDaEmpresa(), dreModo });
+    // A lista de grupos tirados do PL mora no CADASTRO (vale todos os anos) e entra na config do motor.
+    return motor().montar({ ano: E.ano, balancetes: balancetes || E.balancetes, config: Object.assign({}, E.config, { plFora: plFora() }), mapaDre: mapaDaEmpresa(), dreModo });
   }
   // Plano de contas diferente do modelo e linhas ainda não conferidas: a DRE e o que sai dela ficam fechados.
   const dreFechada = () => !!E.rel && E.rel.dre.situacao === 'sugestao';
@@ -1391,6 +1430,11 @@
     el.addEventListener('click', async (ev) => {
       // A máscara do código das contas: guarda na empresa e lê os balancetes de novo com ela.
       if (ev.target.closest('[data-acao="guardar-mascara"]')) { await guardarMascara(el); return; }
+      // Tirar (e trazer de volta) um grupo do patrimônio líquido.
+      const tirarPl = ev.target.closest('[data-tirar-pl]');
+      if (tirarPl) { await mudarPlFora(tirarPl.getAttribute('data-tirar-pl'), true); return; }
+      const voltarPl = ev.target.closest('[data-voltar-pl]');
+      if (voltarPl) { await mudarPlFora(voltarPl.getAttribute('data-voltar-pl'), false); return; }
       const aba = ev.target.closest('[data-aba]');
       if (aba) { E.verFora = aba.hasAttribute('data-ver-fora'); irParaAba(el, aba.getAttribute('data-aba')); return; }
       const botaoGrupo = ev.target.closest('[data-aba-grupo]');
@@ -1959,7 +2003,7 @@
     const m = mapaDaEmpresa();
     const chave = E.balancetesAnt.length + '|' + E.rel.dre.situacao + '|' + (m ? (m.conferidoEm || '') + Object.keys(m.contas).length : '');
     if (!E.relAnt || E.relAnt.chave !== chave) {
-      E.relAnt = { chave, rel: motor().montar({ ano: E.ano - 1, balancetes: E.balancetesAnt, config: {}, mapaDre: m, dreModo: E.rel.dre.situacao === 'modelo' ? 'modelo' : undefined }) };
+      E.relAnt = { chave, rel: motor().montar({ ano: E.ano - 1, balancetes: E.balancetesAnt, config: { plFora: plFora() }, mapaDre: m, dreModo: E.rel.dre.situacao === 'modelo' ? 'modelo' : undefined }) };
     }
     return E.relAnt.rel;
   }
@@ -2116,7 +2160,7 @@
     const chave = bs.length + '|' + E.rel.dre.situacao + '|' + (m ? (m.conferidoEm || '') + Object.keys(m.contas).length : '');
     E.relsPorAno = E.relsPorAno || {};
     if (!E.relsPorAno[n] || E.relsPorAno[n].chave !== chave) {
-      E.relsPorAno[n] = { chave, rel: motor().montar({ ano: n, balancetes: bs, config: {}, mapaDre: m, dreModo: E.rel.dre.situacao === 'modelo' ? 'modelo' : undefined }) };
+      E.relsPorAno[n] = { chave, rel: motor().montar({ ano: n, balancetes: bs, config: { plFora: plFora() }, mapaDre: m, dreModo: E.rel.dre.situacao === 'modelo' ? 'modelo' : undefined }) };
     }
     return E.relsPorAno[n].rel;
   }
@@ -2552,7 +2596,12 @@
       if (!mu) return '<div class="dem dem-pagina"><div class="dem-cab"><h2>' + T.esc(titulo) + '</h2></div>' +
         '<p class="suave">Não achei o patrimônio líquido no plano de contas: sem ele não dá para montar esta demonstração.</p></div>';
       const cols = mu.colunas;
-      cab = '<th>&nbsp;</th>' + cols.map((c) => '<th class="num">' + T.esc(c.titulo) + '</th>').join('') + '<th class="num">TOTAL</th>';
+      // O ✕ em cada grupo (Dony, 21/10/2026: "essa empresa tem compensações de estoque dentro do PL;
+      // preciso excluir isso manualmente"). Só na tela — na impressão e no Excel ele não sai.
+      cab = '<th>&nbsp;</th>' + cols.map((c) => '<th class="num">' +
+        (editavel && c.conta ? '<button type="button" class="dem-tirar nao-imprimir" data-tirar-pl="' + T.esc(c.conta) + '" ' +
+          'title="Tirar este grupo do patrimônio líquido (ele vai para o passivo e fica guardado na empresa)">✕</button>' : '') +
+        T.esc(c.titulo) + '</th>').join('') + '<th class="num">TOTAL</th>';
       corpo = mu.linhas.map((l) => '<tr class="' + (l.tipo === 'saldo' ? 'dem-total' : 'dem-conta') + '"><td>' + T.esc(l.rotulo) + '</td>' +
         l.valores.map((v) => '<td class="num">' + (Math.round(v) ? dinheiro(v) : '<span class="zero">–</span>') + '</td>').join('') +
         '<td class="num">' + dinheiro(l.total) + '</td></tr>').join('');
@@ -2562,7 +2611,7 @@
         // Com muitas contas no patrimônio líquido a folha fica apertada: a fonte diminui em vez de
         // o número quebrar a linha (a classe some quando são poucas colunas).
         '<table class="dem-tabela dem-dmpl' + (cols.length >= 6 ? ' dem-dmpl-cheia' : '') + '"><thead><tr>' + cab + '</tr></thead><tbody>' + corpo + '</tbody></table>' +
-        blocoAssinaturas(editavel) + '</div>';
+        blocoDoPlFora(editavel) + blocoAssinaturas(editavel) + '</div>';
     } else if (qual === 'notas') {
       // NOTAS EXPLICATIVAS (Dony, 24/09/2026, com o modelo de um escritório): o contexto da empresa, como o
       // balanço foi preparado, as práticas contábeis e a abertura de cada grupo do balanço nas contas.

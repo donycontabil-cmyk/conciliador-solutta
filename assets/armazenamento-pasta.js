@@ -635,6 +635,13 @@
       // Linhas da DRE conferidas por quem usa (Dony, 18/09/2026: cada empresa com o seu plano de contas).
       const mapaDre = limparMapaDre(empresa.mapaDre !== undefined ? empresa.mapaDre : (anterior && anterior.mapaDre));
       if (mapaDre) registro.mapaDre = mapaDre;
+      // GRUPOS QUE SAÍRAM DO PATRIMÔNIO LÍQUIDO (Dony, 21/10/2026, a Center Lar: compensação de
+      // estoque pendurada no PL). São códigos de conta; eles vão para o passivo no balanço.
+      const plFora = Array.isArray(empresa.plFora !== undefined ? empresa.plFora : (anterior && anterior.plFora))
+        ? (empresa.plFora !== undefined ? empresa.plFora : anterior.plFora)
+          .map((c) => String(c || '').trim()).filter((c) => c && c.length <= 40).slice(0, 60)
+        : [];
+      if (plFora.length) registro.plFora = Array.from(new Set(plFora));
       const cor = empresa.corRelatorio !== undefined ? empresa.corRelatorio : (anterior && anterior.corRelatorio);
       if (typeof cor === 'string' && /^#[0-9a-fA-F]{6}$/.test(cor)) registro.corRelatorio = cor.toLowerCase();
       const assinaturas = limparAssinaturas(empresa.assinaturas !== undefined ? empresa.assinaturas : (anterior && anterior.assinaturas));
