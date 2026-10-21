@@ -2533,9 +2533,20 @@
     const pessoa = (p, papel, falta) => '<div class="dem-ass"><div class="dem-linha"></div>' +
       (p.nome ? '<b>' + T.esc(p.nome) + '</b>' : editavel ? '<b class="dem-falta">' + falta + '</b>' : '<b>&nbsp;</b>') +
       '<span>' + T.esc(papel) + '</span>' + (p.cpf ? '<span>CPF ' + T.esc(p.cpf) + '</span>' : '') + '</div>';
-    return '<div class="dem-assinaturas"><p class="dem-local">' + T.esc((a.local ? a.local + ', ' : '') + dataPorExtenso(hojeBr())) + '.</p><div class="dem-ass-linhas">' +
-      pessoa(r, r.cargo || 'Responsável pela empresa', 'Nome do responsável: clique em ✎ Assinaturas') +
-      pessoa(c, 'Contador' + (c.crc ? ' · CRC ' + c.crc : ''), 'Nome do contador: clique em ✎ Assinaturas') + '</div></div>';
+    // QUEM NÃO TEM NOME NÃO SAI NA IMPRESSÃO (Dony, 21/10/2026: "se não tem os dados do sócio, não
+    // precisa sair na impressão"). Na tela o lugar continua aparecendo, com o convite para
+    // preencher — é por ele que se chega em ✎ Assinaturas. Assinando um só, a linha dele fica no
+    // meio da folha, e não encostada num canto.
+    const linhas = [
+      { p: r, papel: r.cargo || 'Responsável pela empresa', falta: 'Nome do responsável: clique em ✎ Assinaturas' },
+      { p: c, papel: 'Contador' + (c.crc ? ' · CRC ' + c.crc : ''), falta: 'Nome do contador: clique em ✎ Assinaturas' },
+    ];
+    const assinam = linhas.filter((x) => x.p.nome);
+    const naTela = editavel ? linhas : assinam;
+    if (!naTela.length) return '';
+    return '<div class="dem-assinaturas"><p class="dem-local">' + T.esc((a.local ? a.local + ', ' : '') + dataPorExtenso(hojeBr())) + '.</p>' +
+      '<div class="dem-ass-linhas' + (naTela.length === 1 ? ' uma-so' : '') + '">' +
+      naTela.map((x) => pessoa(x.p, x.papel, x.falta)).join('') + '</div></div>';
   }
   // Uma folha (balanço, DRE ou fluxo de caixa) para a data escolhida.
   function paginaDocumento(qual, d, editavel) {

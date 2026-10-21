@@ -973,6 +973,8 @@ table.apres.ajustes-sim td.txt { white-space: normal; }
 .dem-assinaturas { margin-top: auto; padding-top: 12mm; break-inside: avoid; }
 .dem-local { text-align: right; margin: 0 0 17mm; }
 .dem-ass-linhas { display: grid; grid-template-columns: 1fr 1fr; gap: 14mm; }
+/* Assinando um só (o outro não foi preenchido): a linha fica no meio da folha, não num canto. */
+.dem-ass-linhas.uma-so { grid-template-columns: minmax(70mm, 58%); justify-content: center; }
 .dem-ass { text-align: center; font-size: 9pt; display: flex; flex-direction: column; gap: 0.6mm; }
 .dem-ass .dem-linha { border-top: 0.25mm solid #111; margin-bottom: 1.2mm; }
 .dem-ass .dem-falta { color: #b3261e; font-weight: 600; }
