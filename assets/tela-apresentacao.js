@@ -292,7 +292,10 @@
       for (const l of lugares) {
         if (l.tipo !== 'balancete' || !l.arquivos.length) continue;
         const c = await arm.conteudoDoArquivo(l.arquivos[0].id);
-        if (c && c.contas) balancetes.push({ competencia: l.competencia, contas: comArvore(raiz.TelaSubir.comNomesDoPlano(c.contas, plano), mascaraDe(emp)) });
+        // A ÁRVORE VEM ANTES DO PLANO: os grupos que a máscara cria precisam passar pelo plano de
+        // contas para ganhar nome. Ao contrário, eles nasciam depois e ficavam só com o código
+        // (Dony, 21/10/2026: "1.1" no lugar de "ATIVO CIRCULANTE" no balanço da Center Lar).
+        if (c && c.contas) balancetes.push({ competencia: l.competencia, contas: raiz.TelaSubir.comNomesDoPlano(comArvore(c.contas, mascaraDe(emp)), plano) });
       }
     }
     const registro = (await arm.conciliacoes(codigo, anoEscolhido + '-01-01')).find((r) => r.id === idRegistro(codigo, anoEscolhido)) || null;
