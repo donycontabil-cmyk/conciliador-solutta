@@ -216,7 +216,7 @@
       const doMes = doTipo.filter((m) => m.competencia === comp).sort((a, b) => U.paraMs(b.enviadoEm) - U.paraMs(a.enviadoEm));
       if (!doMes.length) continue;
       const c = await arm.conteudoDoArquivo(doMes[0].id);
-      if (c && c.contas) lista.push({ competencia: comp, contas: comArvore(raiz.TelaSubir.comNomesDoPlano(c.contas, plano), mascara) });
+      if (c && c.contas) lista.push({ competencia: comp, contas: raiz.TelaSubir.comNomesDoPlano(comArvore(c.contas, mascara), plano) });
     }
     return lista;
   }

@@ -518,7 +518,11 @@
             // sai da classe, que é convenção firme; nos outros fica o CÓDIGO, não um nome chutado —
             // "1.1" é honesto, "ATIVO CIRCULANTE" seria invenção. Quem quiser o nome sobe o plano
             // de contas da empresa.
-            conta: caminho, reduzido: '', titulo: n === 0 ? (NOME_DA_CLASSE[Number(caminho)] || caminho) : caminho,
+            // O "reduzido" do grupo é o código COLADO dele ("1.1" -> "101"). É por ele que o nome
+            // vem do plano de contas da empresa, que lista os grupos do mesmo jeito que as contas:
+            // 1 ATIVO, 101 ATIVO CIRCULANTE, 10101 DISPONIVEL… (Center Lar, 21/10/2026).
+            conta: caminho, reduzido: codigos[i].slice(0, tamanhos.slice(0, n + 1).reduce((s, t) => s + t, 0)),
+            titulo: n === 0 ? (NOME_DA_CLASSE[Number(caminho)] || caminho) : caminho,
             nivel: n + 1, pai: n === 0 ? '' : caminhos[n - 1], analitica: false, daMascara: true,
             ordemNaArvore: numeros(codigos[i]).slice(0, n + 1),
             saldoAnterior: 0, debitos: 0, creditos: 0, saldoAtual: 0,
