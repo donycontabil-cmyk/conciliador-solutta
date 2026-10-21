@@ -178,6 +178,11 @@
     if (!mascara || !arvorePlana(contas)) return contas;
     return raiz.LerBalancete.comMascara(contas, mascara) || contas;
   }
+  // O nome de cada conta: primeiro o plano de contas da empresa; depois, o grupo que o plano não tem
+  // herda o nome de quem está abaixo dele (senão a coluna sai como "2.3.4").
+  function comNomes(contas, plano) {
+    return raiz.LerBalancete.nomearGruposSemNome(raiz.TelaSubir.comNomesDoPlano(contas, plano));
+  }
 
   async function guardarMascara(el) {
     const campo = el.querySelector('#apres-mascara');
@@ -216,7 +221,7 @@
       const doMes = doTipo.filter((m) => m.competencia === comp).sort((a, b) => U.paraMs(b.enviadoEm) - U.paraMs(a.enviadoEm));
       if (!doMes.length) continue;
       const c = await arm.conteudoDoArquivo(doMes[0].id);
-      if (c && c.contas) lista.push({ competencia: comp, contas: raiz.TelaSubir.comNomesDoPlano(comArvore(c.contas, mascara), plano) });
+      if (c && c.contas) lista.push({ competencia: comp, contas: comNomes(comArvore(c.contas, mascara), plano) });
     }
     return lista;
   }
@@ -295,7 +300,7 @@
         // A ÁRVORE VEM ANTES DO PLANO: os grupos que a máscara cria precisam passar pelo plano de
         // contas para ganhar nome. Ao contrário, eles nasciam depois e ficavam só com o código
         // (Dony, 21/10/2026: "1.1" no lugar de "ATIVO CIRCULANTE" no balanço da Center Lar).
-        if (c && c.contas) balancetes.push({ competencia: l.competencia, contas: raiz.TelaSubir.comNomesDoPlano(comArvore(c.contas, mascaraDe(emp)), plano) });
+        if (c && c.contas) balancetes.push({ competencia: l.competencia, contas: comNomes(comArvore(c.contas, mascaraDe(emp)), plano) });
       }
     }
     const registro = (await arm.conciliacoes(codigo, anoEscolhido + '-01-01')).find((r) => r.id === idRegistro(codigo, anoEscolhido)) || null;

@@ -914,6 +914,24 @@
   // Para quem já tem o balancete LIDO e guardado (o relatório de apresentação): aplica a máscara nas
   // contas sem reler o arquivo. Devolve a lista nova (sintéticas + analíticas) ou null se não servir.
   // ------------------------------------------------------------------
+  // O GRUPO QUE O PLANO NÃO TEM herda o nome de quem está abaixo dele (Dony, 21/10/2026: no plano da
+  // Center Lar existe "2030401 RESERVA DE LUCROS", mas não o grupo "20304" — e a coluna da DMPL saía
+  // como "2.3.4"). Só herda quando NÃO HÁ DÚVIDA: todas as filhas com nome dizem a mesma coisa.
+  // Vai de baixo para cima, então um nome sobe mais de um nível quando o caminho é único.
+  function nomearGruposSemNome(contas) {
+    const lista = (contas || []);
+    const semNome = (c) => !c.analitica && (!c.titulo || String(c.titulo).trim() === String(c.conta).trim());
+    const porNivel = lista.filter(semNome).sort((a, b) => (b.nivel || 0) - (a.nivel || 0));
+    porNivel.forEach((g) => {
+      const filhas = lista.filter((c) => c.pai === g.conta);
+      const nomes = Array.from(new Set(filhas
+        .filter((f) => f.titulo && String(f.titulo).trim() !== String(f.conta).trim())
+        .map((f) => String(f.titulo).trim())));
+      if (nomes.length === 1) { g.titulo = nomes[0]; g.tituloHerdado = true; }
+    });
+    return lista;
+  }
+
   function comMascara(contas, mascara) {
     if (!Array.isArray(contas) || !contas.length || !mascara) return null;
     const copia = contas.map((c) => Object.assign({}, c));
@@ -947,5 +965,5 @@
   }
 
   return { reconhecer, ler, inferir, lerCodigo, lerValor, campoDoTitulo, competenciaPeloNome,
-    comMascara, mascaraSugerida, SINONIMOS, CAMPOS };
+    comMascara, mascaraSugerida, nomearGruposSemNome, SINONIMOS, CAMPOS };
 });

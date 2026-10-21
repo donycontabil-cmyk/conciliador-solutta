@@ -1150,6 +1150,10 @@ table.rc-tabela-contas { font-size: 7.6pt; }
 .dem-tabela.dem-dmpl { table-layout: fixed; }
 .dem-tabela.dem-dmpl th:first-child, .dem-tabela.dem-dmpl td:first-child { width: 46mm; }
 .dem-tabela.dem-dmpl td.num, .dem-tabela.dem-dmpl th.num { width: auto; min-width: 0; }
+/* O cabeçalho QUEBRA A LINHA: a classe .num, que todas as colunas de valor usam, traz
+   white-space: nowrap — e com ele o nome comprido não quebrava, passava por cima do vizinho
+   (Dony, 21/10/2026: "coloca ali pra quebrar a linha; se não couber, ele escreve embaixo"). */
+.dem-tabela.dem-dmpl th, .dem-tabela.dem-dmpl th.num { white-space: normal; }
 .dem-tabela.dem-dmpl th { font-size: 7pt; line-height: 1.2; vertical-align: bottom; overflow-wrap: anywhere; hyphens: auto; }
 .dem-tabela.dem-dmpl td { font-size: 8pt; }
 .dem-tabela.dem-dmpl td:first-child { overflow-wrap: anywhere; hyphens: auto; }
