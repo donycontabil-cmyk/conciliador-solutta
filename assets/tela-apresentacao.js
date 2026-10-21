@@ -2554,7 +2554,9 @@
       return '<div class="dem dem-pagina' + (E.dmplPaisagem ? ' dem-deitada' : '') + '"><div class="dem-cab"><div class="dem-empresa">' + T.esc(emp.nome) + '</div>' +
         (emp.cnpj ? '<div class="dem-cnpj">CNPJ ' + T.esc(U.formatarCnpj(emp.cnpj)) + '</div>' : '') +
         '<h2>' + T.esc(titulo) + '</h2><div class="dem-sub">' + T.esc(sub) + '</div></div>' +
-        '<table class="dem-tabela dem-dmpl"><thead><tr>' + cab + '</tr></thead><tbody>' + corpo + '</tbody></table>' +
+        // Com muitas contas no patrimônio líquido a folha fica apertada: a fonte diminui em vez de
+        // o número quebrar a linha (a classe some quando são poucas colunas).
+        '<table class="dem-tabela dem-dmpl' + (cols.length >= 6 ? ' dem-dmpl-cheia' : '') + '"><thead><tr>' + cab + '</tr></thead><tbody>' + corpo + '</tbody></table>' +
         blocoAssinaturas(editavel) + '</div>';
     } else if (qual === 'notas') {
       // NOTAS EXPLICATIVAS (Dony, 24/09/2026, com o modelo de um escritório): o contexto da empresa, como o

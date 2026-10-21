@@ -1142,10 +1142,23 @@ table.rc-tabela-contas { font-size: 7.6pt; }
 .dem-tabela tr.dem-nota-destaque td { font-style: italic; }
 .dem-vazio { color: var(--texto-suave); font-style: italic; }
 
-/* ---------- DMPL: uma coluna por conta do patrimônio líquido (cabem mais na folha deitada) ---------- */
-.dem-tabela.dem-dmpl td.num, .dem-tabela.dem-dmpl th.num { width: auto; min-width: 26mm; }
-.dem-tabela.dem-dmpl th { font-size: 8pt; }
+/* ---------- DMPL: uma coluna por conta do patrimônio líquido (cabem mais na folha deitada) ----------
+   LARGURA FIXA (Dony, 21/10/2026, a Center Lar): quando o plano de contas deu nome aos grupos, os
+   títulos longos ("Outras contas do patrimônio líquido") esticaram as colunas, o cabeçalho saiu de
+   cima dos números e o rótulo da linha virou uma torre de cinco andares. Com table-layout fixo, a
+   primeira coluna tem largura própria e as de valor dividem o resto por igual. */
+.dem-tabela.dem-dmpl { table-layout: fixed; }
+.dem-tabela.dem-dmpl th:first-child, .dem-tabela.dem-dmpl td:first-child { width: 46mm; }
+.dem-tabela.dem-dmpl td.num, .dem-tabela.dem-dmpl th.num { width: auto; min-width: 0; }
+.dem-tabela.dem-dmpl th { font-size: 7pt; line-height: 1.2; vertical-align: bottom; overflow-wrap: anywhere; hyphens: auto; }
+.dem-tabela.dem-dmpl td { font-size: 8pt; }
+.dem-tabela.dem-dmpl td:first-child { overflow-wrap: anywhere; hyphens: auto; }
+.dem-tabela.dem-dmpl td.num { white-space: nowrap; }
 .dem-tabela.dem-dmpl tr.dem-conta td:first-child { padding-left: 4mm; }
+/* Oito ou mais colunas: aperta a fonte em vez de deixar o número quebrar a linha. */
+.dem-tabela.dem-dmpl.dem-dmpl-cheia th { font-size: 6.5pt; }
+.dem-tabela.dem-dmpl.dem-dmpl-cheia td { font-size: 7pt; }
+.dem-tabela.dem-dmpl.dem-dmpl-cheia th:first-child, .dem-tabela.dem-dmpl.dem-dmpl-cheia td:first-child { width: 38mm; }
 
 /* ---------- ERP Solutta (Dony, 01/10/2026: "um menu ERP Solutta... aí vamos construindo aos poucos") ----------
    Começa dentro do Conciliador e usa as peças de tela que já existem; só o que é dele mora aqui embaixo,
