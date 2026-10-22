@@ -15,8 +15,8 @@
     // Número e carimbo da versão publicada. Preenchidos sozinhos pelo montar-site.js a cada
     // publicação (o número sobe 1, 2, 3…), para quem usa saber se pegou a versão nova (Ctrl+F5).
     // build 'local' = rodando neste PC, ainda não publicado.
-    numero: 133,
-    build: '22/10/2026 16:56',
+    numero: 134,
+    build: '22/10/2026 17:09',
 
     // Onde os dados moram:
     //   'pasta'    -> numa pasta do computador de quem usa (hoje)
@@ -35,7 +35,7 @@
     // Marca: logotipo e cores da Solutta entram aqui quando o Dony passar (Parte 13, pergunta 6).
     logo: '',                                   // caminho relativo, ex.: 'assets/logo-solutta.png'
     cores: {
-      primaria: '',   // vazia = a cor do tema (verde). A cor da marca da Solutta entra aqui e vale no tema claro.
+      primaria: '#2f4a64',
     },
 
     // Arquivo de lançamentos para o sistema contábil (Parte 7.3): a planilha de importação do sistema do
