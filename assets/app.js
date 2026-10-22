@@ -38,6 +38,38 @@
   function el(id) { return document.getElementById(id); }
 
   // ------------------------------------------------------------------
+  // CLARO OU ESCURO (Dony, 22/10/2026). A escolha é DESTE COMPUTADOR — fica no navegador, não na
+  // pasta de dados: é gosto de quem está usando, não dado da empresa. Sem escolha feita, vale o que
+  // o sistema operacional pede. A folha impressa sai branca nos dois temas (ver o estilo.css).
+  // ------------------------------------------------------------------
+  const CHAVE_TEMA = 'conciliador-solutta.tema';
+  function temaDoSistema() {
+    try { return raiz.matchMedia && raiz.matchMedia('(prefers-color-scheme: dark)').matches ? 'escuro' : 'claro'; }
+    catch (e) { return 'claro'; }
+  }
+  function temaAtual() {
+    const guardado = lerLocal(CHAVE_TEMA);
+    return guardado === 'escuro' || guardado === 'claro' ? guardado : temaDoSistema();
+  }
+  function aplicarCorDaMarca() {
+    const cor = App.config && App.config.cores && App.config.cores.primaria;
+    const raizEl = document.documentElement;
+    if (cor && raizEl.getAttribute('data-tema') !== 'escuro') raizEl.style.setProperty('--primaria', cor);
+    else raizEl.style.removeProperty('--primaria');
+  }
+  function aplicarTema(tema, guardar) {
+    const t = tema === 'escuro' ? 'escuro' : 'claro';
+    document.documentElement.setAttribute('data-tema', t);
+    aplicarCorDaMarca();
+    const b = el('topo-tema');
+    if (b) {
+      b.textContent = t === 'escuro' ? '☀️' : '🌙';
+      b.title = t === 'escuro' ? 'Voltar para o tema claro' : 'Trocar para o tema escuro';
+    }
+    if (guardar) gravarLocal(CHAVE_TEMA, t);
+  }
+
+  // ------------------------------------------------------------------
   // Estrutura da página
   // ------------------------------------------------------------------
   function montarEstrutura() {
@@ -52,6 +84,9 @@
       '<span class="espaco"></span>' +
       '<button type="button" class="pilula-topo" id="topo-pasta" title="Pasta de dados em uso"><span class="ponto desligado"></span><span>Pasta de dados não conectada</span></button>' +
       '<button type="button" class="pilula-topo" id="topo-usuario" title="Quem está usando (fica gravado em cada ação)">👤 <span></span></button>' +
+      // CLARO OU ESCURO (Dony, 22/10/2026, com os prints da outra ferramenta dele). A escolha fica
+      // neste computador; a folha impressa sai branca nos dois.
+      '<button type="button" class="pilula-topo botao-tema" id="topo-tema" title="Trocar entre claro e escuro">🌙</button>' +
       '</header>' + faixa +
       '<nav class="menu" id="menu"></nav>' +
       '<div class="borda-menu" id="borda-menu" title="Menu (passe o mouse ou clique)"></div>' +
@@ -59,6 +94,8 @@
       '</div>';
     el('topo-usuario').addEventListener('click', () => raiz.TelaPasta.pedirNome(true).then(() => { atualizarTopo(); }));
     el('topo-pasta').addEventListener('click', () => raiz.TelaPasta.menuDaPasta());
+    el('topo-tema').addEventListener('click', () => aplicarTema(temaAtual() === 'escuro' ? 'claro' : 'escuro', true));
+    aplicarTema(temaAtual(), false);
     ligarMenuFlutuante();
     atualizarTopo();
   }
@@ -389,7 +426,9 @@
     const params = new URLSearchParams(raiz.location.search);
     App.modo = params.get('modo') === 'memoria' ? 'memoria' : (App.config.modo || 'pasta');
     App.demonstracao = !!(App.config.demonstracao || params.get('demonstracao') === '1');
-    if (App.config.cores && App.config.cores.primaria) document.documentElement.style.setProperty('--primaria', App.config.cores.primaria);
+    // A cor da marca (config.js) vale no tema CLARO. No escuro quem manda é a paleta do tema — uma
+    // cor escolhida para fundo branco fica ilegível sobre o azul-marinho (Dony, 22/10/2026).
+    aplicarCorDaMarca();
     document.title = App.config.programa;
 
     const nomeGuardado = lerLocal(CHAVE_USUARIO);
